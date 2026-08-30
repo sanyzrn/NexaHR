@@ -11,7 +11,7 @@ export const APP_TAGLINE =
  *  پیش از این در دو جا نوشته شده بود و باید دستی همگام می‌ماند — که نماند. */
 // Keep a source-level value as well, so development sessions that keep Vite's
 // configuration cache alive still show the version of this release.
-export const APP_VERSION = "0.9.5";
+export const APP_VERSION = "1.1.0";
 export const DEVELOPER_NAME = "DbsStudio";
 export const DEVELOPER_URL = "https://saeedzarrini.ir/en";
 
