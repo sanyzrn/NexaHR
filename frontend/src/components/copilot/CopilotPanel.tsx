@@ -67,6 +67,16 @@ export function CopilotPanel({
   const [uploading, setUploading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // ورودی با متن بالا می‌آید و با ارسال جمع می‌شود. ارتفاعِ ثابتِ دو خطی هم
+  // برای یک پرسشِ کوتاه زیادی بزرگ بود و هم برای یک پاراگراف کم.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [draft]);
 
   const canChat = Boolean(status?.available);
   const canUpload = canChat && Boolean(status?.allow_uploads);
@@ -330,8 +340,16 @@ export function CopilotPanel({
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-4 py-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-sm">
+          <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-sm">
             <SparkIcon className="h-4 w-4" />
+            {/* نقطهٔ وضعیت: در دسترس بودن باید *دیده* شود، نه اینکه کاربر با
+                فرستادنِ یک پیام و ندیدنِ پاسخ کشفش کند. */}
+            <span
+              className={`absolute -bottom-0.5 -end-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${
+                canChat ? "bg-green-500" : "bg-gray-300"
+              }`}
+              aria-hidden
+            />
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-bold text-gray-900">همکار NexaHR</h2>
@@ -377,7 +395,7 @@ export function CopilotPanel({
           )}
         </header>
 
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
           {status && !status.available && (
             <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
               {status.reason || "همکار هنوز برای این حساب فعال نشده است."}
@@ -388,11 +406,11 @@ export function CopilotPanel({
             <Welcome suggestions={suggestions} tools={tools} onPick={(text) => { setDraft(text); void send(); }} />
           )}
 
+          {/* کارت‌ها با همان تورفتگیِ ستونِ همکار می‌نشینند (پهنای آواتار + فاصله)
+              تا ستونِ گفت‌وگو یک خطِ عمودیِ واحد داشته باشد. */}
           {uploads.map((upload) => (
-            <div key={upload.id} className="flex justify-end">
-              <div className="w-full max-w-[85%]">
-                <UploadCard upload={upload} />
-              </div>
+            <div key={upload.id} className="ps-[38px]">
+              <UploadCard upload={upload} />
             </div>
           ))}
 
@@ -401,15 +419,13 @@ export function CopilotPanel({
           ))}
 
           {pendingList.map((action) => (
-            <div key={`pending-${action.id}`} className="flex justify-end">
-              <div className="w-full max-w-[85%]">
-                <PendingActionCard
-                  action={action}
-                  busy={busy}
-                  onConfirm={(id) => confirmMutation.mutate(id)}
-                  onReject={(id) => rejectMutation.mutate(id)}
-                />
-              </div>
+            <div key={`pending-${action.id}`} className="ps-[38px]">
+              <PendingActionCard
+                action={action}
+                busy={busy}
+                onConfirm={(id) => confirmMutation.mutate(id)}
+                onReject={(id) => rejectMutation.mutate(id)}
+              />
             </div>
           ))}
 
@@ -424,7 +440,7 @@ export function CopilotPanel({
         </div>
 
         <form
-          className="flex shrink-0 items-end gap-2 border-t border-gray-100 p-3"
+          className="shrink-0 border-t border-gray-100 p-3"
           onSubmit={(e) => {
             e.preventDefault();
             void send();
@@ -441,85 +457,176 @@ export function CopilotPanel({
               e.target.value = "";
             }}
           />
-          {canUpload && (
+          {/* یک ظرف، نه سه کنترلِ کنارِ هم.
+              فوکوس روی کلِ ظرف دیده می‌شود (`focus-within`) تا ورودی و دکمه‌ها
+              یک چیز به‌نظر برسند، نه سه چیزِ هم‌جوار. */}
+          <div className="flex items-end gap-1.5 rounded-2xl border border-gray-200 bg-gray-100 p-1.5 transition-colors focus-within:border-gray-900 focus-within:bg-white">
+            {canUpload && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={busy || uploading}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-gray-400 transition-colors hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40"
+                aria-label="بارگذاری فایل اکسل"
+                title="بارگذاری اکسل پرسنل"
+              >
+                <svg viewBox="0 0 20 20" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 13V4M6.5 7.5L10 4l3.5 3.5" />
+                  <path d="M4 13v2.5h12V13" />
+                </svg>
+              </button>
+            )}
+            <textarea
+              ref={textareaRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              disabled={!canChat || busy}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              rows={1}
+              placeholder={canChat ? "بپرسید یا بخواهید…" : "همکار در دسترس نیست"}
+              className="max-h-40 min-h-[36px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
+            />
             <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={busy || uploading}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-40"
-              aria-label="بارگذاری فایل اکسل"
-              title="بارگذاری اکسل پرسنل"
+              type="submit"
+              disabled={busy || !canChat || !draft.trim()}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-pulse-600 text-white transition-all hover:bg-pulse-700 disabled:opacity-30"
+              aria-label="ارسال"
             >
-              <svg viewBox="0 0 20 20" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 13V4M6.5 7.5L10 4l3.5 3.5" />
-                <path d="M4 13v2.5h12V13" />
+              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 3L9 11M17 3l-5 14-3-6-6-3 14-5z" />
               </svg>
             </button>
+          </div>
+          {canChat && (
+            <p className="mt-1.5 px-1 text-[10px] text-gray-400">
+              <kbd className="rounded border border-gray-200 px-1">Enter</kbd> ارسال ·{" "}
+              <kbd className="rounded border border-gray-200 px-1">Shift+Enter</kbd> خطِ تازه
+            </p>
           )}
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            disabled={!canChat || busy}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={2}
-            placeholder={canChat ? "بپرسید یا بخواهید… (مثلاً: قراردادهای رو به اتمام را نشانم بده)" : "همکار در دسترس نیست"}
-            className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 text-sm text-gray-900 outline-none transition-colors focus:border-gray-900 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-          />
-          <button
-            type="submit"
-            disabled={busy || !canChat || !draft.trim()}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-pulse-600 text-white transition-colors hover:bg-pulse-700 disabled:opacity-40"
-            aria-label="ارسال"
-          >
-            <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 3L9 11M17 3l-5 14-3-6-6-3 14-5z" />
-            </svg>
-          </button>
         </form>
       </section>
     </div>
   );
 }
 
+/** نشانِ فرستنده. همکار نشانِ برندی دارد، کاربر حرفِ اولِ نامش.
+ *
+ *  آواتار فقط تزئین نیست: با آن، نوبت‌ها بدون تکیه بر رنگِ حباب هم از هم جدا
+ *  می‌شوند — همان چیزی که در تم تیره و برای کم‌بینایی اهمیت دارد.
+ */
+function Avatar({ mine, label }: { mine: boolean; label: string }) {
+  if (mine) {
+    return (
+      <span
+        aria-hidden
+        className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-gray-100 text-[11px] font-bold text-gray-500"
+      >
+        {label}
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden
+      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-sm"
+    >
+      <SparkIcon className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setDone(true);
+          window.setTimeout(() => setDone(false), 1400);
+        });
+      }}
+      // تا وقتی روی نوبت نرفته‌ای پنهان است، ولی با تب دیده می‌شود: پنهانیِ
+      // بصری نباید دسترسیِ صفحه‌کلید را ببندد.
+      className="rounded-lg p-1 text-gray-400 opacity-0 transition-all hover:bg-gray-100 hover:text-gray-700 focus-visible:opacity-100 group-hover:opacity-100"
+      aria-label={done ? "رونوشت گرفته شد" : "رونوشت از پاسخ"}
+      title={done ? "رونوشت شد" : "رونوشت"}
+    >
+      {done ? (
+        <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 10.5l4 4 8-9" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="7" y="7" width="9" height="9" rx="2" />
+          <path d="M13 7V5a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/** یک نوبتِ گفت‌وگو.
+ *
+ *  پاسخِ همکار عمداً حباب ندارد. پاسخ‌ها این‌جا کوتاه نیستند — جدول، فهرست و
+ *  گزارش می‌آیند — و حبابِ باریک، جدولِ ده‌ستونی را به یک ستونِ فشرده تبدیل
+ *  می‌کرد. متنِ همکار روی خودِ صفحه جاری می‌شود و آواتار مرزش را نشان می‌دهد؛
+ *  پرسشِ کاربر که کوتاه است حبابِ خودش را نگه می‌دارد.
+ */
 function MessageRow({ message }: { message: AiMessage }) {
+  const { user } = useAuth();
   const mine = message.role === "user";
   const text = message.content.trim();
-
   if (!text && (message.steps ?? []).length === 0) return null;
 
+  const initial = (user?.display_name || user?.username || "؟").trim().charAt(0);
+
   return (
-    <div className={mine ? "flex justify-start" : "flex justify-end"}>
-      <div
-        className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-          mine
-            ? "bg-pulse-50 text-pulse-800"
-            : "border border-gray-100 bg-gray-50 text-gray-800"
-        }`}
-      >
-        {text && <Markdown text={text} />}
-        {!mine && <StepTrace steps={message.steps ?? []} />}
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.28, ease: EASE_SOFT }}
+      className={`group flex gap-2.5 ${mine ? "flex-row" : "flex-row"}`}
+    >
+      <Avatar mine={mine} label={initial} />
+      <div className={`min-w-0 flex-1 ${mine ? "" : "pt-0.5"}`}>
+        {mine ? (
+          <div className="inline-block max-w-full rounded-2xl rounded-ss-md bg-pulse-50 px-3.5 py-2 text-sm leading-relaxed text-pulse-800">
+            <Markdown text={text} />
+          </div>
+        ) : (
+          <div className="text-sm leading-relaxed text-gray-800">
+            {text && <Markdown text={text} />}
+            <StepTrace steps={message.steps ?? []} />
+          </div>
+        )}
       </div>
-    </div>
+      {!mine && text && <CopyButton text={text} />}
+    </motion.div>
   );
 }
 
 function ThinkingIndicator() {
   return (
-    <div className="flex justify-end">
-      <div className="flex items-center gap-1.5 rounded-2xl border border-gray-100 bg-gray-50 px-3.5 py-3">
-        {[0, 1, 2].map((i) => (
-          <motion.span
-            key={i}
-            className="h-1.5 w-1.5 rounded-full bg-gray-400"
-            animate={{ opacity: [0.25, 1, 0.25] }}
-            transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
-          />
-        ))}
+    <div className="flex gap-2.5">
+      <Avatar mine={false} label="" />
+      <div className="flex items-center gap-2 pt-1.5">
+        <span className="flex gap-1">
+          {[0, 1, 2].map((i) => (
+            <motion.span
+              key={i}
+              className="h-1.5 w-1.5 rounded-full bg-pulse-400"
+              animate={{ opacity: [0.25, 1, 0.25], y: [0, -2, 0] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.16 }}
+            />
+          ))}
+        </span>
+        <span className="text-xs text-gray-400">در حال بررسی…</span>
       </div>
     </div>
   );
@@ -542,48 +649,73 @@ function Welcome({
       if (tool.risky) entry.risky += 1;
       counts.set(tool.category, entry);
     }
-    return [...counts.entries()];
+    return [...counts.entries()].sort((a, b) => b[1].total - a[1].total);
   }, [tools]);
 
   return (
-    <div className="space-y-3 py-4">
-      <div className="rounded-2xl border border-gray-100 bg-gradient-to-bl from-pulse-50/70 to-transparent px-4 py-3.5">
-        <p className="text-sm font-bold text-gray-900">سلام! من همکارِ شما در NexaHR هستم.</p>
-        <p className="mt-1 text-xs leading-relaxed text-gray-500">
-          می‌توانم داده‌ها را بخوانم، گزارش بسازم و فایل اکسل را بررسی و وارد کنم. هر کاری هم
-          که خودتان در سامانه اجازه‌اش را نداشته باشید، از من برنمی‌آید — و برای هر تغییری،
-          کارتِ تأیید می‌بینید و خودتان تصمیم می‌گیرید.
-        </p>
-      </div>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: EASE_SOFT }}
+      className="flex flex-col items-center px-1 py-6 text-center"
+    >
+      <span className="relative mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-float">
+        {/* هالهٔ نرمِ نبض — همان حرکتی که در نشانِ برند هست */}
+        <motion.span
+          aria-hidden
+          className="absolute inset-0 rounded-2xl bg-pulse-500"
+          animate={{ opacity: [0.35, 0, 0.35], scale: [1, 1.35, 1] }}
+          transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
+        />
+        <SparkIcon className="relative h-6 w-6" />
+      </span>
+
+      <h3 className="text-base font-bold text-gray-900">همکارِ شما در NexaHR</h3>
+      <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-gray-500">
+        داده‌ها را می‌خوانم، گزارش می‌سازم و اکسل پرسنل را بررسی و وارد می‌کنم. هر کاری که
+        خودتان اجازه‌اش را نداشته باشید از من هم برنمی‌آید، و برای هر تغییر، کارتِ تأیید
+        می‌بینید.
+      </p>
+
       {categories.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="mt-4 flex flex-wrap justify-center gap-1.5">
           {categories.map(([category, counts]) => (
             <span
               key={category}
-              className="rounded-lg bg-gray-100 px-2 py-1 text-[11px] text-gray-600"
+              className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] text-gray-600"
               title={`${counts.total} ابزار${counts.risky ? ` (${counts.risky} با تأیید)` : ""}`}
             >
               {category}
-              <span className="ms-1 text-gray-400">{counts.total}</span>
+              <span className="ms-1 font-bold text-gray-400">{counts.total}</span>
             </span>
           ))}
         </div>
       )}
+
       {suggestions.length > 0 && (
-        <div className="space-y-1.5">
-          {suggestions.map((suggestion) => (
-            <button
+        <div className="mt-5 grid w-full gap-2 sm:grid-cols-2">
+          {suggestions.map((suggestion, i) => (
+            <motion.button
               key={suggestion}
               type="button"
               onClick={() => onPick(suggestion)}
-              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-start text-xs text-gray-600 transition-colors hover:border-pulse-200 hover:bg-pulse-50/50 hover:text-pulse-700"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25, delay: 0.05 * i, ease: EASE_SOFT }}
+              className="group flex items-start gap-2 rounded-2xl border border-gray-200 bg-white p-3 text-start text-xs leading-relaxed text-gray-600 transition-colors hover:border-pulse-300 hover:bg-pulse-50/60 hover:text-pulse-800"
             >
-              {suggestion}
-            </button>
+              <span className="mt-px text-gray-300 transition-colors group-hover:text-pulse-400" aria-hidden>
+                <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5l5 5-5 5" />
+                  <path d="M17 10H3" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">{suggestion}</span>
+            </motion.button>
           ))}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
