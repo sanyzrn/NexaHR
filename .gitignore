@@ -15,3 +15,7 @@ frontend/dist/
 
 # فایلِ اکسلِ نمونه که setup_e2e.py می‌سازد — ساختنی است، نه دارایی مخزن.
 e2e/e2e-personnel.xlsx
+
+# گزارشی که راه‌انداز فقط وقتی می‌نویسد که خودش پیش از باز شدنِ پنجره بمیرد.
+launcher-error.log
+tools/**/__pycache__/

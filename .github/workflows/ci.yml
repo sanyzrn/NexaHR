@@ -62,6 +62,21 @@ jobs:
       - run: ruff check .
       - run: pytest -q
 
+  # راه‌اندازِ محیطِ توسعه. فقط کتابخانهٔ استاندارد لازم دارد — نه venv، نه
+  # دیتابیس — چون خودش همان‌هاست که می‌سازد. تست‌هایش رفتارِ ویندوز را شبیه‌سازی
+  # می‌کنند (خروجیِ netstat و netsh)، و همین باعث می‌شود روی رانرِ لینوکسی هم
+  # معنا داشته باشند.
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install pytest ruff
+      - run: ruff check tools
+      - run: python -m pytest tools/tests -q
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
