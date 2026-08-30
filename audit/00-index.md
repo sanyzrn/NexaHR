@@ -1,8 +1,8 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: Index
 
-# DbsPulse V2 audit — full Markdown export
+# NexaHR V2 audit — full Markdown export
 
 Complete export of every section of the interactive audit report. Nothing is summarised: all findings, evidence blocks, file paths, tables and lists are reproduced in full.
 
@@ -17,7 +17,7 @@ Complete export of every section of the interactive audit report. Nothing is sum
 | [`05-security-and-enterprise-posture.md`](05-security-and-enterprise-posture.md) | Section 1.4 — Security posture and enterprise readiness |
 | [`06-reviewed-scope.md`](06-reviewed-scope.md) | Section 1.5 — Reviewed scope: inventory, technology, tenancy, not-inspected / not-verifiable boundaries |
 | [`07-gap-analysis-findings.md`](07-gap-analysis-findings.md) | Section 2 — Gap Analysis + Fixes: all 41 findings with the full 12-field schema |
-| [`08-how-dbspulse-can-win.md`](08-how-dbspulse-can-win.md) | Section 3 — How DbsPulse Can Win: strengths, positioning, advantages, Persian market, AI opportunities and safeguards |
+| [`08-how-nexahr-can-win.md`](08-how-nexahr-can-win.md) | Section 3 — How NexaHR Can Win: strengths, positioning, advantages, Persian market, AI opportunities and safeguards |
 | [`09-execution-roadmap.md`](09-execution-roadmap.md) | Section 4 — Execution Roadmap: impact-vs-effort table, 6 waves, dependencies, implementation order |
 
 ## Headline

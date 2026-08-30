@@ -4,10 +4,10 @@
 # Nginx بیرونی فقط یک لایه TLS/دامنه اضافه می‌کند و نیازی به تنظیم جداگانه برای /api ندارد.
 #
 # نصب:
-#   1. این فایل را به /etc/nginx/sites-available/dbspulse.conf کپی کنید و دامنه را جایگزین کنید.
+#   1. این فایل را به /etc/nginx/sites-available/nexahr.conf کپی کنید و دامنه را جایگزین کنید.
 #   2. برای گواهی رایگان: sudo certbot --nginx -d your-domain.example.com
 #      (certbot به‌صورت خودکار بلوک‌های ssl_certificate را اضافه/تمدید می‌کند)
-#   3. ln -s /etc/nginx/sites-available/dbspulse.conf /etc/nginx/sites-enabled/
+#   3. ln -s /etc/nginx/sites-available/nexahr.conf /etc/nginx/sites-enabled/
 #   4. nginx -t && systemctl reload nginx
 
 server {

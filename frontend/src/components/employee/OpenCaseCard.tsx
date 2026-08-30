@@ -125,7 +125,7 @@ function SelfAssessmentForm({
   // فرم ارزیاب از قبل ذخیرهٔ خودکار داشت؛ فرمِ کارمند نداشت — یعنی کم‌قدرت‌ترین
   // آدمِ این فرایند، نابخشنده‌ترین فرم را داشت: بیست شاخص با یادداشت، که با یک
   // کلید Back از بین می‌رفت.
-  const draftKey = `dbspulse:self-assessment:${evaluationId}`;
+  const draftKey = `nexahr:self-assessment:${evaluationId}`;
   const [draft, setDraft] = useLocalDraft(draftKey);
   const scores = draft.scores;
   const notes = draft.notes;

@@ -1,4 +1,4 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 1.5 · Reviewed scope
 
@@ -57,7 +57,7 @@ No tenant / organization / company column exists on any of the 12 SQLAlchemy mod
 
 ## Runtime verification
 
-**Runtime verification was not possible.** PostgreSQL is not available in the review environment (no postgres / psql / pg_ctl binaries; /usr/lib/postgresql absent). DbsPulse hard-requires PostgreSQL features (JSONB columns, partial unique indexes, sequences, SELECT … FOR UPDATE OF), so the 152 backend tests could not be executed. Test-suite health is reported from the CI definition only (.github/workflows/ci.yml), never as a passing result observed by this audit. Every finding below is derived from static reading of actual source files.
+**Runtime verification was not possible.** PostgreSQL is not available in the review environment (no postgres / psql / pg_ctl binaries; /usr/lib/postgresql absent). NexaHR hard-requires PostgreSQL features (JSONB columns, partial unique indexes, sequences, SELECT … FOR UPDATE OF), so the 152 backend tests could not be executed. Test-suite health is reported from the CI definition only (.github/workflows/ci.yml), never as a passing result observed by this audit. Every finding below is derived from static reading of actual source files.
 
 ## Implementation authenticity
 

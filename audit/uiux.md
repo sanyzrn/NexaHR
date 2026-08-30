@@ -1,14 +1,14 @@
 I now have a thorough understanding of the product's UX. I have enough evidence to write the audit. I'll write the full report in English (the user asked in English), citing Persian UI strings where relevant.
 
-DbsPulse — UX & Product Usability Audit
+NexaHR — UX & Product Usability Audit
 
-Product context: DbsPulse is a Persian (RTL) organizational performance-evaluation system built around a chained approval workflow — Supervisor scores → HR reviews → Deputy approves → CEO finalizes — feeding contract-renewal decisions, with hashed/QR-verifiable PDF scorecards, an audit log, improvement plans, objections, and self-assessment. Frontend: React + Tailwind, Vazirmatn font, dir="rtl".
+Product context: NexaHR is a Persian (RTL) organizational performance-evaluation system built around a chained approval workflow — Supervisor scores → HR reviews → Deputy approves → CEO finalizes — feeding contract-renewal decisions, with hashed/QR-verifiable PDF scorecards, an audit log, improvement plans, objections, and self-assessment. Frontend: React + Tailwind, Vazirmatn font, dir="rtl".
 
 This audit is based on a direct reading of the frontend source (routing, layout, every role page, forms, dialogs, tables, meters, notification, PDF generation) and the README. It deliberately ignores code quality except where code shape determines user experience.
 
 Overall Impression
 
-DbsPulse is unusually thoughtful for an internal tool — it has skeleton loading states, permission-aware UI, a skip-to-content link, prefers-reduced-motion support, live evidence-word counters, explicit empty states, optimistic conflict handling ("already has an open evaluation → navigate to it"), and workflow states communicated with plain-language copy. Many of its "weaknesses" are the opposite of most systems: it over-explains and over-confirms in places. The core problems are concentrated in terminology ambiguity ("رؤیت"), one-confirm destructive actions, notification/comment silos, bulk-operation discoverability, and a few accessibility gaps around motion and charts.
+NexaHR is unusually thoughtful for an internal tool — it has skeleton loading states, permission-aware UI, a skip-to-content link, prefers-reduced-motion support, live evidence-word counters, explicit empty states, optimistic conflict handling ("already has an open evaluation → navigate to it"), and workflow states communicated with plain-language copy. Many of its "weaknesses" are the opposite of most systems: it over-explains and over-confirms in places. The core problems are concentrated in terminology ambiguity ("رؤیت"), one-confirm destructive actions, notification/comment silos, bulk-operation discoverability, and a few accessibility gaps around motion and charts.
 
 1. Employee
 

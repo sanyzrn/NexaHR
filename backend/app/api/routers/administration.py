@@ -437,7 +437,7 @@ def test_integration(
         channel.send(
             channels.Message(
                 recipient=payload.recipient,
-                subject="آزمون پیکربندی DbsPulse",
+                subject="آزمون پیکربندی NexaHR",
                 body="این یک پیام آزمایشی است. اگر آن را دریافت کردید، تنظیمات درست است.",
             )
         )

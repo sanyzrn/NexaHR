@@ -1,7 +1,7 @@
 import os
 
 os.environ.setdefault(
-    "DATABASE_URL", "postgresql+psycopg://dbspulse:dbspulse_dev_password@localhost:5432/dbspulse_test"
+    "DATABASE_URL", "postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr_test"
 )
 os.environ.setdefault("ENVIRONMENT", "development")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-not-for-production")

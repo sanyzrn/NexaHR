@@ -7,7 +7,7 @@
 احراز هویت نمی‌کند — فقط با آن مقایسه می‌شود.
 """
 
-DEMO_PASSWORD = "DbsPulse@12345"
+DEMO_PASSWORD = "NexaHR@12345"
 
 DEMO_USERNAMES: tuple[str, ...] = ("hr1", "sup1", "sup2", "dep1", "ceo1")
 

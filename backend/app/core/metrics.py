@@ -22,14 +22,14 @@ from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 REGISTRY = CollectorRegistry()
 
 http_requests = Counter(
-    "dbspulse_http_requests_total",
+    "nexahr_http_requests_total",
     "تعداد درخواست‌های HTTP",
     ["method", "path", "status"],
     registry=REGISTRY,
 )
 
 http_duration = Histogram(
-    "dbspulse_http_request_duration_seconds",
+    "nexahr_http_request_duration_seconds",
     "مدت پاسخ‌دهی درخواست‌های HTTP",
     ["method", "path"],
     # سطل‌ها برای یک API داخلی تنظیم شده‌اند؛ پیش‌فرض کتابخانه تا ۱۰ ثانیه می‌رود
@@ -39,55 +39,55 @@ http_duration = Histogram(
 )
 
 auth_failures = Counter(
-    "dbspulse_auth_failures_total",
+    "nexahr_auth_failures_total",
     "ورودهای ناموفق — جهش ناگهانی یعنی حملهٔ حدس رمز",
     ["reason"],
     registry=REGISTRY,
 )
 
 rate_limit_rejections = Counter(
-    "dbspulse_rate_limit_rejections_total",
+    "nexahr_rate_limit_rejections_total",
     "درخواست‌های ردشده به‌خاطر محدودیت نرخ",
     registry=REGISTRY,
 )
 
 workflow_transitions = Counter(
-    "dbspulse_workflow_transitions_total",
+    "nexahr_workflow_transitions_total",
     "گذارهای گردش‌کار ارزیابی به تفکیک وضعیت مقصد",
     ["to_status"],
     registry=REGISTRY,
 )
 
 pdf_renders = Counter(
-    "dbspulse_pdf_renders_total",
+    "nexahr_pdf_renders_total",
     "رندر PDF — شکستِ پیوسته یعنی کتابخانهٔ سیستمی (WeasyPrint) نصب نیست",
     ["outcome"],
     registry=REGISTRY,
 )
 
 sweep_runs = Counter(
-    "dbspulse_scheduler_sweep_runs_total",
+    "nexahr_scheduler_sweep_runs_total",
     "اجرای کارهای زمان‌بندی‌شده",
     ["outcome"],
     registry=REGISTRY,
 )
 
 sweep_last_success_timestamp = Gauge(
-    "dbspulse_scheduler_last_success_timestamp_seconds",
+    "nexahr_scheduler_last_success_timestamp_seconds",
     "زمان آخرین اجرای موفق sweep — کهنه‌شدنش یعنی یادآوری‌ها متوقف شده‌اند",
     registry=REGISTRY,
 )
 
 
 db_pool_connections = Gauge(
-    "dbspulse_db_pool_connections",
+    "nexahr_db_pool_connections",
     "اتصال‌های استخر دیتابیس به تفکیک وضعیت (P2-05)",
     ["state"],
     registry=REGISTRY,
 )
 
 db_pool_capacity = Gauge(
-    "dbspulse_db_pool_capacity",
+    "nexahr_db_pool_capacity",
     "سقف مطلق اتصال‌های این کارگر (pool_size + max_overflow)",
     registry=REGISTRY,
 )

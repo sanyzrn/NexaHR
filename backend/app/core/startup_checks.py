@@ -14,7 +14,7 @@ from app.core.demo_data import DEMO_PASSWORD, DEMO_USERNAMES
 from app.core.security import verify_password
 from app.models.user import User
 
-logger = logging.getLogger("dbspulse.startup")
+logger = logging.getLogger("nexahr.startup")
 
 
 def find_active_demo_accounts(db: Session) -> list[str]:

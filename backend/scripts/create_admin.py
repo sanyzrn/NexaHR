@@ -23,7 +23,7 @@
 می‌شود هرکدام را جداگانه پس گرفت — نه یک پرچمِ یکپارچه که برداشتنش یعنی هیچ.
 
 رمز عبور از خط فرمان گرفته نمی‌شود: آرگومان‌ها در فهرست پروسه‌ها و تاریخچهٔ شل
-دیده می‌شوند. یا تعاملی پرسیده می‌شود، یا از متغیر محیطی DBSPULSE_ADMIN_PASSWORD
+دیده می‌شوند. یا تعاملی پرسیده می‌شود، یا از متغیر محیطی NEXAHR_ADMIN_PASSWORD
 خوانده می‌شود (برای اجرای خودکار).
 
 اجرا (از پوشهٔ backend، با venv فعال)::
@@ -49,7 +49,7 @@ from app.models.user import User
 # اسکریپت حسابی می‌سازد که فرم ویرایش کاربر بعداً قبولش ندارد.
 PASSWORD_MIN_LENGTH = 10
 
-_PASSWORD_ENV = "DBSPULSE_ADMIN_PASSWORD"
+_PASSWORD_ENV = "NEXAHR_ADMIN_PASSWORD"
 
 
 def _read_password() -> str:

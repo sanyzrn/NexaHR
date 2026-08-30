@@ -1,4 +1,4 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 4. Execution Roadmap
 
@@ -183,7 +183,7 @@ Six chains where sequence matters. Building the dependent item first means rebui
 | P0-08 reliable scheduler | P1-02 SLA · P1-03 delivery · P3-05 plan reviews · P2-05 async PDF | Every time-based and asynchronous feature depends on scheduled work that provably runs exactly once. |
 | P1-02 stage_entered_at | P3-04 cycle-time proof · P2-01 stage analytics · escalation | Time in stage is the atom of every workflow metric and every escalation rule. |
 | P0-06 employee stage | P1-06 calibration · P3-05 plan effectiveness · trust positioning | Self-assessment supplies the second perspective calibration compares against, and the employee's participation is what makes the process defensible. |
-| P1-14 integrations | MS-01 performance signals · reliable contract-expiry alerting | Signals and accurate contract dates both require the customer's systems to feed DbsPulse rather than HR retyping them. |
+| P1-14 integrations | MS-01 performance signals · reliable contract-expiry alerting | Signals and accurate contract dates both require the customer's systems to feed NexaHR rather than HR retyping them. |
 
 ### Expanded
 
@@ -203,7 +203,7 @@ Six chains where sequence matters. Building the dependent item first means rebui
   Self-assessment supplies the second perspective calibration compares against, and the employee's participation is what makes the process defensible.
 
 - **P1-14 integrations → MS-01 performance signals · reliable contract-expiry alerting**  
-  Signals and accurate contract dates both require the customer's systems to feed DbsPulse rather than HR retyping them.
+  Signals and accurate contract dates both require the customer's systems to feed NexaHR rather than HR retyping them.
 
 ---
 

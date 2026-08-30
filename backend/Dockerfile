@@ -24,10 +24,10 @@ COPY . .
 # کانتینر به‌عنوان root اجرا نمی‌شود: اگر روزی یک آسیب‌پذیری اجرای کد پیدا شود،
 # مهاجم داخل کانتینر یک کاربر بی‌امتیاز است نه root. UID ثابت است تا اگر جایی
 # volume سوار شد، مالکیت فایل‌ها بین بازسازی‌های ایمیج تغییر نکند.
-RUN useradd --create-home --uid 10001 dbspulse \
+RUN useradd --create-home --uid 10001 nexahr \
     && chmod +x ./docker-entrypoint.sh \
-    && chown -R dbspulse:dbspulse /app
-USER dbspulse
+    && chown -R nexahr:nexahr /app
+USER nexahr
 
 EXPOSE 8000
 

@@ -1,4 +1,4 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 1.1 · Score methodology and confidence
 
@@ -23,7 +23,7 @@ Seven areas, transparently weighted. Each row expands to show the evidence the s
 
 **Overall maturity: 64 / 100 — Solid internal tool — not yet a commercial performance-management product**
 
-_Shape shows where DbsPulse is strong relative to its own weakest areas. Workflow enforcement is its structural strength; enterprise operations and product capability are the drags on the weighted total._
+_Shape shows where NexaHR is strong relative to its own weakest areas. Workflow enforcement is its structural strength; enterprise operations and product capability are the drags on the weighted total._
 
 ## Area detail
 

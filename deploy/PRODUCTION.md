@@ -37,10 +37,10 @@
 
 ```bash
 docker compose build
-docker save dbspulse-backend dbspulse-frontend -o dbspulse-images.tar
+docker save nexahr-backend nexahr-frontend -o nexahr-images.tar
 ```
 
-فایل `dbspulse-images.tar` ساخته می‌شود. حجمش حدود یک گیگابایت است.
+فایل `nexahr-images.tar` ساخته می‌شود. حجمش حدود یک گیگابایت است.
 
 ## مرحلهٔ ۲ — آماده‌کردن تنظیمات
 
@@ -53,7 +53,7 @@ cp .env.production.example .env
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"   # POSTGRES_PASSWORD
 python -c "import secrets; print(secrets.token_urlsafe(64))"   # JWT_SECRET_KEY
-python -c "import secrets; print(secrets.token_urlsafe(18))"   # DBSPULSE_ADMIN_PASSWORD
+python -c "import secrets; print(secrets.token_urlsafe(18))"   # NEXAHR_ADMIN_PASSWORD
 ```
 
 > اگر هرکدام از این‌ها روی مقدار توسعه‌ای بماند، بک‌اند عمداً بالا **نمی‌آید** و
@@ -67,7 +67,7 @@ python -c "import secrets; print(secrets.token_urlsafe(18))"   # DBSPULSE_ADMIN_
 فقط این سه فایل منتقل می‌شوند:
 
 ```
-dbspulse-images.tar
+nexahr-images.tar
 docker-compose.prod.yml
 .env
 ```
@@ -77,14 +77,14 @@ docker-compose.prod.yml
 ## مرحلهٔ ۴ — اجرا
 
 ```bash
-docker load -i dbspulse-images.tar
+docker load -i nexahr-images.tar
 docker compose -f docker-compose.prod.yml up -d
 ```
 
 سامانه روی پورت ۸۰۸۰ بالا می‌آید (با `HTTP_PORT` در `.env` قابل تغییر است).
 مایگریشن‌ها خودشان اجرا می‌شوند و بک‌اند بعد از پایانِ موفقشان بالا می‌آید.
 
-نخستین حساب مدیر با همان `DBSPULSE_ADMIN_USERNAME` و `DBSPULSE_ADMIN_PASSWORD`
+نخستین حساب مدیر با همان `NEXAHR_ADMIN_USERNAME` و `NEXAHR_ADMIN_PASSWORD`
 ساخته می‌شود و در اولین ورود، تغییر رمز اجباری است. اگر رمز را در `.env`
 نگذاشته باشید، یک رمز تصادفی ساخته و **فقط یک‌بار** در لاگ نوشته می‌شود:
 
@@ -113,11 +113,11 @@ HTTPS اختیاری نیست. نمونهٔ پیکربندی nginx در همین
 
 ## بک‌آپ
 
-دیتابیس در volume با نام `dbspulse_pgdata` است و هیچ پورتی از آن منتشر نمی‌شود.
+دیتابیس در volume با نام `nexahr_pgdata` است و هیچ پورتی از آن منتشر نمی‌شود.
 
 ```bash
 docker compose -f docker-compose.prod.yml exec -T db \
-  pg_dump -U dbspulse dbspulse > backup-$(date +%F).sql
+  pg_dump -U nexahr nexahr > backup-$(date +%F).sql
 ```
 
 ## به‌روزرسانی نسخه
@@ -125,7 +125,7 @@ docker compose -f docker-compose.prod.yml exec -T db \
 روی سیستم خودتان دوباره `build` و `save` کنید، فایل tar تازه را ببرید، و:
 
 ```bash
-docker load -i dbspulse-images.tar
+docker load -i nexahr-images.tar
 docker compose -f docker-compose.prod.yml up -d
 ```
 

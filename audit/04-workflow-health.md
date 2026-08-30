@@ -1,4 +1,4 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 1.3 · Workflow health
 

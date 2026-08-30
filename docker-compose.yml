@@ -1,7 +1,7 @@
 # محیط مشترک بین سرویس migrate و backend — باید یکی باشند، وگرنه مایگریشن روی یک
 # دیتابیس اجرا می‌شود و اپ به دیتابیس دیگری وصل می‌شود.
 x-backend-env: &backend-env
-  DATABASE_URL: postgresql+psycopg://dbspulse:${POSTGRES_PASSWORD:-dbspulse_dev_password}@db:5432/dbspulse
+  DATABASE_URL: postgresql+psycopg://nexahr:${POSTGRES_PASSWORD:-nexahr_dev_password}@db:5432/nexahr
   # هشدار: مقادیر پیش‌فرض فقط برای اجرای محلی/دمو مناسب‌اند.
   # پیش از استقرار واقعی، در فایل .env کنار همین docker-compose.yml مقادیر
   # ENVIRONMENT=production و یک JWT_SECRET_KEY تصادفی و طولانی تنظیم کنید
@@ -29,16 +29,16 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: dbspulse
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dbspulse_dev_password}
-      POSTGRES_DB: dbspulse
+      POSTGRES_USER: nexahr
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexahr_dev_password}
+      POSTGRES_DB: nexahr
     ports:
       # فقط روی loopback؛ دیتابیس نباید از شبکه بیرونی قابل دسترسی باشد
       - "127.0.0.1:5432:5432"
     volumes:
-      - dbspulse_pgdata:/var/lib/postgresql/data
+      - nexahr_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dbspulse -d dbspulse"]
+      test: ["CMD-SHELL", "pg_isready -U nexahr -d nexahr"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -48,10 +48,10 @@ services:
   # یک‌بار اجرا می‌شود، تا پایان موفق منتظر می‌مانیم، بعد بک‌اند بالا می‌آید.
   migrate:
     build: ./backend
-    # نام صریح، تا `docker save dbspulse-backend` و `docker-compose.prod.yml`
+    # نام صریح، تا `docker save nexahr-backend` و `docker-compose.prod.yml`
     # همان ایمیجی را ببینند که این‌جا ساخته می‌شود؛ بدون این، نام از روی نام
     # پوشهٔ پروژه ساخته می‌شود و روی هر ماشین می‌تواند فرق کند.
-    image: dbspulse-backend
+    image: nexahr-backend
     command: alembic upgrade head
     restart: "no"
     environment: *backend-env
@@ -61,7 +61,7 @@ services:
 
   backend:
     build: ./backend
-    image: dbspulse-backend
+    image: nexahr-backend
     restart: unless-stopped
     environment: *backend-env
     depends_on:
@@ -82,7 +82,7 @@ services:
 
   frontend:
     build: ./frontend
-    image: dbspulse-frontend
+    image: nexahr-frontend
     restart: unless-stopped
     depends_on:
       - backend
@@ -90,4 +90,4 @@ services:
       - "8080:80"
 
 volumes:
-  dbspulse_pgdata:
+  nexahr_pgdata:

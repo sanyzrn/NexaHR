@@ -8,7 +8,7 @@ const DEV_LOGO_URL = "/logo/Dbs_logo_single.png";
 const DEV_LOGO_URL_DARK = "/logo/Dbs_logo_single_w.png";
 
 /** نشان‌های موقت برنامه و توسعه‌دهنده — قرمز برند، تک‌رنگ.
- * نشان اصلی شامل موج پالس متحرک است که هویت «DbsPulse» را منتقل می‌کند. */
+ * نشان اصلی شامل موج پالس متحرک است که هویت «NexaHR» را منتقل می‌کند. */
 
 export function BrandMark({ className = "h-9 w-9" }: { className?: string }) {
   return (

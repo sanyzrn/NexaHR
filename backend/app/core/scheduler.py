@@ -14,7 +14,7 @@ import logging
 
 from app.core.config import settings
 
-logger = logging.getLogger("dbspulse.scheduler")
+logger = logging.getLogger("nexahr.scheduler")
 
 
 def _run_sweeps_sync() -> None:

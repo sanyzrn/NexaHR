@@ -17,7 +17,7 @@
 
 دو راه، به همین ترتیب:
 
-* `DBSPULSE_ADMIN_PASSWORD` اگر تنظیم شده باشد (برای استقرار خودکار).
+* `NEXAHR_ADMIN_PASSWORD` اگر تنظیم شده باشد (برای استقرار خودکار).
 * وگرنه یک رمزِ تصادفیِ قوی که **یک بار** در لاگِ سرویس نوشته می‌شود. اگر کسی آن
   خط را ندید، حساب ساخته شده ولی رمزش را کسی نمی‌داند؛ راهِ درستش این است که
   همان اسکریپتِ دستی رمز را عوض کند. این عمدی است: چاپِ دوبارهٔ رمز در هر
@@ -46,10 +46,10 @@ from app.models.capability import UserCapability
 from app.models.enums import Capability, UserRole
 from app.models.user import User
 
-logger = logging.getLogger("dbspulse")
+logger = logging.getLogger("nexahr")
 
-PASSWORD_ENV = "DBSPULSE_ADMIN_PASSWORD"
-USERNAME_ENV = "DBSPULSE_ADMIN_USERNAME"
+PASSWORD_ENV = "NEXAHR_ADMIN_PASSWORD"
+USERNAME_ENV = "NEXAHR_ADMIN_USERNAME"
 DEFAULT_USERNAME = "admin"
 
 #: حروف و رقم‌ها به‌علاوهٔ چند نشانه — بدون کاراکترهایی که در ترمینال و کپی/پیست

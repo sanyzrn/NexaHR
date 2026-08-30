@@ -2,7 +2,7 @@
 # سناریوی مرورگریِ همکار: هر سه سرویس را بالا می‌آورد و e2e_browser.py را اجرا می‌کند.
 # پیش‌نیاز: playwright نصب و مرورگرِ chromium دانلود شده باشد؛ setup_e2e.py یک‌بار اجرا شده باشد.
 set -e
-export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://dbspulse:dbspulse_dev_password@localhost:5432/dbspulse}"
+export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-dev-only-secret-change-me-0123456789abcdef}"
 export ENABLE_SCHEDULER="${ENABLE_SCHEDULER:-false}"
 

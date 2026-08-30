@@ -1,9 +1,9 @@
 @echo off
 setlocal enabledelayedexpansion
-title DbsPulse - Setup and Run
+title NexaHR - Setup and Run
 
 REM ============================================================
-REM  DbsPulse - local development bootstrap (Windows)
+REM  NexaHR - local development bootstrap (Windows)
 REM
 REM  *** DEVELOPMENT ONLY - DO NOT RUN ON A REAL DEPLOYMENT ***
 REM
@@ -69,7 +69,7 @@ REM the backend at startup and is never set in production.
 set "SEED_DEMO_DATA=false"
 
 echo ============================================================
-echo  DbsPulse setup
+echo  NexaHR setup
 echo  Root: %ROOT%
 echo ============================================================
 echo.
@@ -235,7 +235,7 @@ if not exist "%ENV_FILE%" (
     REM .env.example is annotated in Persian, and those comments are
     REM exactly what crashes a non-UTF-8 reader. Read .env.example for
     REM the explanations; this file stays ASCII so it always parses.
-    >"%ENV_FILE%" echo # DbsPulse - local development settings
+    >"%ENV_FILE%" echo # NexaHR - local development settings
     >>"%ENV_FILE%" echo #
     >>"%ENV_FILE%" echo # ASCII only, on purpose: this file is also read by starlette's
     >>"%ENV_FILE%" echo # Config using the OS default encoding, which is cp1252 on a
@@ -245,7 +245,7 @@ if not exist "%ENV_FILE%" (
     >>"%ENV_FILE%" echo # The annotated Persian reference lives in .env.example.
     >>"%ENV_FILE%" echo.
     >>"%ENV_FILE%" echo ENVIRONMENT=development
-    >>"%ENV_FILE%" echo DATABASE_URL=postgresql+psycopg://dbspulse:dbspulse_dev_password@localhost:5432/dbspulse
+    >>"%ENV_FILE%" echo DATABASE_URL=postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr
     >>"%ENV_FILE%" echo JWT_SECRET_KEY=local-development-only-not-a-real-secret
     >>"%ENV_FILE%" echo CORS_ORIGINS=http://localhost:5173,http://localhost:8080
     >>"%ENV_FILE%" echo PUBLIC_BASE_URL=http://localhost:5173
@@ -327,14 +327,14 @@ if not "!DBRC!"=="0" (
     echo    Could not create the database automatically.
     echo.
     echo    If you have pgAdmin ^(installed alongside PostgreSQL^), create:
-    echo        role      dbspulse   password  dbspulse_dev_password
-    echo        database  dbspulse   owner     dbspulse
+    echo        role      nexahr   password  nexahr_dev_password
+    echo        database  nexahr   owner     nexahr
     echo.
     echo    Or from the PostgreSQL bin folder, which is usually
     echo        C:\Program Files\PostgreSQL\16\bin
     echo    run:
-    echo        psql -U postgres -c "CREATE ROLE dbspulse LOGIN PASSWORD 'dbspulse_dev_password';"
-    echo        psql -U postgres -c "CREATE DATABASE dbspulse OWNER dbspulse;"
+    echo        psql -U postgres -c "CREATE ROLE nexahr LOGIN PASSWORD 'nexahr_dev_password';"
+    echo        psql -U postgres -c "CREATE DATABASE nexahr OWNER nexahr;"
     echo.
     echo    If your credentials differ, edit DATABASE_URL in "%ENV_FILE%".
     echo.
@@ -438,8 +438,8 @@ if not "!PORTRC!"=="0" (
     call :fail "Port 8000 could not be tested - see the error above." "Fix the reported problem, then run this script again."
 )
 
-start "DbsPulse Backend (port 8000)" /D "%BACKEND%" cmd /k ""%VENV%\Scripts\uvicorn.exe" app.main:app --reload --host 0.0.0.0 --port 8000"
-start "DbsPulse Frontend (port 5173)" /D "%FRONTEND%" cmd /k "npm run dev -- --host"
+start "NexaHR Backend (port 8000)" /D "%BACKEND%" cmd /k ""%VENV%\Scripts\uvicorn.exe" app.main:app --reload --host 0.0.0.0 --port 8000"
+start "NexaHR Frontend (port 5173)" /D "%FRONTEND%" cmd /k "npm run dev -- --host"
 
 echo    Waiting for the backend to answer on /api/health...
 set "BACKEND_READY=0"
@@ -503,7 +503,7 @@ for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$ip = (Get-Ne
 start "" "http://localhost:5173"
 
 echo ============================================================
-echo  DbsPulse is running.
+echo  NexaHR is running.
 echo.
 echo  Frontend : http://localhost:5173
 echo  Backend  : http://localhost:8000
@@ -513,7 +513,7 @@ REM Only the accounts the seed migration actually creates are listed.
 REM An account that does not exist looks identical to a broken backend
 REM from the login screen, so a wrong name here costs real debugging time.
 echo  Demo sign-in: hr1 / sup1 / sup2 / dep1 / ceo1
-echo  Password    : DbsPulse@12345
+echo  Password    : NexaHR@12345
 echo.
 echo  The base seed is only 3 people, so most charts stay empty. For a
 echo  realistic org (every workflow stage, a returned case, an expiring
@@ -521,7 +521,7 @@ echo  contract), run once in the backend folder:
 echo      .venv\Scripts\python -m scripts.seed_demo_scenarios
 echo.
 echo  Two console windows are running the servers.
-echo  Close them (or press Ctrl+C inside) to stop DbsPulse.
+echo  Close them (or press Ctrl+C inside) to stop NexaHR.
 echo ============================================================
 echo.
 pause

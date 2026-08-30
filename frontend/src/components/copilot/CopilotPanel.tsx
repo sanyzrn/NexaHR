@@ -334,7 +334,7 @@ export function CopilotPanel({
             <SparkIcon className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-bold text-gray-900">همکار DbsPulse</h2>
+            <h2 className="truncate text-sm font-bold text-gray-900">همکار NexaHR</h2>
             <p className="truncate text-[11px] text-gray-400">
               {canChat ? "همان اختیارات شما، در گفت‌وگو" : "در دسترس نیست"}
             </p>
@@ -548,7 +548,7 @@ function Welcome({
   return (
     <div className="space-y-3 py-4">
       <div className="rounded-2xl border border-gray-100 bg-gradient-to-bl from-pulse-50/70 to-transparent px-4 py-3.5">
-        <p className="text-sm font-bold text-gray-900">سلام! من همکارِ شما در DbsPulse هستم.</p>
+        <p className="text-sm font-bold text-gray-900">سلام! من همکارِ شما در NexaHR هستم.</p>
         <p className="mt-1 text-xs leading-relaxed text-gray-500">
           می‌توانم داده‌ها را بخوانم، گزارش بسازم و فایل اکسل را بررسی و وارد کنم. هر کاری هم
           که خودتان در سامانه اجازه‌اش را نداشته باشید، از من برنمی‌آید — و برای هر تغییری،

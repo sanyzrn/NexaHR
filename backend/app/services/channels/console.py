@@ -9,7 +9,7 @@ import logging
 from app.models.enums import DeliveryChannel
 from app.services.channels.base import Message
 
-logger = logging.getLogger("dbspulse.delivery")
+logger = logging.getLogger("nexahr.delivery")
 
 
 class ConsoleChannel:

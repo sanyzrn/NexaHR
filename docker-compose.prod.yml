@@ -7,15 +7,15 @@
 #
 # ساخت و انتقال:
 #   docker compose build                     # روی ماشین توسعه
-#   docker save dbspulse-backend dbspulse-frontend -o dbspulse-images.tar
+#   docker save nexahr-backend nexahr-frontend -o nexahr-images.tar
 #   # فایل tar + همین فایل + .env را به ماشین مقصد ببرید
-#   docker load -i dbspulse-images.tar       # روی ماشین مقصد
+#   docker load -i nexahr-images.tar       # روی ماشین مقصد
 #   docker compose -f docker-compose.prod.yml up -d
 #
 # راهنمای کامل: deploy/PRODUCTION.md
 
 x-backend-env: &backend-env
-  DATABASE_URL: postgresql+psycopg://dbspulse:${POSTGRES_PASSWORD}@db:5432/dbspulse
+  DATABASE_URL: postgresql+psycopg://nexahr:${POSTGRES_PASSWORD}@db:5432/nexahr
   ENVIRONMENT: ${ENVIRONMENT}
   JWT_SECRET_KEY: ${JWT_SECRET_KEY}
   CORS_ORIGINS: ${CORS_ORIGINS}
@@ -29,8 +29,8 @@ x-backend-env: &backend-env
   SEED_DEMO_DATA: "false"
   # نام کاربری و رمزِ نخستین حساب مدیر. اگر خالی بماند، رمز تصادفی ساخته و
   # یک‌بار در لاگِ استارت‌آپ نوشته می‌شود (`docker compose logs backend`).
-  DBSPULSE_ADMIN_USERNAME: ${DBSPULSE_ADMIN_USERNAME:-admin}
-  DBSPULSE_ADMIN_PASSWORD: ${DBSPULSE_ADMIN_PASSWORD:-}
+  NEXAHR_ADMIN_USERNAME: ${NEXAHR_ADMIN_USERNAME:-admin}
+  NEXAHR_ADMIN_PASSWORD: ${NEXAHR_ADMIN_PASSWORD:-}
   # تنظیمات ایمیل و پیامک: مقدارهای غیرِراز از پنل مدیریت عوض می‌شوند، ولی
   # رمز و کلید API عمداً فقط از همین‌جا خوانده می‌شوند تا در بک‌آپ دیتابیس نیفتند.
   SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -44,21 +44,21 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: dbspulse
+      POSTGRES_USER: nexahr
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: dbspulse
+      POSTGRES_DB: nexahr
     # هیچ پورتی منتشر نمی‌شود: دیتابیس فقط از شبکهٔ داخلی docker دیده می‌شود.
     # برای بک‌آپ از `docker compose exec db pg_dump` استفاده کنید.
     volumes:
-      - dbspulse_pgdata:/var/lib/postgresql/data
+      - nexahr_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dbspulse -d dbspulse"]
+      test: ["CMD-SHELL", "pg_isready -U nexahr -d nexahr"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   migrate:
-    image: dbspulse-backend
+    image: nexahr-backend
     command: alembic upgrade head
     restart: "no"
     environment: *backend-env
@@ -67,7 +67,7 @@ services:
         condition: service_healthy
 
   backend:
-    image: dbspulse-backend
+    image: nexahr-backend
     restart: unless-stopped
     environment: *backend-env
     depends_on:
@@ -85,7 +85,7 @@ services:
       start_period: 30s
 
   frontend:
-    image: dbspulse-frontend
+    image: nexahr-frontend
     restart: unless-stopped
     depends_on:
       - backend
@@ -93,4 +93,4 @@ services:
       - "${HTTP_PORT:-8080}:80"
 
 volumes:
-  dbspulse_pgdata:
+  nexahr_pgdata:

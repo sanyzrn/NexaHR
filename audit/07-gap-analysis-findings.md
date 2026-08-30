@@ -1,4 +1,4 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 2. Gap Analysis + Fixes
 
@@ -91,7 +91,7 @@ backend/app/models/ · backend/app/models/improvement_plan.py · backend/app/cor
 
 **Gap / risk / missing capability**
 
-Every benchmark product treats goals as the spine that connects strategy to individual assessment: Workday and SuccessFactors cascade objectives through the org, Lattice and Leapsome make goal check-ins the weekly habit that supplies review evidence. Without a goal object DbsPulse cannot answer 'what was this person accountable for', cannot show progress between cycles, cannot supply the manager with anything factual at scoring time, and cannot distinguish an employee who missed agreed targets from one whose manager rates strictly. It also means the product has nothing to sell to a buyer whose stated problem is alignment rather than contract compliance.
+Every benchmark product treats goals as the spine that connects strategy to individual assessment: Workday and SuccessFactors cascade objectives through the org, Lattice and Leapsome make goal check-ins the weekly habit that supplies review evidence. Without a goal object NexaHR cannot answer 'what was this person accountable for', cannot show progress between cycles, cannot supply the manager with anything factual at scoring time, and cannot distinguish an employee who missed agreed targets from one whose manager rates strictly. It also means the product has nothing to sell to a buyer whose stated problem is alignment rather than contract compliance.
 
 **Recommended fix**
 
@@ -99,7 +99,7 @@ Introduce a first-class goal entity (owner personnel, title, description, measur
 
 **Product & business impact**
 
-Moves DbsPulse from 'contract-renewal paperwork' to 'performance management'. It is the single largest capability gap versus every competitor and the prerequisite for continuous performance, for meaningful analytics and for most of the AI opportunities in section 3.
+Moves NexaHR from 'contract-renewal paperwork' to 'performance management'. It is the single largest capability gap versus every competitor and the prerequisite for continuous performance, for meaningful analytics and for most of the AI opportunities in section 3.
 
 **Dependencies**
 
@@ -183,7 +183,7 @@ backend/app/core/constants.py · backend/app/api/routers/config.py · backend/ap
 
 **Gap / risk / missing capability**
 
-The scoring model is the part of a performance product every buyer wants to argue about. Today a customer who wants 70/30, a fifth renewal band, evidence required on a score of 2, or a heavier weight on safety indicators needs a code change, a review, a build and a deploy — which means DbsPulse cannot be sold to a second organisation without forking behaviour, and cannot let HR run a pilot with adjusted weights. There is also no versioning: even if the constants were editable, changing them would silently rewrite the meaning of historical scores, and finalize_scoring already requires the full current indicator set, so any mid-cycle change invalidates in-flight drafts.
+The scoring model is the part of a performance product every buyer wants to argue about. Today a customer who wants 70/30, a fifth renewal band, evidence required on a score of 2, or a heavier weight on safety indicators needs a code change, a review, a build and a deploy — which means NexaHR cannot be sold to a second organisation without forking behaviour, and cannot let HR run a pilot with adjusted weights. There is also no versioning: even if the constants were editable, changing them would silently rewrite the meaning of historical scores, and finalize_scoring already requires the full current indicator set, so any mid-cycle change invalidates in-flight drafts.
 
 **Recommended fix**
 
@@ -274,7 +274,7 @@ backend/app/services/workflow.py TRANSITIONS · README.md out-of-scope · backen
 
 **Gap / risk / missing capability**
 
-Single-rater scoring is systematically biased — leniency, severity, recency and halo effects are the most documented findings in performance measurement — and DbsPulse currently has no instrument to detect or correct any of them, while using the output to recommend whether a contract continues. Two managers applying different standards produce incomparable numbers that nonetheless meet the same numeric renewal thresholds. Because the only remedy is returning the entire record, HR's practical choice is to accept a score they doubt or restart the case.
+Single-rater scoring is systematically biased — leniency, severity, recency and halo effects are the most documented findings in performance measurement — and NexaHR currently has no instrument to detect or correct any of them, while using the output to recommend whether a contract continues. Two managers applying different standards produce incomparable numbers that nonetheless meet the same numeric renewal thresholds. Because the only remedy is returning the entire record, HR's practical choice is to accept a score they doubt or restart the case.
 
 **Recommended fix**
 
@@ -320,7 +320,7 @@ backend/app/api/routers/reports.py · backend/app/api/routers/dashboard.py
 
 **Gap / risk / missing capability**
 
-A unit supervisor cannot see how their own scoring distribution compares to the organisation, which is the single most useful piece of feedback a rater can receive. The CEO gets a queue, not a view of workforce risk, unit performance or renewal exposure. The result is that the data DbsPulse already holds informs one department's decisions and nobody else's, which caps perceived value at 'HR paperwork tool'.
+A unit supervisor cannot see how their own scoring distribution compares to the organisation, which is the single most useful piece of feedback a rater can receive. The CEO gets a queue, not a view of workforce risk, unit performance or renewal exposure. The result is that the data NexaHR already holds informs one department's decisions and nobody else's, which caps perceived value at 'HR paperwork tool'.
 
 **Recommended fix**
 
@@ -685,7 +685,7 @@ Migration 1eaa459f4dde unconditionally inserts five users — hr1, sup1, sup2, d
 **Exact repository evidence**
 
 ```text
-DEMO_PASSWORD = "DbsPulse@12345" at line 23, followed by an unconditional upgrade() that inserts the five users; the entrypoint applies all migrations at boot; the same password appears in repository documentation.
+DEMO_PASSWORD = "NexaHR@12345" at line 23, followed by an unconditional upgrade() that inserts the five users; the entrypoint applies all migrations at boot; the same password appears in repository documentation.
 ```
 
 **File path & location**
@@ -1073,7 +1073,7 @@ Move scheduled work to a dedicated single-replica worker service in Compose with
 
 **Product & business impact**
 
-Without this, deadline management is a feature the README describes and operations does not have. With it, the SLA and contract-expiry sweeps become the mechanism that makes DbsPulse the system HR trusts to not miss a renewal.
+Without this, deadline management is a feature the README describes and operations does not have. With it, the SLA and contract-expiry sweeps become the mechanism that makes NexaHR the system HR trusts to not miss a renewal.
 
 **Dependencies**
 
@@ -1111,7 +1111,7 @@ backend/app/services/documents.py · backend/app/models/ · backend/app/api/rout
 
 **Gap / risk / missing capability**
 
-Two problems that look separate and are not. Legally, a system holding performance judgements about identifiable employees needs answers to how long data is kept, what happens when an employee leaves, how a subject-access request is served, and how a record under dispute is preserved from deletion — and DbsPulse has none, which is a hard blocker in any customer with a privacy or works-council review. Operationally, keeping every PDF as a bytea in the primary database inflates the table, the backup, the restore time and every full-table maintenance operation, on a row that is written once and read rarely — the classic case for object storage. There is also no backup, restore or disaster-recovery procedure in the repository; the underlying infrastructure is outside the repository and therefore not verifiable, but the absence of any documented procedure is itself a finding.
+Two problems that look separate and are not. Legally, a system holding performance judgements about identifiable employees needs answers to how long data is kept, what happens when an employee leaves, how a subject-access request is served, and how a record under dispute is preserved from deletion — and NexaHR has none, which is a hard blocker in any customer with a privacy or works-council review. Operationally, keeping every PDF as a bytea in the primary database inflates the table, the backup, the restore time and every full-table maintenance operation, on a row that is written once and read rarely — the classic case for object storage. There is also no backup, restore or disaster-recovery procedure in the repository; the underlying infrastructure is outside the repository and therefore not verifiable, but the absence of any documented procedure is itself a finding.
 
 **Recommended fix**
 
@@ -1157,7 +1157,7 @@ backend/app/api/deps.py · backend/app/main.py · backend/app/models/ · README.
 
 **Gap / risk / missing capability**
 
-For an internal tool this is defensible. For a product it is a wall. Every organisation past a modest size already has an identity provider and a payroll or personnel system, and will refuse to maintain a second employee list by hand — duplicate personnel data drifts, leavers stay active, and contract_end_date, the field the contract-expiry sweep depends on, silently goes stale. Without webhooks or an API, DbsPulse cannot notify a payroll system of a renewal decision, cannot be embedded in an existing HR portal, and cannot be extended by the customer at all.
+For an internal tool this is defensible. For a product it is a wall. Every organisation past a modest size already has an identity provider and a payroll or personnel system, and will refuse to maintain a second employee list by hand — duplicate personnel data drifts, leavers stay active, and contract_end_date, the field the contract-expiry sweep depends on, silently goes stale. Without webhooks or an API, NexaHR cannot notify a payroll system of a renewal decision, cannot be embedded in an existing HR portal, and cannot be extended by the customer at all.
 
 **Recommended fix**
 
@@ -1466,7 +1466,7 @@ Converts the workflow guarantees from 'read as correct' to 'proven under content
 
 ## Differentiation & AI (11)
 
-Forward-looking findings — these are opportunities, not defects. Detail on strategy lives in section 3 (How DbsPulse Can Win).
+Forward-looking findings — these are opportunities, not defects. Detail on strategy lives in section 3 (How NexaHR Can Win).
 
 ### P3-01 · P3 · Renewal-risk early warning: predict the contract decision months before the evaluation, with explanation
 
@@ -1871,7 +1871,7 @@ Build a signal ingestion layer: typed, consented, per-organisation-configured fe
 
 **Product & business impact**
 
-Would reposition DbsPulse from a review tool to the organisation's performance evidence system — the highest-ceiling opportunity in this audit.
+Would reposition NexaHR from a review tool to the organisation's performance evidence system — the highest-ceiling opportunity in this audit.
 
 **Dependencies**
 
@@ -1965,7 +1965,7 @@ Issue each finalized evaluation as a cryptographically signed attestation: organ
 
 **Product & business impact**
 
-Would make DbsPulse the system whose output is trusted outside the company that produced it — a differentiator with no equivalent in this market segment, built on infrastructure that already exists.
+Would make NexaHR the system whose output is trusted outside the company that produced it — a differentiator with no equivalent in this market segment, built on infrastructure that already exists.
 
 **Dependencies**
 

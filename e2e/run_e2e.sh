@@ -5,7 +5,7 @@
 #
 # پیش‌نیازها: دیتابیسِ آمادهٔ مایگریشن + «python3 e2e/setup_e2e.py» که یک‌بار اجرا شده باشد.
 set -e
-export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://dbspulse:dbspulse_dev_password@localhost:5432/dbspulse}"
+export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr}"
 export JWT_SECRET_KEY="${JWT_SECRET_KEY:-dev-only-secret-change-me-0123456789abcdef}"
 export ENABLE_SCHEDULER="${ENABLE_SCHEDULER:-false}"
 

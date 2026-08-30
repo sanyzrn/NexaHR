@@ -174,7 +174,7 @@ async def chat_completions(request: Request) -> dict:
     if "پرسنل" in user_text:
         return _reply("جست‌وجو می‌کنم.", calls=[_tool("search_personnel", "c_sp", {"q": ""})])
 
-    return _reply("سلام! من همکار DbsPulse هستم. چه کاری برایتان انجام بدهم؟ (پاسخِ آزمونِ سرویسِ قلابی)")
+    return _reply("سلام! من همکار NexaHR هستم. چه کاری برایتان انجام بدهم؟ (پاسخِ آزمونِ سرویسِ قلابی)")
 
 
 if __name__ == "__main__":

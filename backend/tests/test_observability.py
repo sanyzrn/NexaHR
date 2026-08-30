@@ -43,8 +43,8 @@ def test_metrics_requires_the_token(client, metrics_token):
 def test_metrics_are_served_in_prometheus_format(client, metrics_token):
     body = _scrape(client, metrics_token).text
 
-    assert "# TYPE dbspulse_http_requests_total counter" in body
-    assert "dbspulse_http_request_duration_seconds" in body
+    assert "# TYPE nexahr_http_requests_total counter" in body
+    assert "nexahr_http_request_duration_seconds" in body
 
 
 # ───────────────────────────────── کاردینالیتی
@@ -87,7 +87,7 @@ def test_a_failed_login_is_counted(client, db_session, metrics_token):
     client.post("/api/auth/login", json={"username": "ghost-user", "password": "wrong"})
 
     after = _scrape(client, metrics_token).text
-    assert 'dbspulse_auth_failures_total{reason="bad_credentials"}' in after
+    assert 'nexahr_auth_failures_total{reason="bad_credentials"}' in after
     assert after != before
 
 
@@ -112,7 +112,7 @@ def test_workflow_transitions_are_counted_by_destination(client, db_session, met
     client.post(f"/api/evaluations/{ev['id']}/submit", headers=auth_header(sup))
 
     body = _scrape(client, metrics_token).text
-    assert 'dbspulse_workflow_transitions_total{to_status="submitted"}' in body
+    assert 'nexahr_workflow_transitions_total{to_status="submitted"}' in body
 
 
 def test_the_registry_carries_the_named_failure_modes():
@@ -120,12 +120,12 @@ def test_the_registry_carries_the_named_failure_modes():
     names = {m.name for m in REGISTRY.collect()}
 
     assert {
-        "dbspulse_http_requests",
-        "dbspulse_auth_failures",
-        "dbspulse_rate_limit_rejections",
-        "dbspulse_workflow_transitions",
-        "dbspulse_pdf_renders",
-        "dbspulse_scheduler_sweep_runs",
+        "nexahr_http_requests",
+        "nexahr_auth_failures",
+        "nexahr_rate_limit_rejections",
+        "nexahr_workflow_transitions",
+        "nexahr_pdf_renders",
+        "nexahr_scheduler_sweep_runs",
     } <= names
 
 

@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.core.metrics import sweep_runs
 from app.models.scheduler_run import SchedulerRun
 
-logger = logging.getLogger("dbspulse.scheduler")
+logger = logging.getLogger("nexahr.scheduler")
 
 # شناسهٔ دلخواه ولی ثابت برای قفل توصیه‌ای. فضای نام قفل‌ها در کل دیتابیس مشترک است،
 # پس عدد باید یکتا و ثابت بماند.

@@ -63,7 +63,7 @@ def build_system_prompt(
     role = _ROLE_LABELS.get(user.role.value, user.role.value)
     parts.append(
         (instructions or "").strip()
-        + "\n\nتو «همکار DbsPulse» هستی: به جای یک چت‌باتِ ساده، دستیارِ کاریِ همین سامانه. "
+        + "\n\nتو «همکار NexaHR» هستی: به جای یک چت‌باتِ ساده، دستیارِ کاریِ همین سامانه. "
         f"کاربر فعلی تو ({user.display_name or user.username}) نقش «{role}» دارد؛ "
         "هر کاری که خودش در رابط نمی‌تواند بکند، از این‌جا هم نمی‌توانی برایش بکنی — و این محدودیت را شفاف بگو."
     )

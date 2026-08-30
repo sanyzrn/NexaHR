@@ -54,8 +54,8 @@ def test_hsts_is_never_emitted_unconditionally(nginx_conf: str):
 
 def test_the_hsts_variable_is_empty_for_plain_http(nginx_conf: str):
     """نگاشت باید پیش‌فرضِ خالی داشته باشد؛ nginx هدر با مقدار خالی را اضافه نمی‌کند."""
-    mapping = re.search(r"map\s+\$\w+\s+\$dbspulse_hsts\s*\{(.*?)\}", nginx_conf, re.S)
-    assert mapping, "نگاشت $dbspulse_hsts پیدا نشد"
+    mapping = re.search(r"map\s+\$\w+\s+\$nexahr_hsts\s*\{(.*?)\}", nginx_conf, re.S)
+    assert mapping, "نگاشت $nexahr_hsts پیدا نشد"
     body = mapping.group(1)
     assert re.search(r'default\s+""\s*;', body), "پیش‌فرض نگاشت باید رشتهٔ خالی باشد"
     assert "https" in body

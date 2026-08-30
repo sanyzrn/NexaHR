@@ -1,4 +1,4 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 1.2 · Capability maturity
 
@@ -280,7 +280,7 @@ backend/app/services/documents.py · backend/app/services/pdf.py _local_template
 
 **Status:** Missing · **Tier:** Enterprise grade (only if sold as SaaS)
 
-Single-organization by design — no tenant discriminator anywhere in the schema. This is a legitimate choice for an internal tool and should not be scored as a defect for that use case, but it is an absolute blocker for selling DbsPulse as a hosted product to multiple companies.
+Single-organization by design — no tenant discriminator anywhere in the schema. This is a legitimate choice for an internal tool and should not be scored as a defect for that use case, but it is an absolute blocker for selling NexaHR as a hosted product to multiple companies.
 
 **Repository evidence**
 

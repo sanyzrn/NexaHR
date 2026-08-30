@@ -99,7 +99,7 @@ def enqueue_for(db: Session, notification: Notification) -> int:
 
 def _subject_for(notification: Notification) -> str:
     """موضوع ایمیل. پیامک نادیده‌اش می‌گیرد."""
-    return f"DbsPulse — {notification.message[:60]}"
+    return f"NexaHR — {notification.message[:60]}"
 
 
 def _retry_delay(attempts: int) -> timedelta:

@@ -1,14 +1,14 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
 > Site section: 1. Product Reality — hero, verdict and review basis
 
-# DbsPulse V2 — product reality audit
+# NexaHR V2 — product reality audit
 
 An evidence-based assessment of an Iranian organizational performance-evaluation platform whose output is a contract-renewal recommendation. Judged as a commercial performance-management product: every claim below is traced to a file in commit `ef0166b`, and anything the repository cannot prove is labelled as such.
 
 | Attribute | Value |
 |---|---|
-| Subject | DbsPulse V2 — سامانه ارزیابی عملکرد شرکت نفس زیست فارمد |
+| Subject | NexaHR V2 — سامانه ارزیابی عملکرد شرکت نفس زیست فارمد |
 | Repository | https://github.com/sanyzrn/DbsPulse_V2 |
 | Branch | `main` |
 | Commit reviewed | `ef0166b091d2d167d808702e084c079e5143e307` |
@@ -37,7 +37,7 @@ A repository-wide search for TODO / FIXME / XXX / HACK / mock / dummy / placehol
 
 ## Runtime verification was not possible
 
-PostgreSQL is not available in the review environment (no postgres / psql / pg_ctl binaries; /usr/lib/postgresql absent). DbsPulse hard-requires PostgreSQL features (JSONB columns, partial unique indexes, sequences, SELECT … FOR UPDATE OF), so the 152 backend tests could not be executed. Test-suite health is reported from the CI definition only (.github/workflows/ci.yml), never as a passing result observed by this audit. Every finding below is derived from static reading of actual source files.
+PostgreSQL is not available in the review environment (no postgres / psql / pg_ctl binaries; /usr/lib/postgresql absent). NexaHR hard-requires PostgreSQL features (JSONB columns, partial unique indexes, sequences, SELECT … FOR UPDATE OF), so the 152 backend tests could not be executed. Test-suite health is reported from the CI definition only (.github/workflows/ci.yml), never as a passing result observed by this audit. Every finding below is derived from static reading of actual source files.
 
 ## Tenancy determination
 

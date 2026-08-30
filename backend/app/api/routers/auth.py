@@ -46,7 +46,7 @@ from app.services.sessions import (
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-REFRESH_COOKIE = "dbspulse_refresh"
+REFRESH_COOKIE = "nexahr_refresh"
 
 # برای کاربر ناموجود هم یک verify واقعی انجام می‌دهیم تا از روی زمان پاسخ نتوان
 # نام‌های کاربری معتبر را حدس زد (timing attack).

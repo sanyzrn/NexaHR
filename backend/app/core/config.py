@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     environment: str = "development"
-    database_url: str = "postgresql+psycopg://dbspulse:dbspulse_dev_password@localhost:5432/dbspulse"
+    database_url: str = "postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr"
     jwt_secret_key: str = _INSECURE_DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30

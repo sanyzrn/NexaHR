@@ -1,14 +1,14 @@
-> **DbsPulse V2 — Product, Architecture, Workflow, Security & UX Audit**  
+> **NexaHR V2 — Product, Architecture, Workflow, Security & UX Audit**  
 > Repository: <https://github.com/sanyzrn/DbsPulse_V2> · Branch `main` · Commit `ef0166b091d2d167d808702e084c079e5143e307`  
-> Site section: 3. How DbsPulse Can Win
+> Site section: 3. How NexaHR Can Win
 
-# How DbsPulse can win — practical advantages, honest positioning, and AI that stays advisory
+# How NexaHR can win — practical advantages, honest positioning, and AI that stays advisory
 
 Differentiation grounded in what the codebase already does well and what the Iranian market actually needs — not parity with every global suite. Each opportunity names the findings it depends on, so strategy and roadmap stay connected.
 
-## Where DbsPulse actually stands
+## Where NexaHR actually stands
 
-DbsPulse is a real, well-engineered, single-organization performance-evaluation and contract-renewal system — not a prototype and not a dashboard. Its workflow engine and document-integrity chain are stronger than its market segment would suggest. What it is not, yet, is a performance-management product: it has no goals, no competencies, no employee voice, no calibration, no configurability, no integrations and no outbound notifications. The honest summary is that DbsPulse has built the hardest 20% (verifiable, enforced process) and skipped much of the expected 80% (the content of performance management).
+NexaHR is a real, well-engineered, single-organization performance-evaluation and contract-renewal system — not a prototype and not a dashboard. Its workflow engine and document-integrity chain are stronger than its market segment would suggest. What it is not, yet, is a performance-management product: it has no goals, no competencies, no employee voice, no calibration, no configurability, no integrations and no outbound notifications. The honest summary is that NexaHR has built the hardest 20% (verifiable, enforced process) and skipped much of the expected 80% (the content of performance management).
 
 ## 3.1 · Existing assets — what is already strong enough to build a strategy on
 
@@ -16,7 +16,7 @@ Verified strengths — each one read in source. These are the foundations the re
 
 ### A declarative, backend-enforced state machine
 
-The seven-transition table checks from-status, role and record-level assignee in one place before any mutation, and transitions hold a row lock. Most systems of this size scatter these checks through endpoint bodies or trust the UI; DbsPulse does neither.
+The seven-transition table checks from-status, role and record-level assignee in one place before any mutation, and transitions hold a row lock. Most systems of this size scatter these checks through endpoint bodies or trust the UI; NexaHR does neither.
 
 **Evidence**
 
@@ -96,11 +96,11 @@ backend/app/core/constants.py FINAL_RESULT_THRESHOLDS · backend/app/services/sc
 
 ## 3.2 · Competitive advantages to pursue
 
-High-value differentiation where DbsPulse can be better rather than merely cheaper. Referenced finding IDs are the prerequisites — see section 2 (Gap Analysis) for the evidence and the fix.
+High-value differentiation where NexaHR can be better rather than merely cheaper. Referenced finding IDs are the prerequisites — see section 2 (Gap Analysis) for the evidence and the fix.
 
 ### 01. Own the renewal decision, end to end
 
-No competitor in this segment treats contract renewal as the primary object. DbsPulse already produces a threshold-based recommendation, warns on contract expiry, and issues a hash-verified decision document. Extending that into early risk detection (P3-01), renewal documentation packs and a renewal pipeline view makes 'the system Iranian HR uses at renewal time' a category DbsPulse defines rather than competes in.
+No competitor in this segment treats contract renewal as the primary object. NexaHR already produces a threshold-based recommendation, warns on contract expiry, and issues a hash-verified decision document. Extending that into early risk detection (P3-01), renewal documentation packs and a renewal pipeline view makes 'the system Iranian HR uses at renewal time' a category NexaHR defines rather than competes in.
 
 **Depends on:** P3-01 · P3-03 · P1-02
 
@@ -124,7 +124,7 @@ The enforced state machine, immutable snapshot, SHA-256 and QR verification alre
 
 ### 05. Configurability as the path to a second customer
 
-Weights, thresholds, evidence rules, stages and labels currently live in code. Versioned configuration (P1-04) followed by a process designer (P3-02) is what lets DbsPulse serve organisations with different practices from one codebase — the difference between a project and a product.
+Weights, thresholds, evidence rules, stages and labels currently live in code. Versioned configuration (P1-04) followed by a process designer (P3-02) is what lets NexaHR serve organisations with different practices from one codebase — the difference between a project and a product.
 
 **Depends on:** P1-04 · P1-05 · P3-02
 
@@ -134,9 +134,9 @@ Supervisors on a floor and executives between meetings are the people whose dela
 
 **Depends on:** P2-04 · P1-03
 
-## What DbsPulse should deliberately not chase
+## What NexaHR should deliberately not chase
 
-- Full parity with Workday or SAP SuccessFactors. Compensation planning, succession, learning management, workforce planning and org modelling are decade-scale investments and are not why anyone would buy DbsPulse.
+- Full parity with Workday or SAP SuccessFactors. Compensation planning, succession, learning management, workforce planning and org modelling are decade-scale investments and are not why anyone would buy NexaHR.
 - Anonymous full 360 with rater-set management. The machinery is heavy, the cultural fit in many Iranian organisations is uncertain, and a lightweight manager-peer input path (P1-06) captures most of the value.
 - Engagement surveys and sentiment analysis. Culture Amp owns that category and it does not reinforce the contract-renewal wedge.
 - Multi-tenant SaaS as an early goal. It is a rearchitecture, not a feature; only pursue it when there is a second and third paying customer demanding hosted delivery.
@@ -168,7 +168,7 @@ A library of indicator wording, evidence examples and improvement-plan goals wri
 
 Four features that qualify, five that are refused.
 
-**Governing principle.** AI in DbsPulse must assist the people who decide and must never decide. Because the product's output is a recommendation about whether someone's employment continues, every AI feature is evaluated against six questions before it is built: which specific user problem it solves, whether the product already holds the data it needs, whether it is implementable and maintainable in this stack, what it does to privacy and security, whether its output is explainable and human-reviewed, and what business value it produces that is measurable. A feature that fails any one of these is not built.
+**Governing principle.** AI in NexaHR must assist the people who decide and must never decide. Because the product's output is a recommendation about whether someone's employment continues, every AI feature is evaluated against six questions before it is built: which specific user problem it solves, whether the product already holds the data it needs, whether it is implementable and maintainable in this stack, what it does to privacy and security, whether its output is explainable and human-reviewed, and what business value it produces that is measurable. A feature that fails any one of these is not built.
 
 ### Qualified AI features
 
