@@ -1,5 +1,18 @@
 import os
 
+# فایل `backend/.env` در تست خوانده نمی‌شود.
+#
+# آن فایل را راه‌انداز محیط توسعه می‌سازد و عمداً مقادیر دمو دارد
+# (`MIN_COHORT_SIZE=1`، `SEED_DEMO_DATA=true`، آدرس‌های محلی). تا امروز همان
+# مقادیر در تست هم اعمال می‌شدند: هر کس `setup_and_run` را اجرا کرده بود و بعد
+# `pytest` می‌زد ۱۷ تست قرمز می‌دید که به تغییرات خودش ربطی نداشت. خطرناک‌تر
+# این‌که تستِ سرکوبِ میانگینِ گروهِ کوچک با `MIN_COHORT_SIZE=1` بی‌صدا بی‌معنا
+# می‌شد — یعنی گاردی که باید بسنجد، عملاً سنجیده نمی‌شد.
+#
+# این خط باید پیش از اولین import از `app` بیاید، چون `Settings` مسیر فایل را
+# در زمان تعریف کلاس می‌خواند. زیرپروسه‌ها (alembic) هم همین را به ارث می‌برند.
+os.environ.setdefault("NEXAHR_ENV_FILE", "")
+
 os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr_test"
 )

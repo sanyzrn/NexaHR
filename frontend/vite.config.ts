@@ -10,6 +10,19 @@ import tailwindcss from '@tailwindcss/vite'
 // حالا یک منبع دارد و فوتر همان را نشان می‌دهد که بسته‌بندی شده.
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
 
+// مقصدِ پروکسی، با امکانِ جابه‌جایی.
+//
+// تا پیش از این این‌جا `http://localhost:8000` ثابت نوشته شده بود، و همان یک خط
+// بود که پورت ۸۰۰۰ را اجباری می‌کرد. روی ویندوز آن پورت اغلب در دسترس نیست —
+// گاهی یووی‌کورنِ اجرای قبلی هنوز زنده است، گاهی Hyper-V/WSL2 کلِ بازه را برای
+// خودش رزرو کرده — و چون فرانت‌اند فقط بلد بود ۸۰۰۰ را صدا بزند، تنها راهِ
+// پیش‌رو «آن پورت را آزاد کن» بود.
+//
+// حالا راه‌انداز (tools/launcher) هر پورتی که واقعاً بشود رویش listen کرد
+// برمی‌دارد و آدرسش را از همین متغیر می‌دهد. پیش‌فرض دست‌نخورده است، پس
+// `npm run dev` دستی هم مثل قبل کار می‌کند.
+const backend = process.env.NEXAHR_BACKEND_URL || 'http://localhost:8000'
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
@@ -18,7 +31,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: backend,
         changeOrigin: true,
       },
     },

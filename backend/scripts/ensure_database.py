@@ -68,7 +68,10 @@ class Target:
         self.password = unquote(parsed.password or "")
         self.host = parsed.hostname or "127.0.0.1"
         self.port = parsed.port or 5432
-        self.database = (parsed.path or "/").lstrip("/") or "postgres"
+        # نامِ دیتابیس هم مثلِ کاربر و رمز کدگشایی می‌شود. راه‌انداز آدرس را با
+        # کدگذاری درصدی می‌نویسد (تا `backend/.env` هرگز بایتِ غیرِ ASCII نگیرد)،
+        # پس بدونِ این خط، نامی مثل `%D9%BE...` عیناً به `CREATE DATABASE` می‌رفت.
+        self.database = unquote((parsed.path or "/").lstrip("/")) or "postgres"
 
 
 def _connect(*, user: str, password: str, host: str, port: int, dbname: str):
