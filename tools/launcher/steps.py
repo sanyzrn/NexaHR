@@ -274,6 +274,38 @@ def database_endpoint(env_text: str) -> tuple[str, int]:
 ADMIN_LOGIN_FAILED = 3  # کدِ خروجِ scripts.ensure_database وقتی رمزِ ادمین لازم است
 
 
+def provision_database(ctx: Context) -> int:
+    """نقش و دیتابیس را بساز اگر نیستند. کدِ خروجِ `scripts.ensure_database`.
+
+    جدا از مرحلهٔ `ensure_database` نگه داشته شده چون دو فراخوان دارد: یکی
+    راه‌اندازی، و یکی «به دیتابیسِ دیگری وصل شو». اولین‌بار که این‌جا نبود،
+    مسیرِ دوم بی‌صدا با کدِ ۳ شکست می‌خورد — چون رمزِ ادمین را نمی‌پرسید — و
+    پیامش می‌شد «نشد وصل شوم» بی‌آنکه بگوید فقط یک رمز کم است.
+
+    نقش و دیتابیس این‌جا ساخته می‌شوند به‌جای این‌که از کاربر خواسته شوند، چون
+    دستوری که قبلاً چاپ می‌شد قابلِ اجرا نبود: `psql` بعد از نصبِ پیش‌فرضِ ویندوز
+    روی PATH نیست. psycopg تا این مرحله در venv هست، پس مستقیم انجامش می‌دهیم.
+    """
+    interpreter = str(ctx.paths.venv_python)
+    code = ctx.run([interpreter, "-m", "scripts.ensure_database"], cwd=ctx.paths.backend)
+    if code != ADMIN_LOGIN_FAILED:
+        return code
+
+    secret = ctx.ask_password(
+        "The database does not exist yet. Creating it needs the PostgreSQL admin "
+        "password — the one set for the \"postgres\" user during installation."
+    )
+    if not secret:
+        return code
+    # از راهِ محیط، نه آرگومانِ خطِ فرمان: libpq آن را می‌خواند و رمز در
+    # فهرستِ پروسه‌ها — که کاربرانِ دیگر هم می‌بینند — ظاهر نمی‌شود.
+    return ctx.run(
+        [interpreter, "-m", "scripts.ensure_database"],
+        cwd=ctx.paths.backend,
+        env=child_environment({"PGPASSWORD": secret}),
+    )
+
+
 def ensure_database(ctx: Context) -> Outcome:
     env_text = ctx.paths.env_file.read_text(encoding="utf-8", errors="replace")
     host, port = database_endpoint(env_text)
@@ -298,27 +330,7 @@ def ensure_database(ctx: Context) -> Outcome:
             ),
         )
 
-    interpreter = str(ctx.paths.venv_python)
-    code = ctx.run([interpreter, "-m", "scripts.ensure_database"], cwd=ctx.paths.backend)
-
-    # نقش و دیتابیس این‌جا ساخته می‌شوند به‌جای این‌که از کاربر خواسته شوند، چون
-    # دستوری که قبلاً چاپ می‌شد قابلِ اجرا نبود: psql بعد از نصبِ پیش‌فرضِ ویندوز
-    # روی PATH نیست. psycopg تا این مرحله در venv هست، پس مستقیم انجامش می‌دهیم.
-    if code == ADMIN_LOGIN_FAILED:
-        secret = ctx.ask_password(
-            "The database does not exist yet. Creating it needs the PostgreSQL admin "
-            "password — the one set for the \"postgres\" user during installation."
-        )
-        if secret:
-            # از راهِ محیط، نه آرگومانِ خطِ فرمان: libpq آن را می‌خواند و رمز در
-            # فهرستِ پروسه‌ها — که کاربرانِ دیگر هم می‌بینند — ظاهر نمی‌شود.
-            code = ctx.run(
-                [interpreter, "-m", "scripts.ensure_database"],
-                cwd=ctx.paths.backend,
-                env=child_environment({"PGPASSWORD": secret}),
-            )
-
-    if code != 0:
+    if provision_database(ctx) != 0:
         return Outcome(
             False,
             "the application database is not available",

@@ -1,11 +1,27 @@
+import os
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_DEFAULT_JWT_SECRET = "change-this-to-a-long-random-string"
 
+# کدام فایل تنظیمات خوانده شود — و این‌که بشود اصلاً نخواند.
+#
+# `.env` محلی عمداً مقادیر دمو دارد (`MIN_COHORT_SIZE=1`، `SEED_DEMO_DATA=true`)
+# چون بدون آن‌ها هر نمودار داشبورد در محیط توسعه خالی می‌ماند. ولی همان فایل در
+# تست هم خوانده می‌شد و پیش‌فرض‌ها را زیر پا می‌گذاشت: کسی که راه‌انداز را اجرا
+# کرده بود و بعد `pytest` می‌زد، ۱۷ تست قرمز می‌دید که هیچ‌کدام به کدش ربط
+# نداشت — و بدتر، تستِ «میانگین گروهِ کوچک سرکوب می‌شود» دقیقاً همان تستی است
+# که با `MIN_COHORT_SIZE=1` بی‌صدا بی‌معنا می‌شود.
+#
+# مقدارِ خالی یعنی «هیچ فایلی نخوان»؛ `tests/conftest.py` همین را ست می‌کند تا
+# تست‌ها فقط به پیش‌فرض‌ها و متغیرهای صریحِ خودشان تکیه کنند.
+ENV_FILE_VARIABLE = "NEXAHR_ENV_FILE"
+_ENV_FILE = os.getenv(ENV_FILE_VARIABLE, ".env") or None
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8")
 
     environment: str = "development"
     database_url: str = "postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr"

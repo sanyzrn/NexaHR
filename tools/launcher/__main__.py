@@ -87,9 +87,15 @@ def run_headless(open_browser: bool = True) -> int:
 
 
 def run_check() -> int:
-    """تشخیصِ بدونِ اجرا — برای وقتی که فقط می‌خواهیم بدانیم پورت‌ها چه وضعی دارند."""
+    """تشخیصِ بدونِ اجرا.
+
+    برای وقتی که چیزی کار نمی‌کند و باید فهمید کجا. همان چیزهایی را می‌گوید که
+    پنجره نشان می‌دهد، بدونِ این‌که چیزی را بالا بیاورد — پس می‌شود خروجی‌اش را
+    کپی کرد و فرستاد.
+    """
     from . import ports as portlib
     from .environment import lan_address, locate, node_tool, python_tool
+    from .session import Session
 
     paths = locate()
     print(f"root      {paths.root}")
@@ -103,6 +109,28 @@ def run_check() -> int:
         extra = f" — held by {owner.label}" if owner else ""
         ours = " (ours)" if owner and portlib.belongs_to(owner, paths.root) else ""
         print(f"port {port}  {probe.verdict.value}{extra}{ours}")
+
+    # هرچه از این‌جا به بعد است به venv نیاز دارد. اگر هنوز ساخته نشده، سکوت
+    # بهتر از یک صفحه خطاست — خودِ نبودنش هم گفته می‌شود.
+    if not paths.venv_python.exists():
+        print("venv      not created yet (run without --check to build it)")
+        return 0
+
+    session = Session(log=lambda source, line: None)
+    report = session.database_report()
+    endpoint = session.endpoint()
+    state = "ready" if report.get("database_exists") else "not reachable"
+    print(f"database  {endpoint.label} — {state}")
+    if report.get("databases"):
+        print(f"          on this server: {', '.join(report['databases'])}")
+    if report.get("error"):
+        print(f"          {report['error'].splitlines()[0]}")
+    print(f"admin     {session.admin_status().summary}")
+    for feature in session.features().features:
+        mark = "ok" if feature.available else "missing"
+        detail = feature.detail.splitlines()[0] if feature.detail else ""
+        # کلید و نه عنوان: عنوان‌ها بلندند و ستونِ چپ را به هم می‌ریزند.
+        print(f"{feature.key:<10}{mark}{'  ' + detail if detail else ''}")
     return 0
 
 
