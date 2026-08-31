@@ -1226,17 +1226,27 @@ function AiCard() {
         </label>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3">
         <Button variant="secondary" onClick={test} loading={testing}>
           آزمودن اتصال
         </Button>
+        {/* نتیجه *زیرِ* دکمه می‌نشیند و نه کنارش: پیامِ خطای سرویس می‌تواند چند
+            جمله باشد (کدِ وضعیت + حرفِ خودِ سرویس + راهنمای رفع)، و کنارِ دکمه
+            یا دکمه را له می‌کند یا خودش به یک ستونِ باریک می‌افتد.
+
+            `break-words` هم لازم است: آدرس و نام مدل در متنِ خطا می‌آیند و یک
+            رشتهٔ بلندِ بی‌فاصله از کارت بیرون می‌زند. */}
         {testResult && (
-          <span
-            className={`text-xs ${testResult.ok ? "text-green-700" : "text-red-600"}`}
+          <p
+            className={`mt-2 rounded-xl border px-3 py-2 text-xs leading-relaxed break-words ${
+              testResult.ok
+                ? "border-green-200 bg-green-50 text-green-800"
+                : "border-red-200 bg-red-50 text-red-700"
+            }`}
             dir="auto"
           >
             {testResult.detail}
-          </span>
+          </p>
         )}
       </div>
 
