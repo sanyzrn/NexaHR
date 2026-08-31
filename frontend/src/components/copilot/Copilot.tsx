@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { apiClient } from "../../api/client";
 import type { AiStatus } from "../../types";
-import { CopilotPanel, SparkIcon } from "./CopilotPanel";
+import { CopilotPanel } from "./CopilotPanel";
+import { Mascot } from "./Mascot";
 
 /**
  * ورودیِ همکار: دکمهٔ شناور + پنجرهٔ کنارِ صفحه.
@@ -30,6 +31,9 @@ export function Copilot() {
 
   return (
     <>
+      {/* شخصیت خودش شکلِ دکمه است و دیگر داخل یک دایرهٔ رنگی نمی‌نشیند: قابِ
+          گرد، سر و دست و پا را می‌بُرید و چیزی جز یک لکه باقی نمی‌گذاشت. جای
+          دایره، یک هالهٔ نرم زیر پا نشسته تا شخصیت روی هر زمینه‌ای جدا شود. */}
       <motion.button
         type="button"
         onClick={() => setOpen(true)}
@@ -38,12 +42,29 @@ export function Copilot() {
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.3, duration: 0.3 }}
-        className="fixed bottom-5 left-5 z-40 flex h-13 w-13 items-center justify-center rounded-full bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-float transition-transform hover:scale-105"
+        /* روی لبهٔ بالای پاصفحه می‌ایستد، دقیقاً بالای امضای «Developed by…».
+           عددها اندازه‌گیری‌شده‌اند، نه حدسی:
+
+             bottom = فاصلهٔ پاصفحه از کفِ پنجره (pb-3 → ۱۲، lg:pb-4 → ۱۶)
+                      + بلندیِ پاصفحه (۵۰، در همهٔ عرض‌ها) − ۴
+             ۴ همان فضای خالیِ زیرِ پاست در viewBox ۶۴‌تایی، وگرنه پا کمی
+             بالاتر از سطح می‌ایستد و شخصیت شناور به‌نظر می‌رسد.
+
+             left   = مرکزِ افقیِ همان امضا − نصفِ دکمه (۳۲)
+             و مرکزِ امضا با padding افقیِ پوسته و پاصفحه جابه‌جا می‌شود:
+             ۱۲+۱۶ در پایه، ۱۲+۲۴ از sm، ۱۶+۲۴ از lg.
+
+           پاصفحه در هیچ عرضی دو خطی نمی‌شود (تا ۳۹۰ پیکسل هم سنجیده شد)، پس
+           بلندی‌اش ثابت است و همین سه حالت کافی است. */
+        className="mascot-host group fixed bottom-[58px] left-[73px] z-40 h-16 w-16 transition-transform hover:scale-105 focus-visible:outline-none sm:left-[81px] lg:bottom-[62px] lg:left-[85px]"
       >
-        <SparkIcon className="h-5.5 w-5.5" />
+        <Mascot className="h-16 w-16 drop-shadow-[0_5px_12px_rgba(0,0,0,0.22)]" />
+        {/* نشانِ «اجازهٔ پیشنهادِ تغییر دارد».
+            گوشهٔ پایین‌ـ‌ابتدا، چون تنها گوشه‌ای است که شخصیت خالی گذاشته؛ بالای
+            سر روی صورت می‌افتاد و در ۶۴ پیکسل، با چشم‌ها رقابت می‌کرد. */}
         {status.allow_write_actions && (
           <span
-            className="absolute -end-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-white bg-green-500"
+            className="absolute bottom-1.5 end-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-green-500"
             title="اجازهٔ پیشنهادِ تغییر دارد"
           />
         )}

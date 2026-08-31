@@ -974,6 +974,7 @@ function OrgUnitsCard() {
  *  می‌بیند؛ کاربرِ دستیار — مثلاً معاونت — فقط پنجرهٔ گفت‌وگو را دارد.
  */
 function AiCard() {
+  const { user } = useAuth();
   const { showSuccess, showError } = useToast();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Partial<AiSettings> & { api_key?: string }>({});
@@ -992,6 +993,23 @@ function AiCard() {
 
   const value = { ...(data ?? {}), ...draft } as AiSettings & { api_key?: string };
   const dirty = Object.keys(draft).length > 0;
+
+  // کلیدِ سراسری روشن است ولی دسترسیِ *فردی* داده نشده — تلهٔ همیشگیِ این صفحه.
+  // نبودِ ردیف در `ai_user_access` یعنی «دسترسی ندارد»، پس روشن‌کردنِ کلیدِ بالا
+  // به‌تنهایی برای هیچ‌کس هیچ‌چیز را عوض نمی‌کند و کاربر فقط می‌بیند که دکمهٔ
+  // همکار همچنان نیست. این‌جا همان‌جایی است که او ایستاده، پس همین‌جا گفته
+  // می‌شود — نه در مستندات و نه با یک دکمهٔ مرده در گوشهٔ صفحه.
+  // اطلاعاتِ ذخیره‌شدهٔ سرویسی که *در فرم* انتخاب است — که ممکن است با سرویسِ
+  // فعالِ سرور یکی نباشد (مدیر کلیک کرده و هنوز ذخیره نزده). فیلدهای تخت
+  // `data.api_key_*` دربارهٔ سرویسِ فعال حرف می‌زنند، پس برای نشانِ «کلید دارد»
+  // نمی‌شود به آن‌ها تکیه کرد.
+  const savedFor = (id: string) =>
+    (data?.provider_credentials ?? []).find((c) => c.provider === id);
+
+  const grantedCount = access.filter((row) => row.enabled).length;
+  // `user` تا پیش از رسیدنِ /me نال است؛ آن لحظه هنوز `access` هم خالی است،
+  // پس هیچ هشداری ساخته نمی‌شود و مقایسه فقط باید امن بماند.
+  const myAccess = access.find((row) => row.user_id === user?.id);
 
   function set<K extends keyof typeof value>(key: K, next: (typeof value)[K]) {
     setDraft((prev) => ({ ...prev, [key]: next }));
@@ -1031,7 +1049,10 @@ function AiCard() {
   async function setAccess(row: AiUserAccess, patch: Record<string, unknown>) {
     try {
       await apiClient.put(`/ai/access/${row.user_id}`, patch);
-      await queryClient.invalidateQueries({ queryKey: ["ai", "access"] });
+      // کلِ شاخهٔ `ai` و نه فقط `["ai","access"]`: تطبیقِ کلید پیشوندی است، پس
+      // `["ai","status"]` — همان چیزی که بود و نبودِ دکمهٔ همکار به آن بند است —
+      // با کلیدِ باریک‌تر تازه نمی‌شود و دسترسیِ تازه تا رفرشِ بعدی دیده نمی‌شد.
+      await queryClient.invalidateQueries({ queryKey: ["ai"] });
     } catch (err) {
       showError(extractErrorMessage(err));
     }
@@ -1063,6 +1084,32 @@ function AiCard() {
         دستیار در این سامانه فعال باشد
       </label>
 
+      {value.enabled && !dirty && access.length > 0 && grantedCount === 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+          کلید سراسری روشن است، ولی هنوز <b>هیچ حسابی</b> دستیار ندارد — پس دکمهٔ همکار برای
+          هیچ‌کس دیده نمی‌شود. دسترسی را در بخش «چه کسی دستیار دارد» پایینِ همین کارت بدهید.
+        </div>
+      )}
+
+      {value.enabled && !dirty && grantedCount > 0 && !myAccess?.enabled && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+          <span>
+            دستیار برای {grantedCount.toLocaleString("fa-IR")} حساب فعال است، ولی{" "}
+            <b>حساب خودتان جزوشان نیست</b> — به همین دلیل دکمهٔ همکار را نمی‌بینید.
+          </span>
+          <span className="flex-1" />
+          {myAccess && (
+            <Button
+              variant="secondary"
+              className="text-xs"
+              onClick={() => void setAccess(myAccess, { enabled: true })}
+            >
+              به حساب خودم هم بده
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* انتخاب سرویس: یک کلیک، آدرس و یک مدلِ پیش‌فرضِ سالم.
           نیمی از مشکلات راه‌اندازی یک `/v1` جامانده در آدرس بود. */}
       <div className="mb-4">
@@ -1075,14 +1122,35 @@ function AiCard() {
                 key={option.id}
                 type="button"
                 onClick={() =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    provider: option.id,
-                    // «سفارشی» چیزی را پاک نمی‌کند: کسی که رویش می‌زند معمولاً
-                    // همان آدرسی را می‌خواهد که نوشته بود.
-                    ...(option.base_url ? { base_url: option.base_url } : {}),
-                    ...(option.default_model ? { model: option.default_model } : {}),
-                  }))
+                  setDraft((prev) => {
+                    const saved = savedFor(option.id);
+                    // کلیدِ تایپ‌شده عمداً *حذف* می‌شود و جابه‌جا نمی‌شود: بدونِ
+                    // این، کلیدی که برای Anthropic تایپ شده بود با یک کلیک روی
+                    // Gemini، روی ردیفِ Gemini ذخیره می‌شد.
+                    const rest = { ...prev };
+                    delete rest.api_key;
+                    return {
+                      ...rest,
+                      provider: option.id,
+                      // اطلاعاتِ ذخیره‌شدهٔ خودِ این سرویس مقدم است بر پیش‌فرضِ
+                      // کاتالوگ: اگر مدیر قبلاً مدلِ دیگری برای این سرویس
+                      // نوشته، کلیک روی آن نباید آن انتخاب را پاک کند.
+                      //
+                      // «سفارشی» پیش‌فرضی ندارد، پس اگر ذخیره‌ای هم نداشته باشد
+                      // هر چه در فرم است می‌ماند — کسی که رویش می‌زند معمولاً
+                      // همان آدرسی را می‌خواهد که نوشته بود.
+                      ...(saved?.base_url
+                        ? { base_url: saved.base_url }
+                        : option.base_url
+                          ? { base_url: option.base_url }
+                          : {}),
+                      ...(saved?.model
+                        ? { model: saved.model }
+                        : option.default_model
+                          ? { model: option.default_model }
+                          : {}),
+                    };
+                  })
                 }
                 className={`rounded-xl border px-3 py-2 text-right text-xs transition-colors ${
                   active
@@ -1090,10 +1158,22 @@ function AiCard() {
                     : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
-                <span className="block font-semibold">{option.label}</span>
-                {option.default_model && (
+                <span className="flex items-center gap-1.5 font-semibold">
+                  {option.label}
+                  {/* نشانِ «کلید دارد»: بدونش مدیر برای فهمیدنِ اینکه این سرویس
+                      قبلاً تنظیم شده یا نه، باید رویش کلیک کند و امتحان کند. */}
+                  {savedFor(option.id)?.api_key_configured && (
+                    <span
+                      title="کلید این سرویس ذخیره شده است"
+                      className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700"
+                    >
+                      کلید دارد
+                    </span>
+                  )}
+                </span>
+                {(savedFor(option.id)?.model || option.default_model) && (
                   <span dir="ltr" className="mt-0.5 block text-left text-[11px] text-gray-400">
-                    {option.default_model}
+                    {savedFor(option.id)?.model || option.default_model}
                   </span>
                 )}
               </button>
@@ -1134,7 +1214,9 @@ function AiCard() {
             value={draft.api_key ?? ""}
             onChange={(e) => set("api_key", e.target.value)}
             placeholder={
-              data.api_key_configured ? `تنظیم شده (${data.api_key_hint})` : "هنوز تنظیم نشده"
+              savedFor(value.provider)?.api_key_configured
+                ? `تنظیم شده (${savedFor(value.provider)?.api_key_hint})`
+                : "هنوز تنظیم نشده"
             }
             baseClassName={`${inputClass} pl-11`}
           />

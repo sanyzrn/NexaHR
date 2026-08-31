@@ -7,13 +7,13 @@ import json
 import pytest
 
 from app.core.crypto import decrypt, encrypt
-from app.models.ai import AiSettings, AiUserAccess
+from app.models.ai import AiUserAccess
 from app.models.enums import Capability
 from app.schemas.auth import CurrentUser
 from app.services.ai.prompt import build_system_prompt
 from app.services.ai.tools import base as tools_base
 from tests.fake_llm import FailingAdapter, NoToolsAdapter, ScriptedAdapter, reset, response, tool_call
-from tests.helpers import auth_header, make_user
+from tests.helpers import auth_header, enable_ai_provider, make_user
 
 # ── پروتکلِ جایگزین: تجزیه‌کننده، برابر پاسخ‌هایی که مدل‌ها *واقعاً* می‌دهند ──
 
@@ -132,9 +132,7 @@ def test_risky_tools_are_always_flagged_for_confirmation():
 
 
 def _enable_for(db, user, **access_kwargs):
-    db.merge(
-        AiSettings(id=1, enabled=True, base_url="http://x", model="m", api_key_encrypted=encrypt("k"))
-    )
+    enable_ai_provider(db)
     db.add(AiUserAccess(user_id=user.id, enabled=True, **access_kwargs))
     db.commit()
 
@@ -147,11 +145,9 @@ def test_status_tells_not_configured_from_not_permitted(client, db_session):
     assert body["available"] is False
     assert "فعال نیست" in body["reason"]
 
-    config = db_session.get(AiSettings, 1) or AiSettings(id=1)
-    config.enabled = True
-    config.base_url = "http://x"
-    config.model = "m"
-    db_session.add(config)
+    # کلید عمداً خالی: این تست همان مرحله‌ای را می‌سنجد که دستیار روشن است،
+    # حساب دسترسی دارد، ولی هنوز کلیدی نیست.
+    enable_ai_provider(db_session, api_key="")
     db_session.commit()
     body = client.get("/api/ai/status", headers=auth_header(user)).json()
     assert "حساب شما" in body["reason"]
@@ -190,8 +186,7 @@ def test_the_key_is_encrypted_at_rest(db_session):
 
 def test_disabled_users_cannot_chat(client, db_session):
     user = make_user(db_session, "employee", username="ai_off", capabilities=[])
-    db_session.merge(AiSettings(id=1, enabled=True, base_url="http://x", model="m",
-                                api_key_encrypted=encrypt("k")))
+    enable_ai_provider(db_session)
     db_session.commit()
     response = client.post(
         "/api/ai/chat", json={"message": "سلام"}, headers=auth_header(user)

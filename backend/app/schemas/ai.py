@@ -14,11 +14,31 @@ class AiProviderOption(BaseModel):
     note: str
 
 
+class AiProviderCredentialRead(BaseModel):
+    """اطلاعاتِ ذخیره‌شدهٔ یک سرویس — بدونِ خودِ کلید.
+
+    برای *همهٔ* سرویس‌ها برگردانده می‌شود و نه فقط فعال، چون فرم باید بتواند
+    بگوید کدام‌ها از قبل تنظیم شده‌اند: بدونِ آن، مدیر برای فهمیدنِ اینکه کلید
+    Gemini را قبلاً داده یا نه، باید رویش کلیک کند و امتحان کند.
+    """
+
+    provider: str
+    base_url: str
+    model: str
+    api_key_hint: str
+    api_key_configured: bool
+
+
 class AiSettingsRead(BaseModel):
     enabled: bool
     provider: str
     #: فهرست سرویس‌های آماده، برای ساختن دکمه‌های انتخاب.
     providers: list[AiProviderOption]
+    #: اطلاعاتِ ذخیره‌شدهٔ هر سرویس. سرویس‌های تنظیم‌نشده در این فهرست نیستند.
+    provider_credentials: list[AiProviderCredentialRead]
+    #: چهار فیلد زیر همان اطلاعاتِ سرویسِ *فعال*‌اند و از `provider_credentials`
+    #: بیرون کشیده شده‌اند. تکرارِ عمدی: فرم و آزمونِ اتصال به «الان کدام؟»
+    #: نیاز دارند و محاسبه‌اش (ردیف + پیش‌فرضِ کاتالوگ) کارِ سرور است نه فرانت.
     base_url: str
     model: str
     #: هرگز خودِ کلید — فقط چهار نویسهٔ آخر، تا آدم بشناسدش.
@@ -40,6 +60,10 @@ class AiSettingsRead(BaseModel):
 
 class AiSettingsUpdate(BaseModel):
     enabled: bool | None = None
+    #: سرویسی که از این پس فعال است — و صاحبِ سه فیلدِ بعدی در همین درخواست.
+    #:
+    #: نبودنش یعنی «همان سرویسِ فعالِ کنونی»، پس تغییرِ فقط-رفتاری (دما، سقف
+    #: توکن) هیچ اطلاعاتِ اتصالی را جابه‌جا نمی‌کند.
     provider: str | None = None
     base_url: str | None = None
     model: str | None = None

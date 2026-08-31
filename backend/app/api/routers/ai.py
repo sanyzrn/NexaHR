@@ -41,6 +41,7 @@ from app.schemas.ai import (
     AiMessageRead,
     AiPendingActionRead,
     AiPendingDecisionRequest,
+    AiProviderCredentialRead,
     AiProviderOption,
     AiSettingsRead,
     AiSettingsUpdate,
@@ -54,7 +55,7 @@ from app.schemas.ai import (
     AiUserAccessUpdate,
 )
 from app.schemas.auth import CurrentUser
-from app.services.ai import confirmations
+from app.services.ai import confirmations, credentials
 from app.services.ai.orchestrator import run_turn
 from app.services.ai.port import AiRequestFailed, AiUnavailable
 from app.services.ai.provider import OpenAiCompatibleAdapter
@@ -85,11 +86,17 @@ def _access_row(db: Session, user_id: int) -> AiUserAccess | None:
     return db.scalar(select(AiUserAccess).where(AiUserAccess.user_id == user_id))
 
 
-def _resolve(db: Session, user: CurrentUser) -> tuple[AiSettings, AiUserAccess, str]:
+def _resolve(
+    db: Session, user: CurrentUser
+) -> tuple[AiSettings, AiUserAccess, str, credentials.Credentials]:
     """تنظیمات مؤثر برای همین کاربر، یا یک خطای *قابل اقدام*.
 
     سه حالت جدا نگه داشته می‌شوند چون در کد یکی به‌نظر می‌رسند و برای کاربر
     کاملاً فرق دارند: «راه‌اندازی نشده»، «برای شما روشن نیست»، «کلید ندارد».
+
+    اطلاعاتِ اتصال هم برمی‌گردد و نه فقط کلید: از وقتی هر سرویس ردیفِ خودش را
+    دارد، آدرس و نام مدل هم دیگر روی `config` نیستند و محاسبه‌شان یک جا باید
+    بماند (`services/ai/credentials.py`).
     """
     config = _settings_row(db)
     if not config.enabled:
@@ -102,20 +109,26 @@ def _resolve(db: Session, user: CurrentUser) -> tuple[AiSettings, AiUserAccess, 
             "دستیار هوشمند برای حساب شما فعال نشده است. از مدیر سامانه بخواهید فعالش کند.",
         )
 
-    api_key = decrypt(access.api_key_encrypted) or decrypt(config.api_key_encrypted)
+    creds = credentials.active(db, config)
+    api_key = decrypt(access.api_key_encrypted) or creds.api_key
     if not api_key:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "کلید سرویس هوش مصنوعی تنظیم نشده است. مدیر سامانه باید آن را در پنل مدیریت وارد کند.",
         )
-    return config, access, api_key
+    return config, access, api_key, creds
 
 
-def _adapter(config: AiSettings, access: AiUserAccess, api_key: str) -> OpenAiCompatibleAdapter:
+def _adapter(
+    config: AiSettings,
+    access: AiUserAccess,
+    api_key: str,
+    creds: credentials.Credentials,
+) -> OpenAiCompatibleAdapter:
     return OpenAiCompatibleAdapter(
-        base_url=config.base_url,
+        base_url=creds.base_url,
         api_key=api_key,
-        model=access.model or config.model,
+        model=access.model or creds.model,
         timeout_seconds=config.timeout_seconds,
         temperature=config.temperature / 100,
         max_tokens=config.max_tokens,
@@ -149,9 +162,11 @@ def ai_status(
             reason="دستیار برای حساب شما فعال نشده است",
             allow_write_actions=False,
         )
-    if not (decrypt(access.api_key_encrypted) or decrypt(config.api_key_encrypted)):
+    if not (decrypt(access.api_key_encrypted) or credentials.active(db, config).api_key):
         return AiStatus(
-            available=False, reason="کلید سرویس تنظیم نشده است", allow_write_actions=False
+            available=False,
+            reason="کلید سرویس تنظیم نشده است",
+            allow_write_actions=False,
         )
     return AiStatus(
         available=True,
@@ -360,7 +375,7 @@ async def upload_attachment(
     هیچ ردیفی ساخته نمی‌شود؛ فقط فایل ذخیره و با اعتبارسنجیِ رسمی خوانده
     می‌شود تا دستیار بتواند خطاها را توضیح بدهد و مسیرِ درست‌کردن را بپرسد.
     """
-    config, access, _ = _resolve(db, user)
+    config, access, _, _ = _resolve(db, user)
     if not config.allow_uploads:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "بارگذاری فایل در دستیار فعال نیست")
     convo = _own_conversation(db, conversation_id, user)
@@ -407,7 +422,7 @@ async def chat(
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ) -> AiChatResponse:
-    config, access, api_key = _resolve(db, user)
+    config, access, api_key, creds = _resolve(db, user)
 
     text = (payload.message or "").strip()
     if not text:
@@ -457,8 +472,8 @@ async def chat(
             conversation=convo,
             config=config,
             api_key=api_key,
-            access_model=access.model or config.model,
-            adapter_factory=lambda: _adapter(config, access, api_key),
+            access_model=access.model or creds.model,
+            adapter_factory=lambda: _adapter(config, access, api_key, creds),
             user_text=text,
             allow_writes=allow_writes,
             user_message_id=user_message.id,
@@ -507,7 +522,7 @@ def confirm_pending(
 
     همه‌چیز از نو اعتبارسنجی می‌شود: مالکیت، انقضا، مجوزِ امروز، آرگومان‌ها.
     """
-    config, access, _ = _resolve(db, user)
+    config, access, _, _ = _resolve(db, user)
     row, summary = confirmations.confirm(db, user=user, pending_id=pending_id, config=config, access=access)
     return AiChatResponse(
         conversation_id=row.conversation_id,
@@ -577,7 +592,9 @@ def list_pending(
 # ── مدیریت ────────────────────────────────────────────────────────────────
 
 
-def _to_settings_read(row: AiSettings) -> AiSettingsRead:
+def _to_settings_read(db: Session, row: AiSettings) -> AiSettingsRead:
+    stored = credentials.rows_by_provider(db)
+    live = credentials.active(db, row)
     return AiSettingsRead(
         enabled=row.enabled,
         provider=row.provider,
@@ -588,10 +605,27 @@ def _to_settings_read(row: AiSettings) -> AiSettingsRead:
             )
             for p in PROVIDERS
         ],
-        base_url=row.base_url,
-        model=row.model,
-        api_key_hint=masked(row.api_key_encrypted),
-        api_key_configured=bool(decrypt(row.api_key_encrypted)),
+        # همهٔ سرویس‌های تنظیم‌شده، تا فرم بتواند بگوید کدام‌ها کلید دارند.
+        # ترتیبِ کاتالوگ و نه ترتیبِ دیتابیس، تا با دکمه‌های انتخاب یکی باشد.
+        provider_credentials=[
+            AiProviderCredentialRead(
+                provider=c.provider,
+                base_url=c.base_url,
+                model=c.model,
+                api_key_hint=masked(c.api_key_encrypted),
+                api_key_configured=bool(decrypt(c.api_key_encrypted)),
+            )
+            for c in sorted(
+                stored.values(),
+                key=lambda c: next(
+                    (i for i, p in enumerate(PROVIDERS) if p.id == c.provider), len(PROVIDERS)
+                ),
+            )
+        ],
+        base_url=live.base_url,
+        model=live.model,
+        api_key_hint=masked(live.api_key_encrypted),
+        api_key_configured=bool(live.api_key),
         temperature=row.temperature,
         max_tokens=row.max_tokens,
         timeout_seconds=row.timeout_seconds,
@@ -611,7 +645,7 @@ def read_settings(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(_admin),
 ) -> AiSettingsRead:
-    return _to_settings_read(_settings_row(db))
+    return _to_settings_read(db, _settings_row(db))
 
 
 @router.put("/settings", response_model=AiSettingsRead)
@@ -622,7 +656,12 @@ def update_settings(
 ) -> AiSettingsRead:
     row = _settings_row(db)
     data = payload.model_dump(exclude_unset=True)
+
+    # این سه به *سرویس* تعلق دارند و نه به تنظیماتِ سراسری، پس از `data` جدا
+    # می‌شوند تا در حلقهٔ setattr پایین به `AiSettings` نچسبند.
     api_key = data.pop("api_key", None)
+    base_url = data.pop("base_url", None)
+    model = data.pop("model", None)
 
     # سرویسِ ناشناخته رد می‌شود و به «سفارشی» نمی‌افتد: افتادنِ خاموش یعنی
     # فرم چیزی را ذخیره کند که کاربر انتخاب نکرده.
@@ -631,19 +670,34 @@ def update_settings(
 
     for key, value in data.items():
         setattr(row, key, value)
-    if api_key is not None:
-        row.api_key_encrypted = encrypt(api_key.strip())
 
-    # کلید در لاگ نمی‌آید — فقط اینکه *عوض شد*.
+    # هدف = سرویسی که در همین درخواست آمده، وگرنه سرویسِ فعال. یعنی تغییرِ
+    # فقط-رفتاری (دما، سقف توکن) هیچ اطلاعاتِ اتصالی را جابه‌جا نمی‌کند.
+    target = data.get("provider") or row.provider
+    creds = credentials.row_for(db, target)
+    if base_url is not None:
+        creds.base_url = base_url.strip()
+    if model is not None:
+        creds.model = model.strip()
+    if api_key is not None:
+        creds.api_key_encrypted = encrypt(api_key.strip())
+
+    # کلید در لاگ نمی‌آید — فقط اینکه *عوض شد*، و برای کدام سرویس.
     log_event(
         db,
         actor_user_id=current_user.id,
         event_type="ai_settings_changed",
-        new_value={"keys": sorted(data), "api_key_changed": api_key is not None},
+        new_value={
+            "keys": sorted(data),
+            "provider": target,
+            "api_key_changed": api_key is not None,
+            "base_url_changed": base_url is not None,
+            "model_changed": model is not None,
+        },
     )
     db.commit()
     db.refresh(row)
-    return _to_settings_read(row)
+    return _to_settings_read(db, row)
 
 
 @router.post("/settings/test", response_model=AiTestResult)
@@ -658,10 +712,14 @@ async def test_connection(
     می‌داند خودِ سرویس است. پس «اتصال ناموفق» نه — متنِ او.
     """
     row = _settings_row(db)
+    # آزمون روی *فرمِ باز* اجرا می‌شود: هر چه در فرم پر است می‌بَرد، و هر چه
+    # نیست از سرویسِ فعال. پس مدیر می‌تواند کلیدِ تازه را پیش از ذخیره امتحان
+    # کند — همان کاری که آدم با یک کلیدِ کپی‌شده می‌خواهد بکند.
+    live = credentials.active(db, row)
     adapter = OpenAiCompatibleAdapter(
-        base_url=payload.base_url or row.base_url,
-        api_key=(payload.api_key or "").strip() or decrypt(row.api_key_encrypted),
-        model=payload.model or row.model,
+        base_url=payload.base_url or live.base_url,
+        api_key=(payload.api_key or "").strip() or live.api_key,
+        model=payload.model or live.model,
         timeout_seconds=min(row.timeout_seconds, 30),
         max_tokens=32,
     )

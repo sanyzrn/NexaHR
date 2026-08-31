@@ -38,10 +38,10 @@ def _workbook(rows: list[list]) -> bytes:
 
 
 def _enable_ai(db, user) -> None:
-    from app.core.crypto import encrypt
-    from app.models.ai import AiSettings, AiUserAccess
+    from app.models.ai import AiUserAccess
+    from tests.helpers import enable_ai_provider
 
-    db.merge(AiSettings(id=1, enabled=True, base_url="http://x", model="m", api_key_encrypted=encrypt("k")))
+    enable_ai_provider(db)
     db.add(AiUserAccess(user_id=user.id, enabled=True))
     db.commit()
 
