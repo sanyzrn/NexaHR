@@ -16,6 +16,7 @@ import type {
 } from "../../types";
 import { Markdown } from "./Markdown";
 import { PendingActionCard, StepTrace, UploadCard } from "./Cards";
+import { Mascot, MascotFace } from "./Mascot";
 
 /**
  * سطحِ گفت‌وگوی همکار — بین پنجرهٔ شناور و صفحهٔ کامل مشترک است.
@@ -340,8 +341,8 @@ export function CopilotPanel({
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-4 py-3">
-          <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-sm">
-            <SparkIcon className="h-4 w-4" />
+          <span className="relative flex h-8 w-8 items-center justify-center rounded-xl bg-pulse-50 shadow-sm">
+            <MascotFace className="h-5 w-5" />
             {/* نقطهٔ وضعیت: در دسترس بودن باید *دیده* شود، نه اینکه کاربر با
                 فرستادنِ یک پیام و ندیدنِ پاسخ کشفش کند. */}
             <span
@@ -533,9 +534,9 @@ function Avatar({ mine, label }: { mine: boolean; label: string }) {
   return (
     <span
       aria-hidden
-      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-sm"
+      className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-pulse-50 shadow-sm"
     >
-      <SparkIcon className="h-3.5 w-3.5" />
+      <MascotFace className="h-4.5 w-4.5" />
     </span>
   );
 }
@@ -659,15 +660,17 @@ function Welcome({
       transition={{ duration: 0.35, ease: EASE_SOFT }}
       className="flex flex-col items-center px-1 py-6 text-center"
     >
-      <span className="relative mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-pulse-500 to-pulse-700 text-white shadow-float">
+      {/* این‌جا فضا هست، پس کلِ شخصیت می‌آید و نه فقط سرش — اولین باری که کاربر
+          پنل را باز می‌کند، همان جایی است که باید بفهمد با که طرف است. */}
+      <span className="relative mb-4 flex h-20 w-20 items-center justify-center">
         {/* هالهٔ نرمِ نبض — همان حرکتی که در نشانِ برند هست */}
         <motion.span
           aria-hidden
-          className="absolute inset-0 rounded-2xl bg-pulse-500"
-          animate={{ opacity: [0.35, 0, 0.35], scale: [1, 1.35, 1] }}
+          className="absolute inset-2 rounded-full bg-pulse-300"
+          animate={{ opacity: [0.3, 0, 0.3], scale: [1, 1.3, 1] }}
           transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
         />
-        <SparkIcon className="relative h-6 w-6" />
+        <Mascot className="relative h-20 w-20" />
       </span>
 
       <h3 className="text-base font-bold text-gray-900">همکارِ شما در NexaHR</h3>
@@ -716,23 +719,5 @@ function Welcome({
         </div>
       )}
     </motion.div>
-  );
-}
-
-export function SparkIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M10 2.5l1.7 4.3 4.3 1.7-4.3 1.7L10 14.5l-1.7-4.3L4 8.5l4.3-1.7L10 2.5z" />
-      <path d="M15.5 13.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8.8-1.9z" />
-    </svg>
   );
 }

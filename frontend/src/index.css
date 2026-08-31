@@ -79,6 +79,73 @@
   50% { opacity: 0.6; }
 }
 
+/* ── نشانِ همکار هوشمند (components/copilot/Mascot.tsx) ──────────────────
+   انیمیشنِ بی‌وقفه، پس CSS خالص و نه Framer Motion: نباید در هر رندرِ React
+   دوباره ساخته شود. قاعدهٔ `prefers-reduced-motion` پایینِ همین فایل همه‌شان را
+   با هم خاموش می‌کند.
+
+   هر سه حرکت عمداً *کند و کم‌دامنه*اند. چیزی که همیشه گوشهٔ صفحه است و تند
+   تکان می‌خورد، از چند دقیقه بعد آزاردهنده می‌شود؛ این باید در حاشیهٔ دید
+   «زنده» به‌نظر برسد، نه اینکه توجه را بدزدد. */
+
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+
+/* پلک: ۹۵٪ زمان باز. یک پلکِ منظمِ ریتمیک مصنوعی به‌نظر می‌رسد، پس دو پلک با
+   فاصلهٔ نامساوی در یک دورهٔ بلند می‌زند. */
+@keyframes mascot-blink {
+  0%, 46%, 52%, 88%, 93%, 100% { transform: scaleY(1); }
+  49%, 90.5% { transform: scaleY(0.15); }
+}
+
+@keyframes mascot-spark {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.82); }
+}
+
+.mascot .mascot-body,
+.mascot .mascot-antenna {
+  animation: mascot-float 3.4s ease-in-out infinite;
+}
+
+/* سر کمی دیرتر از تنه حرکت می‌کند — همان تأخیرِ ریزی که حرکت را از «کلِ تصویر
+   بالا و پایین می‌رود» به «نفس می‌کشد» تبدیل می‌کند. */
+.mascot .mascot-head {
+  animation: mascot-float 3.4s ease-in-out infinite;
+  animation-delay: -0.35s;
+}
+
+.mascot .mascot-eyes {
+  animation: mascot-blink 7s ease-in-out infinite;
+  /* بدونِ این، مقیاسِ پلک از گوشهٔ بالا-چپِ SVG اعمال می‌شود و چشم‌ها
+     به‌جای بسته‌شدن، به گوشه پرت می‌شوند. */
+  transform-origin: center 60%;
+  transform-box: fill-box;
+}
+
+.mascot .mascot-spark {
+  animation: mascot-spark 2.6s ease-in-out infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+/* دستِ تکان‌دادن، فقط وقتی نشانگر روی دکمه است: سلامِ کوتاه در پاسخ به
+   نزدیک‌شدنِ کاربر، نه یک حرکتِ همیشگیِ دیگر. */
+@keyframes mascot-wave {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-18deg); }
+  75% { transform: rotate(10deg); }
+}
+
+.mascot-host:hover .mascot .mascot-arm,
+.mascot-host:focus-visible .mascot .mascot-arm {
+  animation: mascot-wave 0.7s ease-in-out 2;
+  transform-origin: center 15%;
+  transform-box: fill-box;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    CSS Custom Properties (non-@theme, available everywhere)
    ═══════════════════════════════════════════════════════════════════════ */

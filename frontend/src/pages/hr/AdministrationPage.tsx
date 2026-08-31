@@ -974,6 +974,7 @@ function OrgUnitsCard() {
  *  می‌بیند؛ کاربرِ دستیار — مثلاً معاونت — فقط پنجرهٔ گفت‌وگو را دارد.
  */
 function AiCard() {
+  const { user } = useAuth();
   const { showSuccess, showError } = useToast();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<Partial<AiSettings> & { api_key?: string }>({});
@@ -992,6 +993,16 @@ function AiCard() {
 
   const value = { ...(data ?? {}), ...draft } as AiSettings & { api_key?: string };
   const dirty = Object.keys(draft).length > 0;
+
+  // کلیدِ سراسری روشن است ولی دسترسیِ *فردی* داده نشده — تلهٔ همیشگیِ این صفحه.
+  // نبودِ ردیف در `ai_user_access` یعنی «دسترسی ندارد»، پس روشن‌کردنِ کلیدِ بالا
+  // به‌تنهایی برای هیچ‌کس هیچ‌چیز را عوض نمی‌کند و کاربر فقط می‌بیند که دکمهٔ
+  // همکار همچنان نیست. این‌جا همان‌جایی است که او ایستاده، پس همین‌جا گفته
+  // می‌شود — نه در مستندات و نه با یک دکمهٔ مرده در گوشهٔ صفحه.
+  const grantedCount = access.filter((row) => row.enabled).length;
+  // `user` تا پیش از رسیدنِ /me نال است؛ آن لحظه هنوز `access` هم خالی است،
+  // پس هیچ هشداری ساخته نمی‌شود و مقایسه فقط باید امن بماند.
+  const myAccess = access.find((row) => row.user_id === user?.id);
 
   function set<K extends keyof typeof value>(key: K, next: (typeof value)[K]) {
     setDraft((prev) => ({ ...prev, [key]: next }));
@@ -1031,7 +1042,10 @@ function AiCard() {
   async function setAccess(row: AiUserAccess, patch: Record<string, unknown>) {
     try {
       await apiClient.put(`/ai/access/${row.user_id}`, patch);
-      await queryClient.invalidateQueries({ queryKey: ["ai", "access"] });
+      // کلِ شاخهٔ `ai` و نه فقط `["ai","access"]`: تطبیقِ کلید پیشوندی است، پس
+      // `["ai","status"]` — همان چیزی که بود و نبودِ دکمهٔ همکار به آن بند است —
+      // با کلیدِ باریک‌تر تازه نمی‌شود و دسترسیِ تازه تا رفرشِ بعدی دیده نمی‌شد.
+      await queryClient.invalidateQueries({ queryKey: ["ai"] });
     } catch (err) {
       showError(extractErrorMessage(err));
     }
@@ -1062,6 +1076,32 @@ function AiCard() {
         />
         دستیار در این سامانه فعال باشد
       </label>
+
+      {value.enabled && !dirty && access.length > 0 && grantedCount === 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+          کلید سراسری روشن است، ولی هنوز <b>هیچ حسابی</b> دستیار ندارد — پس دکمهٔ همکار برای
+          هیچ‌کس دیده نمی‌شود. دسترسی را در بخش «چه کسی دستیار دارد» پایینِ همین کارت بدهید.
+        </div>
+      )}
+
+      {value.enabled && !dirty && grantedCount > 0 && !myAccess?.enabled && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+          <span>
+            دستیار برای {grantedCount.toLocaleString("fa-IR")} حساب فعال است، ولی{" "}
+            <b>حساب خودتان جزوشان نیست</b> — به همین دلیل دکمهٔ همکار را نمی‌بینید.
+          </span>
+          <span className="flex-1" />
+          {myAccess && (
+            <Button
+              variant="secondary"
+              className="text-xs"
+              onClick={() => void setAccess(myAccess, { enabled: true })}
+            >
+              به حساب خودم هم بده
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* انتخاب سرویس: یک کلیک، آدرس و یک مدلِ پیش‌فرضِ سالم.
           نیمی از مشکلات راه‌اندازی یک `/v1` جامانده در آدرس بود. */}
