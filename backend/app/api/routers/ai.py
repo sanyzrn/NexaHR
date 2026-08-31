@@ -58,7 +58,7 @@ from app.schemas.auth import CurrentUser
 from app.services.ai import confirmations, credentials
 from app.services.ai.orchestrator import run_turn
 from app.services.ai.port import AiRequestFailed, AiUnavailable
-from app.services.ai.provider import OpenAiCompatibleAdapter
+from app.services.ai.provider import OpenAiCompatibleAdapter, clean_secret
 from app.services.ai.tools import base as tools_base
 from app.services.audit import log_event
 from app.services.authorization import capabilities_of
@@ -680,7 +680,9 @@ def update_settings(
     if model is not None:
         creds.model = model.strip()
     if api_key is not None:
-        creds.api_key_encrypted = encrypt(api_key.strip())
+        # همان پاکسازیِ آداپتور، سرِ *ذخیره*: نویسهٔ نامرئی‌ای که با کپی وارد
+        # شده نباید در دیتابیس بنشیند و هر بار سرِ درخواست پاک شود.
+        creds.api_key_encrypted = encrypt(clean_secret(api_key))
 
     # کلید در لاگ نمی‌آید — فقط اینکه *عوض شد*، و برای کدام سرویس.
     log_event(
@@ -790,7 +792,7 @@ def update_access(
     for key, value in data.items():
         setattr(access, key, value)
     if api_key is not None:
-        access.api_key_encrypted = encrypt(api_key.strip())
+        access.api_key_encrypted = encrypt(clean_secret(api_key))
 
     log_event(
         db,
