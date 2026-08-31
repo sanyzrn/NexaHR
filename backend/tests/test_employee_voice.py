@@ -428,9 +428,14 @@ def test_the_self_assessment_never_enters_the_result(client, db_session):
     assert final["final_weighted_pct"] == 60.0, "خودارزیابی نباید در میانگین اثر بگذارد"
 
 
-def test_self_assessment_visibility_defaults_to_hr_only_and_can_enable_the_evaluator(
-    client, db_session
-):
+def test_only_hr_ever_sees_a_self_assessment(client, db_session):
+    """قاعده، نه تنظیم: مسئول مستقیم هیچ‌وقت نمی‌بیند — نه پیش از ثبتِ نمره‌اش، نه بعدش.
+
+    پیش از این سه سوییچِ پنل مدیریت بود (پیش‌فرض خاموش) به‌علاوهٔ گاردی زمانی که
+    اجازه می‌داد نمره‌دهنده *پس از* قفل‌شدنِ نمرهٔ خودش ببیند. هر دو برداشته شدند:
+    به کارمند گفته می‌شود «فقط شما و منابع انسانی»، و سوییچی که یک نفر می‌تواند
+    بی‌سروصدا روشنش کند، آن جمله را از یک تضمین به یک تنظیم تبدیل می‌کند.
+    """
     case = _case(client, db_session, finalize=False)
     client.post(
         f"/api/evaluations/{case['id']}/return",
@@ -443,39 +448,24 @@ def test_self_assessment_visibility_defaults_to_hr_only_and_can_enable_the_evalu
         headers=auth_header(case["employee"]),
     )
 
-    supervisor_detail = client.get(
-        f"/api/evaluations/{case['id']}", headers=auth_header(case["sup"])
-    ).json()
-    hr_detail = client.get(
-        f"/api/evaluations/{case['id']}", headers=auth_header(case["hr"])
-    ).json()
+    def detail(token):
+        return client.get(f"/api/evaluations/{case['id']}", headers=auth_header(token)).json()
 
-    assert supervisor_detail["self_assessment"] is None
-    assert hr_detail["self_assessment"] is not None
-    assert len(hr_detail["self_assessment"]["scores"]) == 20
+    # پیش از ثبتِ نمرهٔ ارزیاب
+    assert detail(case["sup"])["self_assessment"] is None
+    hr_view = detail(case["hr"])
+    assert hr_view["self_assessment"] is not None
+    assert len(hr_view["self_assessment"]["scores"]) == 20
 
-    original = settings.self_assessment_visible_to_unit_supervisor
-    try:
-        settings.self_assessment_visible_to_unit_supervisor = True
-
-        # روشن‌بودنِ سوییچ کافی نیست: پرونده هنوز در `draft` است، یعنی سرِ میزِ
-        # نمره‌دهی. دیدنِ نمرهٔ خودِ فرد در این لحظه دیدگاهِ دوم نیست، لنگر است.
-        still_hidden = client.get(
-            f"/api/evaluations/{case['id']}", headers=auth_header(case["sup"])
-        ).json()
-        assert still_hidden["self_assessment"] is None
-
-        # پس از ثبتِ نمره، نمره قفل است و دیدنش دیگر لنگر نیست — همان‌جا که
-        # گفت‌وگو دربارهٔ فاصله‌ها ممکن می‌شود.
-        client.post(f"/api/evaluations/{case['id']}/submit", headers=auth_header(case["sup"]))
-        enabled_detail = client.get(
-            f"/api/evaluations/{case['id']}", headers=auth_header(case["sup"])
-        ).json()
-        assert enabled_detail["self_assessment"]["scores"][0]["score"] == 5
-        # و امتیاز خود ارزیاب جداگانه سر جایش است
-        assert enabled_detail["scores"][0]["score"] == 3
-    finally:
-        settings.self_assessment_visible_to_unit_supervisor = original
+    # و پس از آن هم — این همان چیزی است که گاردِ زمانیِ قدیمی باز می‌کرد
+    client.post(
+        f"/api/evaluations/{case['id']}/scores",
+        json=full_valid_scores(db_session),
+        headers=auth_header(case["sup"]),
+    )
+    client.post(f"/api/evaluations/{case['id']}/submit", headers=auth_header(case["sup"]))
+    assert detail(case["sup"])["self_assessment"] is None
+    assert detail(case["ceo"])["self_assessment"] is None
 
 
 def test_a_case_without_a_self_assessment_is_perfectly_normal(client, db_session):
@@ -522,7 +512,7 @@ def test_the_window_closes_once_the_evaluator_has_scored(client, db_session):
     )
 
     assert r.status_code == 400
-    assert "مهلت خودارزیابی" in r.json()["detail"]
+    assert "پنجرهٔ خودارزیابی بسته است" in r.json()["detail"]
 
 
 def _self_assessment_notes(client, user):
@@ -552,29 +542,26 @@ def test_no_notification_when_the_scorer_is_not_allowed_to_see_it(client, db_ses
     assert _self_assessment_notes(client, case["sup"]) == []
 
 
-def test_submitting_notifies_the_first_scorer_when_they_may_see_it(client, db_session):
+def test_submitting_never_notifies_the_scorer(client, db_session):
+    """حذفِ عمدیِ یک اعلان.
+
+    تا وقتی نمره‌دهنده روزی خودارزیابی را می‌دید، خبردادن معنا داشت. حالا هرگز
+    نمی‌بیند، پس آن اعلان فقط می‌گفت «چیزی هست که نخواهی دید» — و بدتر، به او
+    خبر می‌داد کارمند دربارهٔ خودش چه فکری کرده، درست سرِ میزِ نمره‌دهی.
+    """
     case = _case(client, db_session, finalize=False)
     client.post(
         f"/api/evaluations/{case['id']}/return",
         json={"reason": "بازگشت"},
         headers=auth_header(case["hr"]),
     )
+    client.post(
+        f"/api/me/evaluations/{case['id']}/self-assessment",
+        json=_indicator_payload(db_session, 4),
+        headers=auth_header(case["employee"]),
+    )
 
-    original = settings.self_assessment_visible_to_unit_supervisor
-    try:
-        settings.self_assessment_visible_to_unit_supervisor = True
-        client.post(
-            f"/api/me/evaluations/{case['id']}/self-assessment",
-            json=_indicator_payload(db_session, 4),
-            headers=auth_header(case["employee"]),
-        )
-    finally:
-        settings.self_assessment_visible_to_unit_supervisor = original
-
-    rows = _self_assessment_notes(client, case["sup"])
-    assert rows, "نمره‌دهنده باید خبردار شود"
-    # متن باید زمانِ دیدن را هم بگوید، وگرنه دنبالِ چیزی می‌گردد که هنوز پنهان است
-    assert "پس از ثبتِ نمرهٔ شما" in rows[0]["message"]
+    assert _self_assessment_notes(client, case["sup"]) == []
 
 
 def test_an_employee_cannot_self_assess_someone_elses_record(client, db_session):
@@ -611,7 +598,7 @@ def test_the_window_does_not_reopen_after_hr_approval(client, db_session):
     )
 
     assert r.status_code == 400
-    assert "مهلت خودارزیابی" in r.json()["detail"]
+    assert "پنجرهٔ خودارزیابی بسته است" in r.json()["detail"]
 
 
 def test_the_open_case_says_whether_the_window_is_open(client, db_session):

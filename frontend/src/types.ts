@@ -164,6 +164,11 @@ export type EvaluationStatus =
 
 export interface EvaluationRecord {
   id: number;
+  /** آخرین روزِ مهلتِ ثبت — پایانِ دوره، یا تمدیدی که منابع انسانی داده.
+   *  `null` یعنی این پرونده به دوره‌ای وصل نیست و مهلتی ندارد. */
+  submission_deadline?: string | null;
+  submission_deadline_extended?: boolean;
+  submission_extension_reason?: string | null;
   evaluation_code: string;
   subject_personnel_id: number;
   subject_full_name: string;
@@ -229,8 +234,16 @@ export interface MyOpenEvaluation {
   stage_label: string;
   /** شاخص‌های همین پرونده (P1-05) — فرم خودارزیابی از روی این ساخته می‌شود. */
   indicator_ids: number[];
-  /** آیا پنجرهٔ خودارزیابی هنوز باز است — سرور تصمیم می‌گیرد، نه فرانت. */
+  /** آیا پنجرهٔ خودارزیابی هنوز باز است — سرور تصمیم می‌گیرد، نه فرانت.
+   *
+   * سه شرط را با هم می‌سنجد: نقش خودارزیابی داشته باشد، پرونده در مرحلهٔ ثبت
+   * باشد، و مهلت دوره نگذشته باشد.
+   */
   self_assessment_open: boolean;
+  /** آخرین روز مهلت ثبت. `null` یعنی این پرونده به دوره‌ای وصل نیست. */
+  submission_deadline: string | null;
+  /** آیا این مهلت از تمدید منابع انسانی آمده. */
+  submission_deadline_extended: boolean;
 }
 
 export interface SelfAssessmentScoreRow {

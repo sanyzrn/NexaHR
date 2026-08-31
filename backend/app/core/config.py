@@ -112,12 +112,12 @@ class Settings(BaseSettings):
     sla_reminder_days: int = 3
     # چند روز مانده به تاریخ بازنگری برنامه بهبود، به HR و مسئول پیگیری یادآوری شود
     improvement_review_alert_days: int = 7
-    # دیدنِ خودارزیابی یک سیاست محرمانگیِ نقش‌محور است. پیش‌فرض فقط HR است؛
-    # نقش‌های تصمیم‌گیر صرفاً وقتی می‌بینند که مدیر سامانه صریحاً روشن کند.
-    self_assessment_visible_to_hr: bool = True
-    self_assessment_visible_to_unit_supervisor: bool = False
-    self_assessment_visible_to_deputy: bool = False
-    self_assessment_visible_to_ceo: bool = False
+    # دیدنِ خودارزیابی دیگر تنظیم نیست، قاعده است — و عمداً:
+    # `services/self_assessment.VIEWER_ROLES`. چهار سوییچِ قبلی (‏hr / مسئول واحد /
+    # معاونت / مدیرعامل) از این‌جا برداشته شدند. به کارمند گفته می‌شود
+    # «خودارزیابی‌ات را فقط خودت و منابع انسانی می‌بینند»، و سوییچی که یک نفر
+    # می‌تواند بی‌سروصدا روشنش کند، آن جمله را از یک تضمین به یک تنظیم تبدیل
+    # می‌کند — بدون آن‌که کارمند هیچ‌وقت خبردار شود.
     # پنجره‌ای که در آن یک اعلانِ تکراری (همان کلید) دوباره ساخته نمی‌شود
     notification_dedup_days: int = 7
 
