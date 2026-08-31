@@ -25,7 +25,6 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
-from app.core.crypto import encrypt
 from app.models.ai import AiPendingAction, AiSettings, AiUserAccess
 from app.models.enums import Capability, EvaluationStatus, SchemeStatus
 from app.models.evaluation import EvaluationRecord
@@ -35,7 +34,13 @@ from app.services.ai import confirmations
 from app.services.ai.tools import base as tools_base
 from app.services.ai.tools.base import ToolContext, execute_tool
 from app.services.scoring_scheme import activate, next_version
-from tests.helpers import auth_header, make_access, make_personnel, make_user
+from tests.helpers import (
+    auth_header,
+    enable_ai_provider,
+    make_access,
+    make_personnel,
+    make_user,
+)
 
 # ── ابزارهای کمکیِ همین فایل ────────────────────────────────────────────────
 
@@ -106,15 +111,7 @@ def _personnel_marker_exists(db) -> bool:
 
 
 def _enable_ai(db, user) -> tuple[AiSettings, AiUserAccess]:
-    db.merge(
-        AiSettings(
-            id=1,
-            enabled=True,
-            base_url="http://x",
-            model="m",
-            api_key_encrypted=encrypt("k"),
-        )
-    )
+    enable_ai_provider(db)
     access = AiUserAccess(user_id=user.id, enabled=True)
     db.add(access)
     db.flush()

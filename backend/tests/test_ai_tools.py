@@ -164,15 +164,7 @@ def test_confirm_runs_the_real_action_and_writes_an_assistant_message(client, db
     from app.models.personnel import Personnel
 
     hr = make_user(db_session, "hr", username="tool_cf", capabilities=[Capability.manage_personnel])
-    db_session.merge(
-        __import__("app.models.ai", fromlist=["AiSettings"]).AiSettings(
-            id=1,
-            enabled=True,
-            base_url="http://x",
-            model="m",
-            api_key_encrypted=__import__("app.core.crypto", fromlist=["encrypt"]).encrypt("k"),
-        )
-    )
+    __import__("tests.helpers", fromlist=["enable_ai_provider"]).enable_ai_provider(db_session)
     db_session.add(__import__("app.models.ai", fromlist=["AiUserAccess"]).AiUserAccess(user_id=hr.id, enabled=True))
     row = _make_pending(db_session, hr)
     code = json.loads(row.arguments_json)["personnel_code"]
@@ -199,15 +191,7 @@ def test_reject_leaves_no_trace_in_data(client, db_session):
     from app.models.personnel import Personnel
 
     hr = make_user(db_session, "hr", username="tool_rj", capabilities=[Capability.manage_personnel])
-    db_session.merge(
-        __import__("app.models.ai", fromlist=["AiSettings"]).AiSettings(
-            id=1,
-            enabled=True,
-            base_url="http://x",
-            model="m",
-            api_key_encrypted=__import__("app.core.crypto", fromlist=["encrypt"]).encrypt("k"),
-        )
-    )
+    __import__("tests.helpers", fromlist=["enable_ai_provider"]).enable_ai_provider(db_session)
     db_session.add(__import__("app.models.ai", fromlist=["AiUserAccess"]).AiUserAccess(user_id=hr.id, enabled=True))
     db_session.commit()
     row = _make_pending(db_session, hr)
@@ -221,15 +205,7 @@ def test_reject_leaves_no_trace_in_data(client, db_session):
 
 def test_expired_pending_is_declined(client, db_session):
     hr = make_user(db_session, "hr", username="tool_exp", capabilities=[Capability.manage_personnel])
-    db_session.merge(
-        __import__("app.models.ai", fromlist=["AiSettings"]).AiSettings(
-            id=1,
-            enabled=True,
-            base_url="http://x",
-            model="m",
-            api_key_encrypted=__import__("app.core.crypto", fromlist=["encrypt"]).encrypt("k"),
-        )
-    )
+    __import__("tests.helpers", fromlist=["enable_ai_provider"]).enable_ai_provider(db_session)
     db_session.add(__import__("app.models.ai", fromlist=["AiUserAccess"]).AiUserAccess(user_id=hr.id, enabled=True))
     db_session.commit()
     row = _make_pending(
@@ -244,15 +220,7 @@ def test_expired_pending_is_declined(client, db_session):
 def test_someone_elses_pending_is_not_found(client, db_session):
     owner = make_user(db_session, "hr", username="tool_owner", capabilities=[Capability.manage_personnel])
     stranger = make_user(db_session, "hr", username="tool_stranger", capabilities=[Capability.manage_personnel])
-    db_session.merge(
-        __import__("app.models.ai", fromlist=["AiSettings"]).AiSettings(
-            id=1,
-            enabled=True,
-            base_url="http://x",
-            model="m",
-            api_key_encrypted=__import__("app.core.crypto", fromlist=["encrypt"]).encrypt("k"),
-        )
-    )
+    __import__("tests.helpers", fromlist=["enable_ai_provider"]).enable_ai_provider(db_session)
     db_session.add(
         __import__("app.models.ai", fromlist=["AiUserAccess"]).AiUserAccess(user_id=stranger.id, enabled=True)
     )

@@ -152,12 +152,10 @@ def _enable_ai(db, user):
 
 
 def _enable_globally(db):
-    from app.core.crypto import encrypt
-    from app.models.ai import AiSettings
-    db.merge(AiSettings(id=1, enabled=True, allow_write_actions=True,
-                        base_url="http://127.0.0.1:1", model="m",
-                        api_key_encrypted=encrypt("k")))
-    db.flush()
+    from tests.helpers import enable_ai_provider
+
+    # آدرسِ بسته و عمدی: این فایل گاردها را می‌سنجد، نه یک تماسِ موفق.
+    enable_ai_provider(db, base_url="http://127.0.0.1:1", allow_write_actions=True)
 
 
 def test_one_user_cannot_confirm_another_users_pending_action(client, db_session):

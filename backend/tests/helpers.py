@@ -107,3 +107,34 @@ def active_indicators(db: Session) -> list[Indicator]:
 def full_valid_scores(indicators: list[Indicator]) -> list[dict]:
     """امتیاز ۳ برای همه (بدون نیاز به شواهد) — برای عبور سریع از قانون اعتبارسنجی."""
     return [{"indicator_id": ind.id, "score": 3} for ind in indicators]
+
+
+def enable_ai_provider(
+    db: Session,
+    *,
+    provider: str = "custom",
+    base_url: str = "http://x",
+    model: str = "m",
+    api_key: str = "k",
+    **settings_kwargs,
+) -> None:
+    """دستیار را سراسری روشن کن و اطلاعاتِ اتصالِ یک سرویس را بگذار.
+
+    از وقتی آدرس/مدل/کلید به `ai_provider_credentials` رفته‌اند، «روشن‌کردنِ
+    دستیار» دو نوشتن است و نه یکی. این‌جا جمع شده تا هر فایل تستی نسخهٔ خودش را
+    نداشته باشد — که همان چیزی بود که آن مهاجرت را در تست‌ها پرهزینه می‌کرد.
+    """
+    from app.core.crypto import encrypt
+    from app.models.ai import AiProviderCredential, AiSettings
+
+    db.merge(AiSettings(id=1, enabled=True, provider=provider, **settings_kwargs))
+    existing = db.scalar(
+        select(AiProviderCredential).where(AiProviderCredential.provider == provider)
+    )
+    if existing is None:
+        existing = AiProviderCredential(provider=provider)
+        db.add(existing)
+    existing.base_url = base_url
+    existing.model = model
+    existing.api_key_encrypted = encrypt(api_key) if api_key else ""
+    db.flush()

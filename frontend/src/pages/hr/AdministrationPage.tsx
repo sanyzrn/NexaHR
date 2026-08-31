@@ -999,6 +999,13 @@ function AiCard() {
   // به‌تنهایی برای هیچ‌کس هیچ‌چیز را عوض نمی‌کند و کاربر فقط می‌بیند که دکمهٔ
   // همکار همچنان نیست. این‌جا همان‌جایی است که او ایستاده، پس همین‌جا گفته
   // می‌شود — نه در مستندات و نه با یک دکمهٔ مرده در گوشهٔ صفحه.
+  // اطلاعاتِ ذخیره‌شدهٔ سرویسی که *در فرم* انتخاب است — که ممکن است با سرویسِ
+  // فعالِ سرور یکی نباشد (مدیر کلیک کرده و هنوز ذخیره نزده). فیلدهای تخت
+  // `data.api_key_*` دربارهٔ سرویسِ فعال حرف می‌زنند، پس برای نشانِ «کلید دارد»
+  // نمی‌شود به آن‌ها تکیه کرد.
+  const savedFor = (id: string) =>
+    (data?.provider_credentials ?? []).find((c) => c.provider === id);
+
   const grantedCount = access.filter((row) => row.enabled).length;
   // `user` تا پیش از رسیدنِ /me نال است؛ آن لحظه هنوز `access` هم خالی است،
   // پس هیچ هشداری ساخته نمی‌شود و مقایسه فقط باید امن بماند.
@@ -1115,14 +1122,35 @@ function AiCard() {
                 key={option.id}
                 type="button"
                 onClick={() =>
-                  setDraft((prev) => ({
-                    ...prev,
-                    provider: option.id,
-                    // «سفارشی» چیزی را پاک نمی‌کند: کسی که رویش می‌زند معمولاً
-                    // همان آدرسی را می‌خواهد که نوشته بود.
-                    ...(option.base_url ? { base_url: option.base_url } : {}),
-                    ...(option.default_model ? { model: option.default_model } : {}),
-                  }))
+                  setDraft((prev) => {
+                    const saved = savedFor(option.id);
+                    // کلیدِ تایپ‌شده عمداً *حذف* می‌شود و جابه‌جا نمی‌شود: بدونِ
+                    // این، کلیدی که برای Anthropic تایپ شده بود با یک کلیک روی
+                    // Gemini، روی ردیفِ Gemini ذخیره می‌شد.
+                    const rest = { ...prev };
+                    delete rest.api_key;
+                    return {
+                      ...rest,
+                      provider: option.id,
+                      // اطلاعاتِ ذخیره‌شدهٔ خودِ این سرویس مقدم است بر پیش‌فرضِ
+                      // کاتالوگ: اگر مدیر قبلاً مدلِ دیگری برای این سرویس
+                      // نوشته، کلیک روی آن نباید آن انتخاب را پاک کند.
+                      //
+                      // «سفارشی» پیش‌فرضی ندارد، پس اگر ذخیره‌ای هم نداشته باشد
+                      // هر چه در فرم است می‌ماند — کسی که رویش می‌زند معمولاً
+                      // همان آدرسی را می‌خواهد که نوشته بود.
+                      ...(saved?.base_url
+                        ? { base_url: saved.base_url }
+                        : option.base_url
+                          ? { base_url: option.base_url }
+                          : {}),
+                      ...(saved?.model
+                        ? { model: saved.model }
+                        : option.default_model
+                          ? { model: option.default_model }
+                          : {}),
+                    };
+                  })
                 }
                 className={`rounded-xl border px-3 py-2 text-right text-xs transition-colors ${
                   active
@@ -1130,10 +1158,22 @@ function AiCard() {
                     : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
-                <span className="block font-semibold">{option.label}</span>
-                {option.default_model && (
+                <span className="flex items-center gap-1.5 font-semibold">
+                  {option.label}
+                  {/* نشانِ «کلید دارد»: بدونش مدیر برای فهمیدنِ اینکه این سرویس
+                      قبلاً تنظیم شده یا نه، باید رویش کلیک کند و امتحان کند. */}
+                  {savedFor(option.id)?.api_key_configured && (
+                    <span
+                      title="کلید این سرویس ذخیره شده است"
+                      className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700"
+                    >
+                      کلید دارد
+                    </span>
+                  )}
+                </span>
+                {(savedFor(option.id)?.model || option.default_model) && (
                   <span dir="ltr" className="mt-0.5 block text-left text-[11px] text-gray-400">
-                    {option.default_model}
+                    {savedFor(option.id)?.model || option.default_model}
                   </span>
                 )}
               </button>
@@ -1174,7 +1214,9 @@ function AiCard() {
             value={draft.api_key ?? ""}
             onChange={(e) => set("api_key", e.target.value)}
             placeholder={
-              data.api_key_configured ? `تنظیم شده (${data.api_key_hint})` : "هنوز تنظیم نشده"
+              savedFor(value.provider)?.api_key_configured
+                ? `تنظیم شده (${savedFor(value.provider)?.api_key_hint})`
+                : "هنوز تنظیم نشده"
             }
             baseClassName={`${inputClass} pl-11`}
           />

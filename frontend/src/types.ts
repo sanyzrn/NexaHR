@@ -814,11 +814,23 @@ export interface AiProviderOption {
   note: string;
 }
 
+/** اطلاعاتِ ذخیره‌شدهٔ یک سرویس — بدونِ خودِ کلید. */
+export interface AiProviderCredential {
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key_hint: string;
+  api_key_configured: boolean;
+}
+
 export interface AiSettings {
   enabled: boolean;
   provider: string;
   /** فهرست سرویس‌های آماده — از سرور می‌آید، نه از یک ثابت در فرانت‌اند. */
   providers: AiProviderOption[];
+  /** اطلاعاتِ هر سرویسی که تنظیم شده. سرویس‌های دست‌نخورده در فهرست نیستند. */
+  provider_credentials: AiProviderCredential[];
+  /** چهار فیلد زیر همان اطلاعاتِ سرویسِ *فعال*‌اند. */
   base_url: string;
   model: string;
   api_key_hint: string;

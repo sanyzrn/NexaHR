@@ -57,14 +57,12 @@ class AiSettings(Base):
     #: فردی‌اش روشن باشد.
     enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    #: کدام سرویسِ آماده انتخاب شده. «custom» یعنی آدرس دستی.
+    #: کدام سرویس *فعال* است. «custom» یعنی آدرس دستی.
+    #:
+    #: آدرس، نام مدل و کلیدِ هر سرویس این‌جا نیست — در `ai_provider_credentials`
+    #: است، یک ردیف برای هر سرویس. این ستون فقط می‌گوید کدامشان امروز کار
+    #: می‌کند، پس عوض‌کردن سرویس هیچ چیزی را پاک نمی‌کند.
     provider: Mapped[str] = mapped_column(String(40), default="custom", nullable=False)
-
-    #: نقطهٔ پایانیِ سازگار با OpenAI. خالی یعنی «تنظیم نشده».
-    base_url: Mapped[str] = mapped_column(String(300), default="", nullable=False)
-    model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
-    #: کلید پیش‌فرض، برای کاربرانی که کلید اختصاصی ندارند. رمزنگاری‌شده.
-    api_key_encrypted: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     temperature: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
     max_tokens: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
@@ -96,6 +94,46 @@ class AiSettings(Base):
     #: بعدی.
     allow_uploads: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     max_upload_mb: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AiProviderCredential(Base):
+    """آدرس، مدل و کلیدِ *یک* سرویس. یک ردیف برای هر سرویس.
+
+    چرا جدا از `ai_settings`
+    ------------------------
+    پیش از این هر سه در همان ردیفِ تک تنظیمات بودند، یعنی سازمان یک ست
+    اطلاعات داشت. عوض‌کردنِ سرویس، اطلاعاتِ سرویسِ قبلی را از بین می‌برد: مدیری
+    که کلید Anthropic را وارد کرده بود و می‌خواست Gemini را امتحان کند، برای
+    برگشتن باید کلید را دوباره پیدا و وارد می‌کرد — و کلیدِ API چیزی نیست که
+    آدم دومرتبه دستش باشد.
+
+    حالا هر سرویس ردیفِ خودش را دارد و `ai_settings.provider` فقط می‌گوید کدام
+    فعال است. سوییچ‌کردن یک کلیک است و برگشتن هم.
+
+    چرا ردیف با تقاضا ساخته می‌شود و نه از پیش
+    -------------------------------------------
+    فهرست سرویس‌ها در کد است (`core/ai_providers.py`) و ممکن است عوض شود.
+    ساختنِ ردیفِ خالی برای هر پنج سرویس در مایگریشن یعنی جدولی پر از ردیفِ
+    بی‌محتوا، و یعنی هر سرویسِ تازه‌ای که اضافه شود یک مایگریشنِ دیگر می‌خواهد.
+    """
+
+    __tablename__ = "ai_provider_credentials"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    #: شناسهٔ سرویس از `core/ai_providers.PROVIDERS`. یکتا: یک ست اطلاعات برای
+    #: هر سرویس، نه چندتا.
+    provider: Mapped[str] = mapped_column(String(40), unique=True, nullable=False)
+
+    #: نقطهٔ پایانیِ سازگار با OpenAI. خالی یعنی «تنظیم نشده».
+    base_url: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    #: کلید پیش‌فرضِ همین سرویس، برای کاربرانی که کلید اختصاصی ندارند. رمزنگاری‌شده.
+    api_key_encrypted: Mapped[str] = mapped_column(Text, default="", nullable=False)
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
