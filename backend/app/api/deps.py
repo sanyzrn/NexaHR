@@ -71,6 +71,32 @@ def get_current_user(
     )
 
 
+def require_own_personnel(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """گاردِ مسیرهای «پروندهٔ خودم» — هر کسی که یک پروندهٔ پرسنلی دارد.
+
+    این‌جا عمداً نقش سنجیده نمی‌شود. تا امروز `require_roles(employee)` بود، و
+    آن تطابقِ دقیقِ نقش یک اشکالِ واقعی می‌ساخت: مسئولِ واحد — که خودش هم ارزیابی
+    می‌شود — روی *همهٔ* مسیرهای `/api/me` ۴۰۳ می‌گرفت. یعنی نه خودارزیابی
+    می‌توانست بکند و نه کارنامهٔ نهایی خودش را ببیند.
+
+    ریشه‌اش این بود که «نقش» هم‌زمان دو چیز را تعیین می‌کرد: در زنجیرهٔ ارزیابی چه
+    کاری می‌کنی، و آیا خودت ارزیابی می‌شوی. این دو ربطی به هم ندارند.
+
+    دسترسی را باز نمی‌کند: هر مسیر همچنان فقط پروندهٔ *همین شخص* را برمی‌گرداند
+    (`subject_personnel_id == current_user.personnel_id`) و پروندهٔ دیگران ۴۰۴
+    می‌گیرد. این‌جا فقط گلوگاهِ «اصلاً پروندهٔ پرسنلی داری؟» است.
+    """
+    if current_user.personnel_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "حساب شما به پروندهٔ پرسنلی وصل نیست، پس پروندهٔ ارزیابی‌ای هم ندارد. "
+                "منابع انسانی می‌تواند این اتصال را برقرار کند."
+            ),
+        )
+    return current_user
+
+
 def require_roles(*allowed_roles: UserRole):
     def dependency(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
         if current_user.role not in allowed_roles:

@@ -5,6 +5,7 @@ import { useDebouncedValue, useEvaluations, usePersonnelList } from "../../api/q
 import { EmployeeProfileModal } from "../../components/EmployeeProfileModal";
 import { EvaluationActionButton, type OpenEvaluation } from "../../components/EvaluationActionButton";
 import { EvaluationList } from "../../components/EvaluationList";
+import { MyEvaluationsPanel } from "../employee/MyEvaluationsPage";
 import { RoleOverviewCards } from "../../components/RoleOverviewCards";
 import { StatusBadge } from "../../components/StatusBadge";
 import { PageHeader, TableSkeleton } from "../../ui/Card";
@@ -70,9 +71,41 @@ export function SupervisorHomePage() {
     }
   }
 
+  // مسئول واحد دو کارِ جدا دارد و تا امروز فقط یکی‌شان را داشت: ارزیابیِ
+  // زیرمجموعه‌ها. خودش هم ارزیابی می‌شود، ولی صفحهٔ «کارنامه من» پشتِ گاردِ نقشِ
+  // «کارمند» بود و او روی آن ۴۰۳ می‌گرفت — نه خودارزیابی می‌توانست بکند و نه
+  // نتیجهٔ خودش را می‌دید.
+  const [tab, setTab] = useState<"team" | "mine">("team");
+
   return (
     <div className="space-y-4">
-      <PageHeader title="افراد زیرمجموعه" subtitle="شروع ارزیابی جدید برای افراد زیرمجموعه شما" />
+      <PageHeader title="ارزیابی عملکرد" subtitle="ارزیابی افراد زیرمجموعه، و خودارزیابی خودتان" />
+
+      <div className="flex gap-1 rounded-2xl border border-gray-200 bg-white p-1">
+        {([
+          { key: "team", label: "ارزیابی زیرمجموعه‌ها" },
+          { key: "mine", label: "خودارزیابی من" },
+        ] as const).map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setTab(item.key)}
+            aria-current={tab === item.key ? "page" : undefined}
+            className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              tab === item.key
+                ? "bg-pulse-600 text-white"
+                : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "mine" ? (
+        <MyEvaluationsPanel />
+      ) : (
+        <div className="space-y-4">
       <RoleOverviewCards />
       <div className="rounded-2xl border border-gray-200 bg-white p-4">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -146,6 +179,8 @@ export function SupervisorHomePage() {
           { key: "finalized", label: "نهایی‌شده", status: "finalized" },
         ]}
       />
+        </div>
+      )}
 
       {profilePerson && (
         <EmployeeProfileModal

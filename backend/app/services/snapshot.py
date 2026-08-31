@@ -10,14 +10,16 @@ from sqlalchemy.orm import Session
 from app.models.evaluation import EvaluationComment, EvaluationRecord, EvaluationScore
 from app.models.indicator import Indicator
 from app.models.personnel import Personnel
+from app.models.self_assessment import SelfAssessmentScore
 from app.models.user import User
 from app.services.workflow import is_manager_path
 
+# ۴: افزودن `self_assessment` — برگهٔ مقایسهٔ «خود فرد / مسئول مستقیم» داخل سند.
 # ۳: افزودن `single_decider` — نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند.
 # ۲: افزودن امتیاز ویژه (`bonus_points` / `bonus_reason` / `base_weighted_pct`).
 # افزودنی است، پس قالب PDF هر دو نسخه را رندر می‌کند: در snapshot نسخهٔ ۱ این
 # کلیدها نیستند و بخشِ مربوطه اصلاً چاپ نمی‌شود.
-SNAPSHOT_VERSION = 3
+SNAPSHOT_VERSION = 4
 
 
 def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
@@ -33,6 +35,12 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         select(EvaluationComment).where(EvaluationComment.evaluation_record_id == record.id)
     ).all()
     indicators_by_id = {i.id: i for i in db.scalars(select(Indicator))}
+
+    self_scores = db.scalars(
+        select(SelfAssessmentScore).where(
+            SelfAssessmentScore.evaluation_record_id == record.id
+        )
+    ).all()
 
     manager_path = is_manager_path(record)
     evaluator_user_id = record.deputy_user_id if manager_path else record.unit_supervisor_user_id
@@ -53,6 +61,13 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         # اگر نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند، سند باید همین
         # را بگوید. دو تأیید در لاگ، بدون این جمله، دو بررسی مستقل به‌نظر می‌رسد.
         "single_decider": record.single_decider,
+        # برگهٔ مقایسه — دیدگاه خودِ فرد کنار نمرهٔ ارزیاب، در همان سندی که
+        # قطعی می‌شود. `None` یعنی خودارزیابی ثبت نشده، که کاملاً مجاز است؛
+        # قالب در آن حالت اصلاً این بخش را چاپ نمی‌کند.
+        #
+        # عمداً در snapshot می‌نشیند و نه به‌صورت query در لحظهٔ چاپ: سند نهایی
+        # باید همان چیزی را نشان بدهد که در لحظهٔ نهایی‌شدن بوده.
+        "self_assessment": _self_assessment_block(record, self_scores, scores, indicators_by_id),
         "evaluation_started_at": record.created_at.isoformat(),
         "evaluation_code": record.evaluation_code,
         "general_score_pct": float(record.general_score_pct)
@@ -95,4 +110,43 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
             for c in comments
         ],
         "finalized_at": record.finalized_at.isoformat() if record.finalized_at else None,
+    }
+
+
+def _self_assessment_block(
+    record: EvaluationRecord,
+    self_scores: list[SelfAssessmentScore],
+    evaluator_scores: list[EvaluationScore],
+    indicators_by_id: dict[int, Indicator],
+) -> dict | None:
+    """دیدگاه خودِ فرد، به شکلی که کنار نمرهٔ ارزیاب چاپ شود.
+
+    ردیف‌ها بر اساس *بزرگیِ اختلاف* مرتب می‌شوند، نه شمارهٔ شاخص: جایی که فرد ۵
+    داده و ارزیاب ۲، همان جایی است که خواندنش ارزش دارد. `gap` از پیش حساب
+    می‌شود تا قالب هیچ محاسبه‌ای نکند.
+    """
+    if record.self_assessment_submitted_at is None:
+        return None
+
+    evaluator_by_indicator = {row.indicator_id: row.score for row in evaluator_scores}
+    rows = []
+    for entry in self_scores:
+        indicator = indicators_by_id.get(entry.indicator_id)
+        evaluator_score = evaluator_by_indicator.get(entry.indicator_id)
+        rows.append(
+            {
+                "indicator_id": entry.indicator_id,
+                "category": indicator.category if indicator else "—",
+                "description": indicator.description if indicator else "(شاخص حذف‌شده)",
+                "self_score": entry.score,
+                "evaluator_score": evaluator_score,
+                "gap": None if evaluator_score is None else entry.score - evaluator_score,
+                "note": entry.note,
+            }
+        )
+    rows.sort(key=lambda row: abs(row["gap"] or 0), reverse=True)
+    return {
+        "submitted_at": record.self_assessment_submitted_at.isoformat(),
+        "note": record.self_assessment_note,
+        "rows": rows,
     }

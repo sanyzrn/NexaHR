@@ -306,7 +306,15 @@ function MyPlanCard({ plan, index }: { plan: ImprovementPlanDetail; index: numbe
   );
 }
 
-export function MyEvaluationsPage() {
+/** کارنامهٔ خودِ فرد، بدون سربرگِ صفحه.
+ *
+ * جدا از `MyEvaluationsPage` است چون دو جا نشان داده می‌شود: صفحهٔ «کارنامه من»
+ * برای کارمند، و تبِ «خودارزیابی من» در صفحهٔ مسئول واحد — که خودش هم ارزیابی
+ * می‌شود و تا امروز هیچ راهی به این محتوا نداشت.
+ *
+ * سربرگ بیرون ماند چون داخلِ تب، عنوانِ دوم اضافی است.
+ */
+export function MyEvaluationsPanel() {
   const { moduleEnabled, loading: permissionsLoading } = usePermissions();
   // تا قبل از رسیدن تنظیمات، هیچ بخش اختیاری چشمک نمی‌زند. پیش‌فرض ماژول‌ها
   // برای این صفحه عمداً خاموش است، پس «نامعلوم» نباید به‌اشتباه «روشن» دیده شود.
@@ -322,10 +330,6 @@ export function MyEvaluationsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="کارنامه من"
-        subtitle="نتایج نهایی‌شدهٔ ارزیابی عملکرد شما. ثبت مشاهده یعنی نتیجه را دیده‌اید — نه اینکه آن را پذیرفته‌اید."
-      />
       {showOverview && <RoleOverviewCards />}
 
       {/* پروندهٔ در جریان بالاتر از نتایج گذشته می‌آید: مهم‌ترین چیزی که فرد
@@ -377,6 +381,19 @@ export function MyEvaluationsPage() {
           showAcknowledgement={showAcknowledgement}
         />
       ))}
+    </div>
+  );
+}
+
+
+export function MyEvaluationsPage() {
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="کارنامه من"
+        subtitle="نتایج نهایی‌شدهٔ ارزیابی عملکرد شما. ثبت مشاهده یعنی نتیجه را دیده‌اید — نه اینکه آن را پذیرفته‌اید."
+      />
+      <MyEvaluationsPanel />
     </div>
   );
 }

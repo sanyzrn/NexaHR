@@ -16,7 +16,7 @@ import { WorkflowStepper } from "../WorkflowStepper";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
 import { useLocalDraft } from "../../ui/useLocalDraft";
-import { formatDateTime } from "../../utils/dates";
+import { formatDate, formatDateTime } from "../../utils/dates";
 import type { MyOpenEvaluation, SelfAssessment } from "../../types";
 
 const SCORE_OPTIONS = [1, 2, 3, 4, 5];
@@ -59,23 +59,40 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
           امتیازها تا پیش از تأیید نهایی قطعی نیستند و نمایش داده نمی‌شوند.
         </p>
 
+        {/* متنِ این بخش عمداً چیزی را وعده نمی‌دهد که دیگر درست نیست: تا پیش از
+            این می‌گفت «برای ارزیاب ارسال شد»، در حالی که حالا مسئول مستقیم
+            خودارزیابی را اصلاً نمی‌بیند — فقط خود فرد و منابع انسانی. */}
         {submitted?.submitted_at ? (
           <p className="mt-3 rounded-xl bg-green-50 px-3 py-2 text-sm text-green-800">
-            خودارزیابی شما ثبت شد و برای ارزیاب ارسال گردید.
+            خودارزیابی شما ثبت شد. فقط خودتان و منابع انسانی آن را می‌بینید.
           </p>
         ) : canSelfAssess && !showForm ? (
           <div className="mt-3 rounded-xl border border-dashed border-gray-300 bg-gray-50/60 p-3">
             <p className="text-sm text-gray-700">
-              می‌توانید پیش از ثبت نمرهٔ ارزیاب، دیدگاه خودتان را ثبت کنید.
+              می‌توانید دیدگاه خودتان دربارهٔ عملکردتان را ثبت کنید.
             </p>
             <p className="mt-1 text-xs text-gray-500">
-              اختیاری است و در محاسبهٔ امتیاز نهایی وارد نمی‌شود؛ کنار نظر ارزیاب دیده
-              می‌شود تا تفاوت‌ها موضوع گفت‌وگو باشد. یک‌بار ثبت می‌شود و قابل ویرایش نیست.
+              اختیاری است و در محاسبهٔ امتیاز نهایی وارد نمی‌شود. آن را فقط خودتان و
+              منابع انسانی می‌بینید — مسئول مستقیم، معاونت و مدیرعامل به آن دسترسی
+              ندارند. یک‌بار ثبت می‌شود و قابل ویرایش نیست.
             </p>
+            {item.submission_deadline && (
+              <p className="mt-2 text-xs font-medium text-amber-700">
+                مهلت ثبت تا {formatDate(item.submission_deadline)}
+                {item.submission_deadline_extended ? " (تمدیدشده)" : ""}
+              </p>
+            )}
             <Button className="mt-3" onClick={() => setShowForm(true)}>
               ثبت خودارزیابی
             </Button>
           </div>
+        ) : item.submission_deadline ? (
+          /* مهلت گذشته یا پرونده از مرحلهٔ ثبت رد شده. گفتنِ خودِ تاریخ لازم است:
+             «فرم بسته است» بی‌تاریخ، به فرد نمی‌گوید چقدر دیر کرده. */
+          <p className="mt-3 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-500">
+            مهلت ثبت خودارزیابی این دوره ({formatDate(item.submission_deadline)}) گذشته است.
+            اگر دلیل موجهی دارید، منابع انسانی می‌تواند مهلت را تمدید کند.
+          </p>
         ) : null}
 
         {showForm && !submitted?.submitted_at && (

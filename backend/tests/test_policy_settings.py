@@ -31,10 +31,9 @@ def test_reads_the_value_that_actually_applies(client, db_session):
     # فرم باید همان قاعده‌ای را نشان بدهد که سرور اعمال می‌کند
     assert fields["min_cohort_size"]["minimum"] == 1
     assert fields["objection_window_days"]["maximum"] == 365
-    assert fields["self_assessment_visible_to_hr"]["value"] is True
-    assert fields["self_assessment_visible_to_unit_supervisor"]["value"] is False
-    assert fields["self_assessment_visible_to_deputy"]["value"] is False
-    assert fields["self_assessment_visible_to_ceo"]["value"] is False
+    # سوییچ‌های «نمایش خودارزیابی» عمداً از این پنل برداشته شدند: محرمانگیِ
+    # خودارزیابی قاعده است نه تنظیم (`services/self_assessment.VIEWER_ROLES`).
+    assert not [key for key in fields if key.startswith("self_assessment_visible")]
 
 
 def test_saving_takes_effect_immediately(client, db_session):
@@ -76,19 +75,25 @@ def test_out_of_range_is_refused_by_the_server(client, db_session):
     assert settings.min_cohort_size == original
 
 
-def test_self_assessment_visibility_can_be_changed_from_the_admin_panel(client, db_session):
+def test_self_assessment_visibility_is_no_longer_writable(client, db_session):
+    """گاردِ برگشتِ سوییچی که عمداً حذف شد.
+
+    محرمانگیِ خودارزیابی قاعده است نه تنظیم. اگر روزی کسی کلید را دوباره به فهرست
+    `POLICY` اضافه کند، این تست است که می‌گوید قولِ داده‌شده به کارمند دوباره
+    قابلِ خاموش‌کردن شده.
+    """
     admin = _admin(db_session)
-    original = settings.self_assessment_visible_to_deputy
-    try:
-        response = client.put(
-            "/api/administration/policy",
-            json={"values": {"self_assessment_visible_to_deputy": True}},
-            headers=auth_header(admin),
-        )
-        assert response.status_code == 200, response.text
-        assert settings.self_assessment_visible_to_deputy is True
-    finally:
-        settings.self_assessment_visible_to_deputy = original
+    response = client.put(
+        "/api/administration/policy",
+        json={"values": {"self_assessment_visible_to_deputy": True}},
+        headers=auth_header(admin),
+    )
+
+    # فرم کلیدهای ناشناخته را بی‌صدا نادیده می‌گیرد (رفتار موجود)، پس ادعای
+    # واقعی این است: نه در فهرست هست و نه روی تنظیمات می‌نشیند.
+    assert response.status_code == 200, response.text
+    assert not [f for f in response.json()["fields"] if f["key"].startswith("self_assessment")]
+    assert not hasattr(settings, "self_assessment_visible_to_deputy")
 
 
 def test_the_policy_form_cannot_write_integration_keys(client, db_session):
