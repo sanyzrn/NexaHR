@@ -116,6 +116,28 @@ def test_purge_removes_stale_rows_but_keeps_active_locks(db_session):
 # ---------------------------------------------------------------- endpoint
 
 
+def test_a_wrong_password_and_an_unknown_username_get_different_messages(client, db_session, account):
+    """پیامِ خطا صریح است — تصمیمِ آگاهانه است، نه یک نشتِ اطلاعات.
+
+    این یعنی username enumeration را ممکن می‌کند: مهاجم می‌تواند بفهمد کدام
+    نام‌های کاربری واقعی‌اند. تصمیمِ گرفته‌شده این بود که وضوح برای کاربر
+    مهم‌تر از پنهان‌ماندنِ وجودِ حساب باشد. رفتارِ *قفل* اما این تفاوت را
+    نمی‌شناسد (`test_unknown_usernames_are_counted_too`) — فقط پیام فرق دارد،
+    نه شمارشِ تلاش‌های ناموفق یا زمان‌بندیِ پاسخ.
+    """
+    wrong_password = client.post(
+        "/api/auth/login", json={"username": account.username, "password": "wrong"}
+    )
+    assert wrong_password.status_code == 401
+    assert wrong_password.json()["detail"] == "رمز عبور اشتباه است"
+
+    unknown_user = client.post(
+        "/api/auth/login", json={"username": "definitely-not-a-real-user-2", "password": "x"}
+    )
+    assert unknown_user.status_code == 401
+    assert unknown_user.json()["detail"] == "چنین نام کاربری‌ای وجود ندارد"
+
+
 def test_login_locks_the_account_and_then_refuses_even_the_right_password(
     client, db_session, account
 ):

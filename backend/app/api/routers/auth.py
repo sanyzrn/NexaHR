@@ -115,10 +115,6 @@ def login(
     payload: LoginRequest,
     db: Session = Depends(get_db),
 ) -> LoginResponse:
-    invalid_credentials = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="نام کاربری یا رمز عبور اشتباه است",
-    )
     client_ip = request.client.host if request.client else None
 
     # قفل حساب پیش از هر کاری بررسی می‌شود — حتی رمز درست هم در پنجرهٔ قفل پذیرفته
@@ -155,14 +151,22 @@ def login(
 
     user = db.scalar(select(User).where(User.username == payload.username))
     if user is None:
-        # نام کاربری ناموجود هم شمرده می‌شود، وگرنه خودِ رفتار قفل به یک اوراکل
-        # «این حساب وجود دارد» تبدیل می‌شد.
+        # قفلِ حساب همچنان برای نامِ کاربریِ ناموجود هم می‌شمارد — رفتارِ قفل
+        # یک اوراکلِ *تایمینگ* نیست، هر دو حالت را با یک تأخیر می‌بندد. پیامِ
+        # خطا اما دیگر یکسان نیست: تصمیمِ صریح این بود که وضوح برای کاربر
+        # مهم‌تر از پنهان‌ماندنِ وجودِ حساب باشد.
         verify_password(payload.password, _DUMMY_PASSWORD_HASH)
         _fail(None)
-        raise invalid_credentials
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="چنین نام کاربری‌ای وجود ندارد",
+        )
     if not verify_password(payload.password, user.password_hash):
         _fail(user.id)
-        raise invalid_credentials
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="رمز عبور اشتباه است",
+        )
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="حساب کاربری غیرفعال است"
