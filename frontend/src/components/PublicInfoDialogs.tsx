@@ -62,7 +62,10 @@ export function PublicInfoLinks() {
 
       {panel === "changes" && (
         <Modal title="تغییرات نسخه‌ها" size="lg" onClose={() => setPanel(null)}>
-          <div className="space-y-5">
+          {/* فهرست داخلِ قابِ خودش اسکرول می‌شود، نه کلِ مودال: با ۱۳ نسخه، عنوان
+              و دکمهٔ بستن هم با اسکرول از دید می‌رفتند. `max-h` طوری انتخاب شده
+              که چند نسخهٔ اول بدونِ اسکرول دیده شود و ادامه‌اش زیرِ آن باشد. */}
+          <div className="max-h-[60vh] space-y-5 overflow-y-auto rounded-2xl border border-gray-100 bg-gray-50/60 p-4">
             {RELEASE_NOTES.map((release) => (
               <section key={release.version}>
                 <div className="mb-2 flex flex-wrap items-baseline gap-2">
