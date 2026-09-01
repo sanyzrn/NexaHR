@@ -95,6 +95,9 @@ export interface OrgUnitCatalogueItem {
   /** همان رشته‌ای که در `personnel.org_unit` می‌نشیند. */
   full_name: string;
   is_active: boolean;
+  /** واحدِ منابع انسانی. تنها اثرش شکلِ زنجیرهٔ ارزیابیِ اعضای همین واحد است:
+   *  پروندهٔ آن‌ها مرحلهٔ بررسیِ منابع انسانی را ندارد. */
+  is_hr_unit: boolean;
   display_order: number;
   personnel_count: number;
 }
@@ -164,6 +167,9 @@ export type EvaluationStatus =
 
 export interface EvaluationRecord {
   id: number;
+  /** این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است.
+   *  نوارِ مراحل بی این، آن مرحله را «انجام‌شده» نشان می‌داد. */
+  hr_review_skipped?: boolean;
   /** آخرین روزِ مهلتِ ثبت — پایانِ دوره، یا تمدیدی که منابع انسانی داده.
    *  `null` یعنی این پرونده به دوره‌ای وصل نیست و مهلتی ندارد. */
   submission_deadline?: string | null;
@@ -234,6 +240,8 @@ export interface MyOpenEvaluation {
   stage_label: string;
   /** شاخص‌های همین پرونده (P1-05) — فرم خودارزیابی از روی این ساخته می‌شود. */
   indicator_ids: number[];
+  /** این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است. */
+  hr_review_skipped?: boolean;
   /** آیا پنجرهٔ خودارزیابی هنوز باز است — سرور تصمیم می‌گیرد، نه فرانت.
    *
    * سه شرط را با هم می‌سنجد: نقش خودارزیابی داشته باشد، پرونده در مرحلهٔ ثبت

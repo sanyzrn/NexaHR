@@ -19,7 +19,7 @@
 """
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Integer, String, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -36,6 +36,23 @@ class OrgUnit(Base):
     #: غیرفعال یعنی «دیگر برای ثبتِ تازه پیشنهاد نشو» — نه «حذف شو». پرسنلی که
     #: از قبل در این واحد است سر جایش می‌ماند و گزارش‌های گذشته نمی‌شکنند.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    #: این واحد، واحدِ منابع انسانی است.
+    #:
+    #: تنها چیزی که این پرچم عوض می‌کند شکلِ زنجیرهٔ ارزیابیِ *اعضای همین واحد*
+    #: است: پروندهٔ آن‌ها مرحلهٔ بررسیِ منابع انسانی را ندارد، چون داورِ آن مرحله
+    #: هم‌تیمیِ خودشان می‌شد (`services/self_evaluation.py`).
+    #:
+    #: چرا واحد و نه نقشِ حساب: هر حساب یک نقش دارد و `may_act_at` عمداً نقشِ
+    #: `hr` را از صندلی‌های زنجیره بیرون گذاشته. یعنی مدیرِ منابع انسانی که
+    #: مسئولِ مستقیمِ کارشناسانش است، *نمی‌تواند* نقشِ `hr` داشته باشد — و اگر
+    #: قاعده به نقش بند بود، پروندهٔ خودِ او از قلم می‌افتاد و می‌رفت روی میزِ
+    #: زیردستش. عضویتِ واحد این تناقض را ندارد.
+    #:
+    #: بیش از یک واحد می‌تواند پرچم بگیرد (سازمانی با «منابع انسانی» و «آموزش و
+    #: توسعهٔ منابع انسانی»)، پس این‌جا قیدِ یکتایی نیست.
+    is_hr_unit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

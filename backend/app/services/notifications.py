@@ -6,7 +6,7 @@ atomic باشند؛ اگر گذار rollback شود اعلانی هم باقی �
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import UserRole
@@ -94,6 +94,31 @@ def _active_user_ids_with_role(db: Session, role: UserRole) -> list[int]:
     return list(db.scalars(select(User.id).where(User.role == role, User.is_active.is_(True))))
 
 
+def _hr_queue_ids(db: Session, record: EvaluationRecord) -> list[int]:
+    """صفِ منابع انسانی، منهای خودِ موضوعِ پرونده.
+
+    پروندهٔ کارمندانِ HR از این پس مرحلهٔ منابع انسانی ندارد، پس در حالتِ عادی
+    این تفریق بی‌اثر است. ولی اعلانِ «پروندهٔ خودت در صفِ بررسی قرار گرفت» آن
+    نوعی خرابی است که فقط یک بار و روی حسابِ یک آدمِ واقعی دیده می‌شود — و
+    مهرِ `hr_review_skipped` روی پرونده‌های *گذشته* یا پرونده‌ای که پیش از این
+    تغییر ساخته شده، تضمینی ندارد.
+    """
+    from app.models.user import User
+
+    return list(
+        db.scalars(
+            select(User.id).where(
+                User.role == UserRole.hr,
+                User.is_active.is_(True),
+                or_(
+                    User.personnel_id.is_(None),
+                    User.personnel_id != record.subject_personnel_id,
+                ),
+            )
+        )
+    )
+
+
 def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: str) -> None:
     """نفر بعدی زنجیره (یا نفر قبلی، در برگشت پرونده) را از رویداد باخبر می‌کند."""
     code = record.evaluation_code
@@ -114,8 +139,18 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
     recipients: list[int] = []
     message = ""
     if action in ("submit", "manager_submit"):
-        recipients = _active_user_ids_with_role(db, UserRole.hr)
+        recipients = _hr_queue_ids(db, record)
         message = f"پرونده {code} ({name}) در صف بررسی منابع انسانی قرار گرفت"
+    # پروندهٔ بی‌مرحلهٔ HR: ثبتِ نمره مستقیم روی میزِ نفرِ بعدیِ زنجیره می‌نشیند.
+    # `after_hr_id` همان «بعد از منابع انسانی» است و این‌جا هم درست جواب می‌دهد:
+    # معاونت، و اگر معاونتی در زنجیره نباشد، خودِ مدیرعامل.
+    elif action == "submit_hr_subject":
+        recipients = [after_hr_id]
+        message = f"پرونده {code} ({name}) در انتظار بررسی و تأیید شماست"
+    elif action == "manager_submit_hr_subject":
+        # هر دو مرحلهٔ میانی غایب‌اند؛ تنها تأییدکنندهٔ باقی‌مانده مدیرعامل است.
+        recipients = [record.ceo_user_id]
+        message = f"پرونده {code} ({name}) در انتظار تأیید نهایی شماست"
     elif action == "hr_approve":
         recipients = [after_hr_id]
         message = f"پرونده {code} ({name}) در انتظار بررسی و تأیید شماست"
@@ -136,15 +171,22 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
         recipients = [evaluator_id] if evaluator_id is not None else []
         message = f"پرونده {code} ({name}) توسط منابع انسانی برگشت داده شد؛ دلیل در کامنت‌های پرونده"
     elif action == "deputy_return":
-        recipients = _active_user_ids_with_role(db, UserRole.hr)
+        recipients = _hr_queue_ids(db, record)
         message = f"پرونده {code} ({name}) توسط معاونت برگشت داده شد؛ دلیل در کامنت‌های پرونده"
+    # بی‌مرحلهٔ HR، برگشت یک پله بیشتر عقب می‌رود: تا خودِ نمره‌دهنده.
+    elif action in ("deputy_return_hr_subject", "ceo_return_manager_hr_subject"):
+        recipients = [evaluator_id] if evaluator_id is not None else []
+        message = (
+            f"پرونده {code} ({name}) برگشت داده شد و در انتظار اصلاح شماست؛ "
+            "دلیل در کامنت‌های پرونده"
+        )
     elif action == "ceo_return":
         # برگشت از مدیرعامل هم به همان کسی می‌رود که پرونده را به او داده بود.
         recipients = [after_hr_id]
         message = f"پرونده {code} ({name}) توسط مدیرعامل برگشت داده شد؛ دلیل در کامنت‌های پرونده"
     elif action == "ceo_return_manager":
         # در مسیر «مدیر» پرونده به صف منابع انسانی برمی‌گردد، نه به معاونت.
-        recipients = _active_user_ids_with_role(db, UserRole.hr)
+        recipients = _hr_queue_ids(db, record)
         message = f"پرونده {code} ({name}) توسط مدیرعامل برگشت داده شد؛ دلیل در کامنت‌های پرونده"
     elif action == "cancel":
         # همهٔ کسانی که روی این پرونده نقشی داشتند باید بدانند دیگر منتظرشان نیست.

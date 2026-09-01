@@ -138,3 +138,18 @@ def enable_ai_provider(
     existing.model = model
     existing.api_key_encrypted = encrypt(api_key) if api_key else ""
     db.flush()
+
+
+def make_hr_unit(db: Session, name: str = "منابع انسانی", site: str | None = None) -> str:
+    """واحدِ منابع انسانی را می‌سازد و نامِ کاملش را برمی‌گرداند.
+
+    همان رشته‌ای که باید در `personnel.org_unit` بنشیند تا آن پرسنل عضوِ این
+    واحد شمرده شود — چون `personnel.org_unit` کلید خارجی نیست و پیوند از راهِ
+    رشته است (`models/org_unit.py` می‌گوید چرا).
+    """
+    from app.models.org_unit import OrgUnit
+
+    unit = OrgUnit(site=site, name=name, is_hr_unit=True)
+    db.add(unit)
+    db.flush()
+    return unit.full_name

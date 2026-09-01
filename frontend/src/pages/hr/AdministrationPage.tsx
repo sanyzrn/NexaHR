@@ -923,6 +923,30 @@ function OrgUnitsCard() {
                       غیرفعال
                     </span>
                   )}
+                  {/* پرچمی که *شکلِ زنجیره* را عوض می‌کند، پس کنارِ خودِ واحد
+                      دیده می‌شود و نه در فرمِ ویرایش: کسی که فهرست را نگاه
+                      می‌کند باید بدون کلیک بداند کدام واحد این استثنا را دارد. */}
+                  <label
+                    className="flex items-center gap-1.5 text-xs text-gray-500"
+                    title="پروندهٔ اعضای این واحد مرحلهٔ بررسیِ منابع انسانی ندارد — چون داورِ آن مرحله هم‌تیمیِ خودشان می‌شد"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={unit.is_hr_unit}
+                      disabled={busy === unit.id}
+                      onChange={(e) =>
+                        save(
+                          unit,
+                          { is_hr_unit: e.target.checked },
+                          e.target.checked
+                            ? "این واحد، واحدِ منابع انسانی شد"
+                            : "پرچمِ منابع انسانی برداشته شد",
+                        )
+                      }
+                      className="h-3.5 w-3.5 cursor-pointer rounded border-gray-300 text-pulse-500"
+                    />
+                    واحد منابع انسانی
+                  </label>
                   <button
                     type="button"
                     onClick={() => setEditing(unit)}

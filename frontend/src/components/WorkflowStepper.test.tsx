@@ -59,6 +59,25 @@ describe("WorkflowStepper", () => {
     expect(container.querySelector("span.bg-pulse-600")).toBeNull();
   });
 
+  it("مرحلهٔ رد‌شده را تمام‌شده نشان نمی‌دهد", () => {
+    // پروندهٔ کارمندِ منابع انسانی از `draft` مستقیم به `hr_approved` می‌رود، یعنی
+    // نوار به قدم سوم می‌رسد. بی گاردِ `hrSkipped`، هر دو قدمِ پیشین سبز می‌شدند
+    // و مرحلهٔ منابع انسانی — که هیچ‌کس انجامش نداده — «انجام‌شده» خوانده می‌شد.
+    const { container } = render(<WorkflowStepper status="hr_approved" hrSkipped />);
+
+    expect(currentStep(container)).toBe("معاونت");
+    expect(completedCount(container)).toBe(1);
+    expect(container.querySelector("span.line-through")?.textContent).toBe("منابع انسانی");
+  });
+
+  it("بی این پرچم، همان وضعیت هر دو قدم را تمام‌شده می‌شمارد", () => {
+    // قرینهٔ تست بالا: زنجیرهٔ عادی دست‌نخورده می‌ماند.
+    const { container } = render(<WorkflowStepper status="hr_approved" />);
+
+    expect(completedCount(container)).toBe(2);
+    expect(container.querySelector("span.line-through")).toBeNull();
+  });
+
   it("برای صفحه‌خوان‌ها برچسب دارد", () => {
     render(<WorkflowStepper status="hr_approved" />);
 

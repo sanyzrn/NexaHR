@@ -309,6 +309,7 @@ export function EvaluationDetailPage() {
         <WorkflowStepper
           status={evaluation.status}
           returned={evaluation.was_returned}
+          hrSkipped={evaluation.hr_review_skipped ?? false}
           className="mt-4"
         />
 

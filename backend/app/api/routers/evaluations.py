@@ -64,6 +64,7 @@ from app.services.self_evaluation import (
     ensure_chain_stages_are_not_redundant,
     ensure_evaluators_are_not_the_subject,
     ensure_not_deciding_about_oneself,
+    subject_belongs_to_hr,
 )
 from app.services.snapshot import build_final_snapshot
 from app.services.workflow import (
@@ -73,6 +74,7 @@ from app.services.workflow import (
     finalize_scoring,
     is_manager_path,
     may_act_at,
+    skips_hr_review,
 )
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
@@ -397,6 +399,9 @@ def create_evaluation(
         period_id=open_period.id if open_period else None,
         scoring_scheme_id=scheme.id if scheme else None,
         indicator_framework_id=framework.id,
+        # شکلِ زنجیره در همین لحظه مهر می‌شود، مثل سه صندلیِ بالا: اگر نقشِ فرد
+        # فردا عوض شود، پروندهٔ در جریان از زیر پای تأییدکننده‌اش عوض نمی‌شود.
+        hr_review_skipped=subject_belongs_to_hr(db, personnel.id),
         status=record_status,
     )
     db.add(record)
@@ -517,7 +522,18 @@ def scope_evaluations_for_role(query, user: CurrentUser):
     دیگری نگیرد. نقش ناشناخته هیچ — پیش‌فرضِ باز ممنوع.
     """
     if user.role == UserRole.hr:
-        return query
+        # منابع انسانی همه را می‌بیند، *به‌جز پروندهٔ خودش*.
+        #
+        # صفحهٔ جزئیات از قبل این را می‌گرفت (`_ensure_can_view`) ولی فهرست نه —
+        # و فهرست ستونِ نتیجه دارد. یعنی کارمندِ منابع انسانی نمرهٔ نهاییِ خودش
+        # را در پنل می‌دید، پیش از آن‌که رسماً به او ابلاغ شود؛ فقط نمی‌توانست
+        # رویش کلیک کند. دو گاردِ ناهم‌تراز، بدترین حالت است: کسی که فقط
+        # جزئیات را بسته دیده، فرض می‌کند فهرست هم بسته است.
+        #
+        # مسیرِ خودش جداست و دست‌نخورده می‌ماند (`/api/me/evaluations`).
+        if user.personnel_id is None:
+            return query
+        return query.where(EvaluationRecord.subject_personnel_id != user.personnel_id)
     if user.role == UserRole.unit_supervisor:
         return query.where(EvaluationRecord.unit_supervisor_user_id == user.id)
     if user.role == UserRole.deputy:
@@ -787,7 +803,12 @@ def submit_evaluation(
     # در مسیر «مدیر» نمره‌دهنده معاونت است، پس گذارِ دیگری با همان مقصد لازم
     # است. محاسبهٔ نتیجه در هر دو مسیر همین‌جا انجام می‌شود — جایی که نمره‌دهی
     # تمام می‌شود — نه در تأیید معاونت.
+    # چهار ترکیب، چون دو مرحلهٔ میانی می‌توانند مستقلاً غایب باشند: نمره‌دهنده
+    # مسئول واحد است یا معاونت (مسیر «مدیر»)، و مرحلهٔ منابع انسانی هست یا نیست
+    # (پروندهٔ خودِ کارمندانِ HR). مقصدِ هر ترکیب در جدولِ گذارها است.
     action = "manager_submit" if is_manager_path(record) else "submit"
+    if skips_hr_review(record):
+        action += "_hr_subject"
     apply_transition(
         db, record, action, current_user,
         before=lambda: finalize_scoring(db, record, current_user),
@@ -890,6 +911,12 @@ def return_evaluation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="در مسیر «مدیر» مرحله قبلی وجود ندارد؛ معاونت خودش نمره‌دهنده اول است",
         )
+
+    # پروندهٔ بی‌مرحلهٔ HR: هر برگشتی که مقصدش «صفِ منابع انسانی» بود، یک پله
+    # بیشتر عقب می‌رود. بی این، پرونده به وضعیتی می‌رفت که هیچ‌کس در آن اقدامی
+    # نمی‌تواند بکند و برای همیشه همان‌جا می‌ماند.
+    if skips_hr_review(record) and action in ("deputy_return", "ceo_return_manager"):
+        action += "_hr_subject"
 
     def _before() -> None:
         # دلیل برگشت هم به‌صورت کامنت قابل‌مشاهده در پرونده ثبت می‌شود و هم در audit

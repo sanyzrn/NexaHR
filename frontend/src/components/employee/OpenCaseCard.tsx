@@ -49,7 +49,11 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
       >
         {/* کارمند تا امروز فقط نام مرحله را می‌دید؛ اینکه «چند مرحله مانده»
             هیچ‌جا نبود. جعبهٔ سیاه، حتی وقتی محتوایش درست است، جعبهٔ سیاه است. */}
-        <WorkflowStepper status={item.status} className="mb-4" />
+        <WorkflowStepper
+          status={item.status}
+          hrSkipped={item.hr_review_skipped ?? false}
+          className="mb-4"
+        />
 
         <p className="text-sm text-gray-600">
           ارزیابی شما از {formatDateTime(item.created_at)} آغاز شده و از{" "}
