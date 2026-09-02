@@ -1,4 +1,4 @@
-"""کارمندِ منابع انسانی و پروندهٔ ارزیابیِ خودش.
+"""کارمندِ منابع انسانی و پروندهٔ ارزیابیِ خودش — گاردهای فردی.
 
 سه مرحلهٔ زنجیره از قبل گارد داشتند: هیچ‌کس نمی‌تواند مسئول واحد، معاونت یا
 مدیرعاملِ *خودش* باشد. مرحلهٔ منابع انسانی این گارد را نداشت — و اتفاقاً تنها
@@ -7,6 +7,12 @@
 نتیجه‌اش دقیقاً همان چیزی بود که ممیزی پیدا کرد: کارمند منابع انسانی می‌توانست
 پروندهٔ خودش را از صف بردارد، تأییدش کند، لغوش کند، یا اعتراض خودش را رد کند.
 همهٔ آن endpointها فقط «نقش = hr» را می‌سنجیدند و نقش، این را نمی‌گوید.
+
+این گاردها سرِ جایشان‌اند، ولی حالا لایهٔ *دومِ* دفاع‌اند: پروندهٔ کارمندِ منابع
+انسانی از این پس اصلاً مرحلهٔ منابع انسانی ندارد
+(`test_hr_subject_chain.py`). یعنی مسیری که این تست‌ها می‌بندند، دیگر از
+سرِ ساختار هم باز نیست. هر دو نگه داشته می‌شوند چون یکی قاعدهٔ زنجیره است و
+دیگری گاردِ endpointها؛ اولی می‌تواند روزی برای پرونده‌های قدیمی درست نباشد.
 """
 import pytest
 
@@ -15,6 +21,7 @@ from tests.helpers import (
     auth_header,
     full_valid_scores,
     make_access,
+    make_hr_unit,
     make_personnel,
     make_user,
 )
@@ -26,7 +33,11 @@ def hr_under_review(client, db_session):
 
     این حالت عجیب نیست؛ هر کارمند HR هم پرسنل است و ارزیابی می‌شود.
     """
-    person = make_personnel(db_session, full_name="کارشناس منابع انسانی", org_unit="واحد HR")
+    person = make_personnel(
+        db_session,
+        full_name="کارشناس منابع انسانی",
+        org_unit=make_hr_unit(db_session),
+    )
     subject_hr = make_user(db_session, "hr", personnel_id=person.id)
     other_hr = make_user(db_session, "hr")
     sup = make_user(db_session, "unit_supervisor")
@@ -45,6 +56,8 @@ def hr_under_review(client, db_session):
         json={"scores": full_valid_scores(active_indicators(db_session))},
         headers=auth_header(sup),
     )
+    # ثبتِ مسئول واحد پرونده را مستقیم روی میزِ معاونت می‌گذارد: موضوعِ پرونده
+    # خودش منابع انسانی است، پس مرحلهٔ منابع انسانی وجود ندارد.
     client.post(f"/api/evaluations/{record_id}/submit", headers=auth_header(sup))
     return {
         "record_id": record_id,
@@ -68,11 +81,17 @@ def test_they_cannot_read_their_own_case_from_the_hr_panel(client, hr_under_revi
 
 
 def test_they_cannot_approve_their_own_case(client, hr_under_review):
+    """گاردِ فردی پیش از گاردِ ساختاری می‌ایستد و ۴۰۳ می‌دهد، نه ۴۰۰.
+
+    ترتیبش معنا دارد: پیام باید بگوید «این پروندهٔ خودت است»، نه «این پرونده در
+    انتظار بررسی منابع انسانی نیست» — دومی درست ولی گمراه‌کننده است.
+    """
     response = client.post(
         f"/api/evaluations/{hr_under_review['record_id']}/hr-approve",
         headers=auth_header(hr_under_review["subject_hr"]),
     )
     assert response.status_code == 403, response.text
+    assert "خودِ شما" in response.json()["detail"]
 
 
 def test_they_cannot_claim_their_own_case(client, hr_under_review):
@@ -96,7 +115,7 @@ def test_they_cannot_cancel_their_own_case(client, hr_under_review):
 def test_they_cannot_resolve_their_own_objection(client, db_session, hr_under_review):
     record_id = hr_under_review["record_id"]
     for step, actor in [
-        ("hr-approve", hr_under_review["other_hr"]),
+        # «hr-approve» این‌جا نیست چون این پرونده آن مرحله را ندارد.
         ("deputy-approve", hr_under_review["dep"]),
         ("ceo-finalize", hr_under_review["ceo"]),
     ]:
@@ -128,7 +147,11 @@ def test_they_cannot_resolve_their_own_objection(client, db_session, hr_under_re
 
 
 def test_the_case_cannot_be_handed_over_to_the_subject(client, hr_under_review):
-    """گاردِ بالا از راهِ دیگر: یک HR دیگر پرونده را به خودِ او بدهد."""
+    """گاردِ بالا از راهِ دیگر: یک HR دیگر پرونده را به خودِ او بدهد.
+
+    حالا حتی یک پله زودتر بسته می‌شود: هیچ کاربر HRای — نه فقط خودِ موضوع —
+    روی پروندهٔ بازِ واحدِ منابع انسانی دستی ندارد.
+    """
     response = client.post(
         f"/api/evaluations/{hr_under_review['record_id']}/hr-handover",
         json={
@@ -137,16 +160,26 @@ def test_the_case_cannot_be_handed_over_to_the_subject(client, hr_under_review):
         },
         headers=auth_header(hr_under_review["other_hr"]),
     )
-    assert response.status_code == 400, response.text
+    assert response.status_code == 403, response.text
 
 
-def test_another_hr_user_handles_it_normally(client, hr_under_review):
-    """گاردی که مسیر درست را هم ببندد، یک قفل است نه یک قاعده."""
+def test_not_even_another_hr_user_reviews_it(client, hr_under_review):
+    """قاعده عوض شد: مرحله به HR دیگری *سپرده* نمی‌شود، حذف می‌شود.
+
+    پیش از این همین تست ۲۰۰ می‌گرفت — «یک HR دیگر رسیدگی می‌کند» راهِ درست
+    شمرده می‌شد. در تیمِ واقعیِ منابع انسانی آن راه به دو بن‌بست رسید:
+    تنها HR دیگری که بالای سرِ کارشناس بود، همان کسی بود که نمره را داده، و
+    برای پروندهٔ مدیرِ HR تنها داورِ باقی‌مانده زیردستِ خودش بود.
+
+    پاسخ ۴۰۳ است و نه ۴۰۰: گاردِ دسترسی پیش از گاردِ وضعیت می‌ایستد و
+    می‌گوید این پرونده *مالِ او نیست*، نه اینکه «هنوز نوبتش نشده».
+    """
     response = client.post(
         f"/api/evaluations/{hr_under_review['record_id']}/hr-approve",
         headers=auth_header(hr_under_review["other_hr"]),
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 403, response.text
+    assert "پیش از ثبت نهایی" in response.json()["detail"]
 
 
 def test_they_still_see_their_own_result_through_their_own_panel(client, db_session, hr_under_review):
@@ -155,7 +188,6 @@ def test_they_still_see_their_own_result_through_their_own_panel(client, db_sess
     مسیر کارمند جداست و فقط نتیجهٔ نهایی را می‌دهد — بدون شواهد و کامنت‌های زنجیره.
     """
     record_id = hr_under_review["record_id"]
-    client.post(f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr_under_review["other_hr"]))
     client.post(f"/api/evaluations/{record_id}/deputy-approve", headers=auth_header(hr_under_review["dep"]))
     client.post(f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(hr_under_review["ceo"]))
 

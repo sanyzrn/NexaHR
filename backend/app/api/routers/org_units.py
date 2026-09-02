@@ -44,6 +44,7 @@ def _to_read(db: Session, units: list[OrgUnit]) -> list[OrgUnitRead]:
             name=unit.name,
             full_name=unit.full_name,
             is_active=unit.is_active,
+            is_hr_unit=unit.is_hr_unit,
             display_order=unit.display_order,
             personnel_count=counts.get(unit.full_name, 0),
         )
@@ -120,6 +121,10 @@ def update_org_unit(
         unit.name = updates["name"].strip()
     if "is_active" in updates:
         unit.is_active = updates["is_active"]
+    if "is_hr_unit" in updates:
+        # فقط پرونده‌های *تازه* را عوض می‌کند: شکلِ زنجیره در لحظهٔ ساخت مهر
+        # می‌شود، پس پروندهٔ در جریان از زیر پای تأییدکننده‌اش عوض نمی‌شود.
+        unit.is_hr_unit = updates["is_hr_unit"]
 
     try:
         db.flush()

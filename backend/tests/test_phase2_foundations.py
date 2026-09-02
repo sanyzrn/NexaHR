@@ -62,8 +62,14 @@ def test_setting_is_manager_clears_supervisor_access(client, db_session):
     assert r.json()["unit_supervisor_user_id"] is None
 
 
-def test_create_evaluation_without_supervisor_gives_distinct_message(client, db_session):
-    """مدیر سابق که دیگر مدیر نیست ولی مسئول واحد هم ندارد نباید پیام گمراه‌کننده بگیرد."""
+def test_creating_a_case_names_the_real_scorer(client, db_session):
+    """پیام باید بگوید *کی* می‌تواند این پرونده را باز کند، نه اینکه زنجیره خراب است.
+
+    پیش از این پاسخ «مسئول واحد برای این پرسنل تعریف نشده است؛ منابع انسانی
+    باید تعیینش کند» بود — جمله‌ای که برای این زنجیره دروغ می‌گفت: زنجیره سالم
+    است و نمره‌دهنده‌اش معاونت. منابع انسانی را دنبالِ اشکالی می‌فرستاد که
+    وجود نداشت.
+    """
     sup = make_user(db_session, "unit_supervisor")
     dep = make_user(db_session, "deputy")
     ceo = make_user(db_session, "ceo")
@@ -74,8 +80,14 @@ def test_create_evaluation_without_supervisor_gives_distinct_message(client, db_
     r = client.post(
         "/api/evaluations", json={"subject_personnel_id": personnel.id}, headers=auth_header(sup)
     )
-    assert r.status_code == 400
-    assert "مسئول واحد برای این پرسنل تعریف نشده" in r.json()["detail"]
+    assert r.status_code == 403, r.text
+    assert "معاونت" in r.json()["detail"]
+
+    # و همان زنجیره برای خودِ معاونت باز می‌شود.
+    ok = client.post(
+        "/api/evaluations", json={"subject_personnel_id": personnel.id}, headers=auth_header(dep)
+    )
+    assert ok.status_code == 201, ok.text
 
 
 def test_evaluation_list_is_paginated_and_searchable(client, db_session):

@@ -17,6 +17,7 @@ from tests.helpers import (
     make_access,
     make_personnel,
     make_user,
+    set_module,
 )
 
 
@@ -26,6 +27,9 @@ def _isolated_chain(client, db_session, org_unit: str):
     نام پرسنل هم عمداً یکتاست: هلپر مشترک به همه «کارمند تست» می‌دهد، و با نام
     یکسان نمی‌شود ثابت کرد متن یک اعلان به کدام پرونده اشاره دارد.
     """
+    # کارمند از نهایی‌شدنِ پروندهٔ خودش خبر می‌گیرد — ولی فقط اگر «کارنامه من»
+    # در این سازمان چیزی نشان بدهد. ماژولش پیش‌فرض خاموش است.
+    set_module(db_session, "employee_evaluation_visibility", True)
     hr = make_user(db_session, "hr")
     sup = make_user(db_session, "unit_supervisor")
     dep = make_user(db_session, "deputy")

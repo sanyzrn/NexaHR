@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { usePermissions } from "../auth/PermissionsContext";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Copilot } from "./copilot/Copilot";
+import { CopilotSessionProvider } from "./copilot/CopilotSession";
 import { Footer } from "./Footer";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "../ui/ThemeToggle";
@@ -83,6 +84,7 @@ export function Layout() {
     /* پوستهٔ شناور: هیچ‌کدام از سه قاب (ناوبری، نوار بالا، پاصفحه) به لبهٔ
        پنجره نمی‌چسبند. فاصله را همین ظرف می‌دهد تا هر سه یک اندازه عقب
        بنشینند و گردیِ گوشه‌هایشان دیده شود. */
+    <CopilotSessionProvider>
     <div className="flex min-h-screen gap-3 bg-cream-50 px-3 pb-3 lg:gap-4 lg:px-4 lg:pb-4">
       {/* پرش به محتوای اصلی: کاربر کیبورد/screen reader مجبور نیست هر بار کل
           ناوبری را Tab بزند تا به محتوای صفحه برسد */}
@@ -198,8 +200,11 @@ export function Layout() {
         <Footer />
       </div>
 
-      {/* دستیار هوشمند — خودش تصمیم می‌گیرد دیده شود یا نه (بر پایهٔ /ai/status) */}
+      {/* دستیار هوشمند — خودش تصمیم می‌گیرد دیده شود یا نه (بر پایهٔ /ai/status).
+          ظرفِ گفت‌وگو *بیرون* از این است و بالای مسیریاب می‌نشیند، تا پنجرهٔ
+          شناور و صفحهٔ `/copilot` یک گفت‌وگو داشته باشند نه دو. */}
       <Copilot />
     </div>
+    </CopilotSessionProvider>
   );
 }

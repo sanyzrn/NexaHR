@@ -138,3 +138,36 @@ def enable_ai_provider(
     existing.model = model
     existing.api_key_encrypted = encrypt(api_key) if api_key else ""
     db.flush()
+
+
+def make_hr_unit(db: Session, name: str = "منابع انسانی", site: str | None = None) -> str:
+    """واحدِ منابع انسانی را می‌سازد و نامِ کاملش را برمی‌گرداند.
+
+    همان رشته‌ای که باید در `personnel.org_unit` بنشیند تا آن پرسنل عضوِ این
+    واحد شمرده شود — چون `personnel.org_unit` کلید خارجی نیست و پیوند از راهِ
+    رشته است (`models/org_unit.py` می‌گوید چرا).
+    """
+    from app.models.org_unit import OrgUnit
+
+    unit = OrgUnit(site=site, name=name, is_hr_unit=True)
+    db.add(unit)
+    db.flush()
+    return unit.full_name
+
+
+def set_module(db: Session, key: str, enabled: bool) -> None:
+    """ماژول را روشن/خاموش می‌کند — همان کاری که پنل مدیریت می‌کند.
+
+    لازم است چون چند ماژولِ نمایشِ کارمند پیش‌فرض *خاموش*‌اند
+    (`core/modules.py`)، و تستی که رفتارِ روشن را می‌سنجد باید صریح روشنش کند —
+    نه اینکه به پیش‌فرض تکیه کند و روزی که پیش‌فرض عوض شد بی‌صدا چیزِ دیگری
+    بسنجد.
+    """
+    from app.models.module import ModuleSetting
+
+    row = db.get(ModuleSetting, key)
+    if row is None:
+        db.add(ModuleSetting(key=key, enabled=enabled))
+    else:
+        row.enabled = enabled
+    db.flush()

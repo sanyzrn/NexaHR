@@ -37,6 +37,7 @@ from app.models.personnel import Personnel
 from app.services.evaluation import inactive_seat_labels, next_evaluation_code
 from app.services.indicator_framework import ensure_framework
 from app.services.scoring_scheme import active_scheme
+from app.services.self_evaluation import hr_unit_personnel_ids
 from app.services.workflow import IS_OPEN_RECORD
 
 
@@ -227,16 +228,15 @@ def execute(db: Session, cohort: CohortFilter) -> list[PersonPlan]:
     # دسته خوانده می‌شوند، پس همهٔ پرونده‌های یک اجرا زیر یک نسخه‌اند.
     scheme = active_scheme(db)
     framework = ensure_framework(db)
+    creating_ids = [p.personnel_id for p in plans if p.outcome is BulkOutcome.created]
     access_by_person = {
         row.personnel_id: row
         for row in db.scalars(
-            select(EvaluationAccess).where(
-                EvaluationAccess.personnel_id.in_(
-                    [p.personnel_id for p in plans if p.outcome is BulkOutcome.created]
-                )
-            )
+            select(EvaluationAccess).where(EvaluationAccess.personnel_id.in_(creating_ids))
         )
     }
+    # یک پرسش برای کلِ دسته، نه یکی به‌ازای هر نفر — مثل `access_by_person` بالا.
+    hr_subjects = hr_unit_personnel_ids(db, creating_ids)
 
     for person_plan in plans:
         if person_plan.outcome is not BulkOutcome.created:
@@ -253,6 +253,10 @@ def execute(db: Session, cohort: CohortFilter) -> list[PersonPlan]:
             period_id=open_period.id if open_period else None,
             scoring_scheme_id=scheme.id if scheme else None,
             indicator_framework_id=framework.id,
+            # همان مهرِ create_evaluation: پروندهٔ کارمندِ منابع انسانی مرحلهٔ
+            # بررسیِ منابع انسانی ندارد. جا افتادنش این‌جا یعنی پرونده‌های
+            # ساخته‌شدهٔ دسته‌ای همان بن‌بستی را دارند که این تغییر رفعش کرد.
+            hr_review_skipped=person_plan.personnel_id in hr_subjects,
             # هر دو مسیر از `draft` شروع می‌شوند — همان رفتار create_evaluation.
             # تفاوتِ مسیر «مدیر» فقط در *نمره‌دهندهٔ اول* است (معاونت)، نه در وضعیت.
             status=EvaluationStatus.draft,

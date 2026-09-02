@@ -44,7 +44,7 @@ from app.services.indicator_framework import indicator_ids_for_record
 from app.services.notifications import notify
 from app.services.self_assessment import OPEN_STATUSES as SELF_ASSESSMENT_OPEN_STATUSES
 from app.services.self_assessment import may_self_assess
-from app.services.workflow import IS_OPEN_RECORD
+from app.services.workflow import IS_OPEN_RECORD, objection_resolver_field
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -97,13 +97,22 @@ def my_open_evaluation(
             MyOpenEvaluation.model_validate(record).model_copy(
                 update={
                     "indicator_ids": sorted(indicator_ids_for_record(db, record)),
-                    # سه شرط، و هر سه لازم: نقش خودارزیابی داشته باشد، پرونده
-                    # هنوز در مرحلهٔ ثبت باشد، و مهلتِ دوره نگذشته باشد. فرانت
-                    # نباید هیچ‌کدام را خودش حساب کند.
+                    # چهار شرط، و هر چهار لازم: نقش خودارزیابی داشته باشد،
+                    # پرونده هنوز در مرحلهٔ ثبت باشد، مهلتِ دوره نگذشته باشد، و
+                    # قبلاً ثبت نکرده باشد. فرانت نباید هیچ‌کدام را خودش حساب
+                    # کند — و شرطِ چهارم تا امروز این‌جا نبود، پس دقیقاً همان
+                    # چیزی می‌شد که این کامنت منعش می‌کرد: پرچم پس از ثبت
+                    # همچنان `true` می‌ماند و تنها چیزی که فرم را پنهان
+                    # می‌کرد، شرطِ *دومِ* خودِ رابط بود.
+                    #
+                    # سرور خودش همین ثبتِ دوم را با ۴۰۰ رد می‌کند
+                    # (`submit_self_assessment`)، پس پرچمی که «باز» بگوید فقط
+                    # به دکمه‌ای می‌رسد که خطا می‌دهد.
                     "self_assessment_open": (
                         eligible
                         and record.status in SELF_ASSESSMENT_OPEN_STATUSES
                         and window.is_open
+                        and record.self_assessment_submitted_at is None
                     ),
                     "submission_deadline": window.closes_on,
                     "submission_deadline_extended": window.extended,
@@ -328,20 +337,30 @@ def file_objection(
     )
 
 
-    hr_ids = list(
-        db.scalars(select(User.id).where(User.role == UserRole.hr, User.is_active.is_(True)))
-    )
-    notify(
-        db,
-        hr_ids,
-        type_="evaluation_objection_filed",
-        message=(
-            f"کارمند {record.subject.full_name} به نتیجهٔ پروندهٔ "
-            f"{record.evaluation_code} اعتراض ثبت کرد"
-        ),
-        evaluation_record_id=record.id,
-        link=f"/evaluations/{record.id}",
-    )
+    # اعلان به همان کسی می‌رود که موظف به پاسخ است. برای پروندهٔ اعضای واحدِ
+    # منابع انسانی آن کس، منابع انسانی نیست (`workflow.objection_resolver_field`)
+    # — و فرستادنِ اعلان به صفی که اجازهٔ پاسخ ندارد، یعنی اعتراض بی‌پاسخ می‌ماند
+    # و کسی که باید پاسخ بدهد اصلاً خبردار نمی‌شود.
+    resolver_field = objection_resolver_field(record)
+    if resolver_field is None:
+        recipients = list(
+            db.scalars(select(User.id).where(User.role == UserRole.hr, User.is_active.is_(True)))
+        )
+    else:
+        owner_id = getattr(record, resolver_field)
+        recipients = [owner_id] if owner_id is not None else []
+    if recipients:
+        notify(
+            db,
+            recipients,
+            type_="evaluation_objection_filed",
+            message=(
+                f"کارمند {record.subject.full_name} به نتیجهٔ پروندهٔ "
+                f"{record.evaluation_code} اعتراض ثبت کرد"
+            ),
+            evaluation_record_id=record.id,
+            link=f"/evaluations/{record.id}",
+        )
 
     db.commit()
     db.refresh(record)

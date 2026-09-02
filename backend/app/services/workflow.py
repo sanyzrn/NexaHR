@@ -70,6 +70,64 @@ def is_manager_path(record: EvaluationRecord) -> bool:
     return record.unit_supervisor_user_id is None
 
 
+def is_ceo_only_path(record: EvaluationRecord) -> bool:
+    """نه مسئول واحدی هست و نه معاونتی: خودِ مدیرعامل نمره‌دهندهٔ اول است.
+
+    عضوِ چهارمِ همان خانواده (`is_manager_path`، `skips_deputy`،
+    `skips_hr_review`) و حالتِ حدیِ هر دوی اولی: کسی که مستقیم زیر نظرِ
+    مدیرعامل کار می‌کند و بالای سرِ او کسِ دیگری *وجود ندارد*.
+
+    تا امروز این شکل قابل ثبت نبود — `upsert_access` خالی‌بودنِ هر دو صندلیِ
+    میانی را رد می‌کرد با این استدلال که «نمره‌دهنده‌ای وجود ندارد». استدلال
+    درست بود و نتیجه‌گیری غلط: نمره‌دهنده وجود دارد، مدیرعامل است. تنها راهِ
+    باقی‌مانده این بود که مدیرعامل را در صندلیِ «مسئول واحد» بنشانند — که
+    `may_act_at` اجازه‌اش را می‌دهد، ولی در رابط قابل انتخاب نبود و در سند
+    هم دروغ می‌گفت.
+
+    زیرمجموعهٔ `is_manager_path` است، پس هر گاردی که بر آن بنا شده باید
+    این حالت را هم صریح ببیند؛ گذارهای `ceo_submit*` همان‌جا هستند.
+    """
+    return record.unit_supervisor_user_id is None and record.deputy_user_id is None
+
+
+def skips_hr_review(record: EvaluationRecord) -> bool:
+    """این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است.
+
+    سومین عضوِ همان خانواده‌ای که `is_manager_path` و `skips_deputy` در آن‌اند:
+    مرحله‌ای که داورِ بی‌طرف ندارد، پرونده را نگه نمی‌دارد. دلیلِ نبودنش در
+    `services/self_evaluation.subject_belongs_to_hr` است و مقدارش در لحظهٔ ساخت
+    مهر می‌شود.
+    """
+    return bool(record.hr_review_skipped)
+
+
+def hr_panel_is_shielded(record: EvaluationRecord) -> bool:
+    """تا وقتی این پرونده باز است، پنلِ منابع انسانی آن را نمی‌بیند.
+
+    `skips_hr_review` می‌گوید HR در این پرونده *صندلی* ندارد. این تابع یک قدم
+    جلوتر می‌رود و می‌گوید تا پایانِ کار *پنجره* هم ندارد — چون کارشناسِ HR
+    ابزارهایی دارد که خارج از زنجیره روی پرونده اثر می‌گذارند (لغو، تمدیدِ مهلت،
+    تغییرِ مسئولِ مرحله) و پروندهٔ در جریان، شواهد و کامنت‌های ارزیاب را هم نشان
+    می‌دهد. پروندهٔ مدیرِ خودش یا هم‌تیمی‌اش نباید از آن پنجره دیده شود.
+
+    ولی *برای همیشه* پنهان نمی‌ماند: با `finalized` یا `cancelled` دیگر جای
+    اثرگذاری نیست، و منابع انسانی برای بایگانی، گزارش و رسیدگی به اعتراض به
+    همان پرونده نیاز دارد. همان مرزی که کاربر خواست: «در جریان، علی نبیند» و
+    «بعد از ثبت نهایی، به پنل مدیریت HR برود».
+
+    استثنای دائمی فقط یکی است و جای دیگری است: `ensure_not_deciding_about_oneself`
+    پروندهٔ *خودِ* کاربر را در هر وضعیتی می‌بندد. مسیرِ خودش (`/api/me`) جداست.
+    """
+    return skips_hr_review(record) and record.status in OPEN_STATUSES
+
+
+IS_SHIELDED_FROM_HR_PANEL = EvaluationRecord.hr_review_skipped.is_(True) & IS_OPEN_RECORD
+"""همان شرط، برای کوئری‌ها. جفتِ `hr_panel_is_shielded` است — مثل
+`IS_OPEN_RECORD` و `OPEN_STATUSES` — و باید با آن هم‌قدم بماند: یکی فهرست را
+فیلتر می‌کند و دیگری صفحهٔ جزئیات را می‌بندد، و ناهم‌ترازیِ این دو همان چیزی
+است که یک بار ستونِ نتیجه را در فهرست لو داد."""
+
+
 # `is_manager_path` عمداً پیش از این جدول تعریف شده: چند گذار مستقیماً به آن
 # ارجاع می‌دهند (نه از راه lambda)، و پایین‌تر بودنش یعنی NameError در import.
 TRANSITIONS: dict[str, Transition] = {
@@ -78,7 +136,23 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.submitted,
         allowed_role=UserRole.unit_supervisor,
         assignee_field="unit_supervisor_user_id",
-        guard=lambda record: not is_manager_path(record),
+        guard=lambda record: not is_manager_path(record) and not skips_hr_review(record),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
+    ),
+    # همان ثبت، برای پرونده‌ای که موضوعش خودش منابع انسانی است: مقصد
+    # `hr_approved` است، یعنی «مرحلهٔ HR گذشت» — بی‌آنکه کسی در آن نشسته باشد.
+    #
+    # استفاده از همین وضعیت به‌جای افزودنِ وضعیتِ تازه، عمدی است و پیش از این
+    # هم سابقه دارد (`hr_approve_manager` که مرحلهٔ معاونت را مصرف‌شده
+    # می‌شمارد): وضعیت‌ها «الان روی میزِ کیست» را می‌گویند، و روی میزِ معاونت
+    # بودن، یک وضعیت است نه دو.
+    "submit_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.draft}),
+        to_status=EvaluationStatus.hr_approved,
+        allowed_role=UserRole.unit_supervisor,
+        assignee_field="unit_supervisor_user_id",
+        guard=lambda record: not is_manager_path(record) and skips_hr_review(record),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
     ),
@@ -91,7 +165,53 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.submitted,
         allowed_role=UserRole.deputy,
         assignee_field="deputy_user_id",
-        guard=is_manager_path,
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and not skips_hr_review(record)
+        ),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
+    ),
+    # مدیرِ منابع انسانی: هم مسیر «مدیر» است (معاونت نمره می‌دهد) و هم مرحلهٔ HR
+    # را ندارد. هر دو مرحلهٔ میانی مصرف‌شده‌اند، پس پرونده با ثبتِ معاونت مستقیم
+    # روی میزِ مدیرعامل می‌نشیند. این همان جایی است که پرونده «دیگر به منابع
+    # انسانی برنمی‌گردد».
+    "manager_submit_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.draft}),
+        to_status=EvaluationStatus.deputy_approved,
+        allowed_role=UserRole.deputy,
+        assignee_field="deputy_user_id",
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and skips_hr_review(record)
+        ),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
+    ),
+    # مسیرِ «مستقیمِ مدیرعامل»: نمره‌دهنده خودِ مدیرعامل است. مرحلهٔ معاونت
+    # وجود ندارد (نه اینکه مصرف شده باشد)، ولی مرحلهٔ منابع انسانی می‌ماند و
+    # همان یک جفت‌چشمِ مستقلِ این زنجیره است — این‌جا لازم‌تر از هر پروندهٔ
+    # دیگری، چون تنها تصمیم‌گیرِ زنجیره یک نفر است.
+    "ceo_submit": Transition(
+        from_statuses=frozenset({EvaluationStatus.draft}),
+        to_status=EvaluationStatus.submitted,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: is_ceo_only_path(record) and not skips_hr_review(record),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
+    ),
+    # همان مسیر، برای عضوِ واحدِ منابع انسانی که مستقیم زیر نظرِ مدیرعامل است:
+    # هر سه مرحلهٔ میانی غایب‌اند و مدیرعامل تنها داورِ پرونده است. حالتِ نادری
+    # است، ولی اگر گذارش نبود پرونده در `draft` قفل می‌شد.
+    "ceo_submit_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.draft}),
+        to_status=EvaluationStatus.deputy_approved,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: is_ceo_only_path(record) and skips_hr_review(record),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
     ),
@@ -101,7 +221,7 @@ TRANSITIONS: dict[str, Transition] = {
         allowed_role=UserRole.hr,
         assignee_field="hr_user_id",
         claimable_if_unassigned=True,
-        guard=lambda record: not is_manager_path(record),
+        guard=lambda record: not is_manager_path(record) and not skips_hr_review(record),
         error_status=http_status.HTTP_400_BAD_REQUEST,
         error_detail="این ارزیابی در انتظار بررسی منابع انسانی نیست",
         owner_error_detail="این پرونده در اختیار کاربر دیگری از منابع انسانی است",
@@ -115,7 +235,7 @@ TRANSITIONS: dict[str, Transition] = {
         allowed_role=UserRole.hr,
         assignee_field="hr_user_id",
         claimable_if_unassigned=True,
-        guard=is_manager_path,
+        guard=lambda record: is_manager_path(record) and not skips_hr_review(record),
         error_status=http_status.HTTP_400_BAD_REQUEST,
         error_detail="این ارزیابی در انتظار بررسی منابع انسانی نیست",
         owner_error_detail="این پرونده در اختیار کاربر دیگری از منابع انسانی است",
@@ -150,6 +270,7 @@ TRANSITIONS: dict[str, Transition] = {
         allowed_role=UserRole.hr,
         assignee_field="hr_user_id",
         claimable_if_unassigned=True,
+        guard=lambda record: not skips_hr_review(record),
         error_status=http_status.HTTP_400_BAD_REQUEST,
         error_detail="این ارزیابی در انتظار بررسی منابع انسانی نیست",
         owner_error_detail="این پرونده در اختیار کاربر دیگری از منابع انسانی است",
@@ -159,6 +280,19 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.submitted,
         allowed_role=UserRole.deputy,
         assignee_field="deputy_user_id",
+        guard=lambda record: not skips_hr_review(record),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله بررسی معاونت توسط شما نیست",
+    ),
+    # بی‌مرحلهٔ HR، برگشتِ معاونت یک پله بیشتر عقب می‌رود: `submitted` یعنی
+    # «در صفِ منابع انسانی»، و در این پرونده آن صف وجود ندارد — پرونده همان‌جا
+    # برای همیشه می‌ماند. پس مستقیم به مسئول واحد برمی‌گردد که نمره داده است.
+    "deputy_return_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.hr_approved}),
+        to_status=EvaluationStatus.draft,
+        allowed_role=UserRole.deputy,
+        assignee_field="deputy_user_id",
+        guard=skips_hr_review,
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله بررسی معاونت توسط شما نیست",
     ),
@@ -179,7 +313,38 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.submitted,
         allowed_role=UserRole.ceo,
         assignee_field="ceo_user_id",
-        guard=is_manager_path,
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and not skips_hr_review(record)
+        ),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
+    ),
+    # مسیرِ «مستقیمِ مدیرعامل»: برگشت به «صفِ منابع انسانی» بی‌معناست، چون
+    # چیزی که باید عوض شود نمرهٔ خودِ مدیرعامل است. تنها پلهٔ عقب‌ترش خودِ
+    # نمره‌دهی است.
+    "ceo_return_ceo_only": Transition(
+        from_statuses=frozenset({EvaluationStatus.deputy_approved}),
+        to_status=EvaluationStatus.draft,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=is_ceo_only_path,
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
+    ),
+    # پروندهٔ مدیرِ منابع انسانی: نه مرحلهٔ معاونتِ جدا دارد (خودش نمره داده) و
+    # نه مرحلهٔ HR. تنها پلهٔ عقب‌ترش، خودِ نمره‌دهی است.
+    "ceo_return_manager_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.deputy_approved}),
+        to_status=EvaluationStatus.draft,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and skips_hr_review(record)
+        ),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
     ),
@@ -334,6 +499,29 @@ def skips_deputy(record: EvaluationRecord) -> bool:
     که کسی در آن نایستاده، نباید پرونده را نگه دارد.
     """
     return record.deputy_user_id is None
+
+
+def objection_resolver_field(record: EvaluationRecord) -> str | None:
+    """چه کسی به اعتراضِ این پرونده پاسخ می‌دهد. `None` یعنی منابع انسانی.
+
+    قاعدهٔ رسیدگی به اعتراض در هر آیین‌نامه‌ای یکی است: اعتراض به نخستین سطحی
+    می‌رود که در تهیهٔ همان ارزیابی دست نداشته. برای پروندهٔ معمولی آن سطح،
+    منابع انسانی است. برای پروندهٔ خودِ اعضای واحدِ منابع انسانی، منابع انسانی
+    یا موضوعِ پرونده است یا هم‌تیمیِ او — پس اعتراض یک پله بالاترِ نمره‌دهنده
+    می‌رود:
+
+    * کارشناسِ HR: نمره‌دهنده مسئولِ واحد (مدیرِ HR) است → معاونت.
+    * مدیرِ HR: نمره‌دهنده خودِ معاونت است → مدیرعامل.
+
+    بی این تابع، اعتراضِ این پرونده‌ها *هیچ رسیدگی‌کننده‌ای نداشت*: مسیرِ پاسخ
+    نقشِ `hr` می‌خواست و `ensure_not_deciding_about_oneself` تنها HRِ ممکن را
+    رد می‌کرد. اعتراضی که کسی موظف به پاسخش نباشد، تشریفات است.
+    """
+    if not skips_hr_review(record):
+        return None
+    if is_manager_path(record) or skips_deputy(record):
+        return "ceo_user_id"
+    return "deputy_user_id"
 
 
 # `active_indicators_by_id` عمداً حذف شد (P1-05). هر جا که پرسیده می‌شود «این

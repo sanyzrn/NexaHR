@@ -56,23 +56,33 @@ from app.services.indicator_framework import (
     indicator_ids_for_record,
     indicators_for_record,
 )
-from app.services.notifications import notify, notify_stage_owner_reassigned
+from app.services.notifications import (
+    employee_results_are_visible,
+    notify,
+    notify_stage_owner_reassigned,
+    subject_user_ids,
+)
 from app.services.pdf import weasyprint_available
 from app.services.scoring_scheme import active_scheme, rules_for_record
 from app.services.self_assessment import may_view as may_view_self_assessment
 from app.services.self_evaluation import (
     ensure_chain_stages_are_not_redundant,
     ensure_evaluators_are_not_the_subject,
-    ensure_not_deciding_about_oneself,
+    ensure_hr_may_handle,
+    subject_belongs_to_hr,
 )
 from app.services.snapshot import build_final_snapshot
 from app.services.workflow import (
     IS_OPEN_RECORD,
+    IS_SHIELDED_FROM_HR_PANEL,
     OPEN_STATUSES,
     apply_transition,
     finalize_scoring,
+    is_ceo_only_path,
     is_manager_path,
     may_act_at,
+    objection_resolver_field,
+    skips_hr_review,
 )
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
@@ -123,9 +133,7 @@ def _is_the_scorer(record: EvaluationRecord, current_user: CurrentUser) -> bool:
     """
     if record.status is not EvaluationStatus.draft:
         return False
-    manager_path = is_manager_path(record)
-    stage_role = UserRole.deputy if manager_path else UserRole.unit_supervisor
-    scorer_id = record.deputy_user_id if manager_path else record.unit_supervisor_user_id
+    stage_role, scorer_id = _scorer_seat(record)
     return (
         scorer_id is not None
         and current_user.id == scorer_id
@@ -133,12 +141,28 @@ def _is_the_scorer(record: EvaluationRecord, current_user: CurrentUser) -> bool:
     )
 
 
+def _scorer_seat(record: EvaluationRecord) -> tuple[UserRole, int | None]:
+    """کدام صندلی به این پرونده نمره می‌دهد، و نقشِ آن مرحله چیست.
+
+    سه شکل، به ترتیبِ خالی‌شدنِ زنجیره از پایین: مسئول واحد، معاونت (مسیر
+    «مدیر»)، و خودِ مدیرعامل (کسی که بالای سرش دیگر کسی نیست).
+    """
+    if is_ceo_only_path(record):
+        return UserRole.ceo, record.ceo_user_id
+    if is_manager_path(record):
+        return UserRole.deputy, record.deputy_user_id
+    return UserRole.unit_supervisor, record.unit_supervisor_user_id
+
+
 def _ensure_can_view(record: EvaluationRecord, current_user: CurrentUser) -> None:
     # پیش از هر چیز: موضوعِ پرونده آن را از این‌جا نمی‌بیند. پروندهٔ در جریان
     # شواهدِ ارزیاب را دارد و پنل HR کاملش را نشان می‌دهد؛ کارمندِ منابع انسانی
     # نباید ارزیابیِ خودش را از آن‌جا بخواند. مسیر خودش
     # (`/api/me/evaluations`) جداست و فقط نتیجهٔ نهایی را می‌دهد.
-    ensure_not_deciding_about_oneself(record, current_user)
+    #
+    # و همان استدلال، یک قدم فراتر: پروندهٔ *هم‌تیمی‌های* واحد منابع انسانی هم
+    # تا پیش از ثبت نهایی از این پنجره دیده نمی‌شود.
+    ensure_hr_may_handle(record, current_user)
     if current_user.role == UserRole.hr:
         return
     allowed_ids = {record.unit_supervisor_user_id, record.deputy_user_id, record.ceo_user_id}
@@ -321,44 +345,42 @@ def create_evaluation(
             ),
         )
 
-    if personnel.is_manager:
-        if (
-            not may_act_at(current_user.role, UserRole.deputy)
-            or current_user.id != access.deputy_user_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="فقط معاونت مربوطه می‌تواند ارزیابی این فرد را آغاز کند",
-            )
-        # مسیر «مدیر»: معاونت خودش نمره‌دهندهٔ اول است، پس پرونده مثل هر پروندهٔ
-        # دیگری از `draft` شروع می‌شود — فقط نمره‌دهنده‌اش معاونت است.
+    # «کی می‌تواند این پرونده را باز کند» = «کی به آن نمره می‌دهد»، و آن از
+    # *شکلِ زنجیره* می‌آید نه از پرچمِ `is_manager` روی پرسنل.
+    #
+    # پیش از این شاخهٔ اول `personnel.is_manager` بود و شاخهٔ دوم می‌گفت «مسئول
+    # واحد تعریف نشده است؛ منابع انسانی باید تعیینش کند» — جمله‌ای که برای دو
+    # شکلِ سالمِ زنجیره دروغ بود: کسی که مستقیم زیر نظرِ مدیرعامل است، و
+    # غیرمدیری که مسئولِ مستقیمش معاونت است. زنجیره درست ثبت شده بود و پرونده
+    # باز نمی‌شد.
+    #
+    # زنجیره از پایین خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است.
+    if access.unit_supervisor_user_id is not None:
+        scorer_role, scorer_id = UserRole.unit_supervisor, access.unit_supervisor_user_id
+        scorer_label = "مسئول واحد"
+    elif access.deputy_user_id is not None:
+        # مسیر «مدیر»: معاونت خودش نمره‌دهندهٔ اول است.
         #
-        # پیش از این مستقیماً در `hr_approved` ساخته می‌شد، یعنی *مرحلهٔ بررسی
-        # منابع انسانی را رد می‌کرد*: معاونت نمره می‌داد و خودش همان نمره را
-        # تأیید می‌کرد و پرونده می‌رفت روی میز مدیرعامل. پروندهٔ مدیران —
-        # پرامدترین ارزیابی‌های سازمان — با دو چشم بسته می‌شد، در حالی که پروندهٔ
-        # یک کارشناس با چهار.
-        record_status = EvaluationStatus.draft
-        unit_supervisor_user_id = None
+        # پرونده مثل هر پروندهٔ دیگری از `draft` شروع می‌شود. پیش از این
+        # مستقیماً در `hr_approved` ساخته می‌شد، یعنی *مرحلهٔ بررسی منابع
+        # انسانی را رد می‌کرد*: معاونت نمره می‌داد و خودش همان نمره را تأیید
+        # می‌کرد و پرونده می‌رفت روی میز مدیرعامل. پروندهٔ مدیران — پرامدترین
+        # ارزیابی‌های سازمان — با دو چشم بسته می‌شد، در حالی که پروندهٔ یک
+        # کارشناس با چهار.
+        scorer_role, scorer_id = UserRole.deputy, access.deputy_user_id
+        scorer_label = "معاونت"
     else:
-        if access.unit_supervisor_user_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "مسئول واحد برای این پرسنل تعریف نشده است؛ "
-                    "ابتدا منابع انسانی باید در بخش دسترسی ارزیابی آن را تعیین کند"
-                ),
-            )
-        if (
-            not may_act_at(current_user.role, UserRole.unit_supervisor)
-            or current_user.id != access.unit_supervisor_user_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="فقط مسئول واحد مربوطه می‌تواند ارزیابی این فرد را آغاز کند",
-            )
-        record_status = EvaluationStatus.draft
-        unit_supervisor_user_id = access.unit_supervisor_user_id
+        # مسیرِ «مستقیمِ مدیرعامل»: بالای سرِ این فرد کسِ دیگری وجود ندارد.
+        scorer_role, scorer_id = UserRole.ceo, access.ceo_user_id
+        scorer_label = "مدیرعامل"
+
+    if not may_act_at(current_user.role, scorer_role) or current_user.id != scorer_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"فقط «{scorer_label}»ِ مربوطه می‌تواند ارزیابی این فرد را آغاز کند",
+        )
+    record_status = EvaluationStatus.draft
+    unit_supervisor_user_id = access.unit_supervisor_user_id
 
     # هر پرسنل در هر لحظه فقط یک ارزیابی باز (نهایی‌نشده) می‌تواند داشته باشد؛
     # ایندکس یکتای جزئی در دیتابیس هم همین قانون را در برابر race تضمین می‌کند.
@@ -397,6 +419,9 @@ def create_evaluation(
         period_id=open_period.id if open_period else None,
         scoring_scheme_id=scheme.id if scheme else None,
         indicator_framework_id=framework.id,
+        # شکلِ زنجیره در همین لحظه مهر می‌شود، مثل سه صندلیِ بالا: اگر نقشِ فرد
+        # فردا عوض شود، پروندهٔ در جریان از زیر پای تأییدکننده‌اش عوض نمی‌شود.
+        hr_review_skipped=subject_belongs_to_hr(db, personnel.id),
         status=record_status,
     )
     db.add(record)
@@ -517,7 +542,21 @@ def scope_evaluations_for_role(query, user: CurrentUser):
     دیگری نگیرد. نقش ناشناخته هیچ — پیش‌فرضِ باز ممنوع.
     """
     if user.role == UserRole.hr:
-        return query
+        # منابع انسانی همه را می‌بیند، *به‌جز پروندهٔ خودش*.
+        #
+        # صفحهٔ جزئیات از قبل این را می‌گرفت (`_ensure_can_view`) ولی فهرست نه —
+        # و فهرست ستونِ نتیجه دارد. یعنی کارمندِ منابع انسانی نمرهٔ نهاییِ خودش
+        # را در پنل می‌دید، پیش از آن‌که رسماً به او ابلاغ شود؛ فقط نمی‌توانست
+        # رویش کلیک کند. دو گاردِ ناهم‌تراز، بدترین حالت است: کسی که فقط
+        # جزئیات را بسته دیده، فرض می‌کند فهرست هم بسته است.
+        #
+        # مسیرِ خودش جداست و دست‌نخورده می‌ماند (`/api/me/evaluations`).
+        # و پروندهٔ اعضای واحدِ منابع انسانی، تا وقتی باز است
+        # (`workflow.hr_panel_is_shielded` — همان قاعده، برای کوئری).
+        query = query.where(~IS_SHIELDED_FROM_HR_PANEL)
+        if user.personnel_id is None:
+            return query
+        return query.where(EvaluationRecord.subject_personnel_id != user.personnel_id)
     if user.role == UserRole.unit_supervisor:
         return query.where(EvaluationRecord.unit_supervisor_user_id == user.id)
     if user.role == UserRole.deputy:
@@ -627,9 +666,15 @@ def export_evaluations_excel(
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> Response:
     """خروجی Excel از ارزیابی‌ها (فقط HR) — همان فیلترهای فهرست را می‌پذیرد تا HR
-    دقیقاً همان چیزی را که روی صفحه فیلتر کرده است دریافت کند."""
+    دقیقاً همان چیزی را که روی صفحه فیلتر کرده است دریافت کند.
+
+    «همان چیز» شامل دامنهٔ دید هم می‌شود، نه فقط فیلترها: این‌جا
+    `scope_evaluations_for_role` صدا نمی‌شد، پس خروجیِ Excel همان ستونِ نتیجه‌ای
+    را می‌داد که فهرست عمداً پنهان می‌کند — پروندهٔ خودِ کاربر HR و پروندهٔ در
+    جریانِ واحدش. گاردی که فقط روی صفحه باشد و روی «دریافت خروجی» نه، گارد نیست.
+    """
     query = _apply_evaluation_filters(
-        select(EvaluationRecord),
+        scope_evaluations_for_role(select(EvaluationRecord), current_user),
         q=q,
         status_filter=status_filter,
         org_unit=org_unit,
@@ -787,7 +832,17 @@ def submit_evaluation(
     # در مسیر «مدیر» نمره‌دهنده معاونت است، پس گذارِ دیگری با همان مقصد لازم
     # است. محاسبهٔ نتیجه در هر دو مسیر همین‌جا انجام می‌شود — جایی که نمره‌دهی
     # تمام می‌شود — نه در تأیید معاونت.
-    action = "manager_submit" if is_manager_path(record) else "submit"
+    # چهار ترکیب، چون دو مرحلهٔ میانی می‌توانند مستقلاً غایب باشند: نمره‌دهنده
+    # مسئول واحد است یا معاونت (مسیر «مدیر»)، و مرحلهٔ منابع انسانی هست یا نیست
+    # (پروندهٔ خودِ کارمندانِ HR). مقصدِ هر ترکیب در جدولِ گذارها است.
+    if is_ceo_only_path(record):
+        action = "ceo_submit"
+    elif is_manager_path(record):
+        action = "manager_submit"
+    else:
+        action = "submit"
+    if skips_hr_review(record):
+        action += "_hr_subject"
     apply_transition(
         db, record, action, current_user,
         before=lambda: finalize_scoring(db, record, current_user),
@@ -804,9 +859,9 @@ def hr_approve(
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> EvaluationRead:
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش. مسیر گذارها از `_ensure_can_view` نمی‌گذرد،
-    # پس گارد این‌جا صریح است نه ضمنی.
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش. مسیر گذارها از `_ensure_can_view`
+    # نمی‌گذرد، پس گارد این‌جا صریح است نه ضمنی.
+    ensure_hr_may_handle(record, current_user)
     # در مسیر «مدیر»، تأیید منابع انسانی پرونده را مستقیم روی میز مدیرعامل
     # می‌گذارد: مرحلهٔ معاونت مصرف شده، چون خودش نمره داده است.
     action = "hr_approve_manager" if is_manager_path(record) else "hr_approve"
@@ -879,17 +934,34 @@ def return_evaluation(
 ) -> EvaluationRead:
     """برگشت پرونده یک مرحله به عقب با ذکر دلیل اجباری؛ امتیازهای قبلی حفظ می‌شوند."""
     record = _get_record_or_404_for_update(db, evaluation_id)
+    # گاردِ گذار (`hr_return`) پروندهٔ بی‌مرحلهٔ HR را هم رد می‌کند، ولی با پیامِ
+    # «در انتظار بررسی منابع انسانی نیست» — درست، و گمراه‌کننده: انگار روزی
+    # نوبتش می‌شود. این‌جا زودتر و با پیامِ درست می‌ایستد.
+    ensure_hr_may_handle(record, current_user)
     action, comment_stage = _RETURN_ACTION_BY_ROLE[current_user.role]
 
-    if action == "ceo_return" and is_manager_path(record):
+    if action == "ceo_return" and is_ceo_only_path(record):
+        # نمره‌دهنده خودِ مدیرعامل است؛ تنها پلهٔ عقب‌تر، خودِ نمره‌دهی است.
+        action = "ceo_return_ceo_only"
+    elif action == "ceo_return" and is_manager_path(record):
         # در این مسیر مرحلهٔ معاونت مصرف شده؛ پرونده به صف منابع انسانی برمی‌گردد.
         action = "ceo_return_manager"
 
     if action == "deputy_return" and is_manager_path(record):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="در مسیر «مدیر» مرحله قبلی وجود ندارد؛ معاونت خودش نمره‌دهنده اول است",
+            detail=(
+                "این پرونده مرحلهٔ معاونتِ جدا ندارد؛ نمره‌دهندهٔ اولش خودِ "
+                + ("مدیرعامل" if is_ceo_only_path(record) else "معاونت")
+                + " است"
+            ),
         )
+
+    # پروندهٔ بی‌مرحلهٔ HR: هر برگشتی که مقصدش «صفِ منابع انسانی» بود، یک پله
+    # بیشتر عقب می‌رود. بی این، پرونده به وضعیتی می‌رفت که هیچ‌کس در آن اقدامی
+    # نمی‌تواند بکند و برای همیشه همان‌جا می‌ماند.
+    if skips_hr_review(record) and action in ("deputy_return", "ceo_return_manager"):
+        action += "_hr_subject"
 
     def _before() -> None:
         # دلیل برگشت هم به‌صورت کامنت قابل‌مشاهده در پرونده ثبت می‌شود و هم در audit
@@ -929,8 +1001,8 @@ def cancel_evaluation(
     غیرقابل‌ارزیابی می‌ماند و تنها درمانش SQL دستی روی پروداکشن بود.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
+    ensure_hr_may_handle(record, current_user)
 
     def _before() -> None:
         # دلیل هم به‌صورت کامنت در خود پرونده می‌ماند و هم در audit — تصمیم است، نه پاک‌کردن.
@@ -975,8 +1047,9 @@ def extend_submission_window(
     بازبینی از تمدیدِ خودسرانه قابل تشخیص نیست.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # همان قاعدهٔ همیشگی: منابع انسانی دربارهٔ پروندهٔ خودش تصمیم نمی‌گیرد.
-    ensure_not_deciding_about_oneself(record, current_user)
+    # همان قاعدهٔ همیشگی: منابع انسانی دربارهٔ پروندهٔ خودش — و پروندهٔ واحدِ
+    # خودش — تصمیم نمی‌گیرد.
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in _EXTENDABLE_STATUSES:
         raise HTTPException(
@@ -1047,8 +1120,8 @@ def hr_claim(
     هم‌زمان روی یک پرونده کار نکنند.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(
@@ -1092,8 +1165,8 @@ def hr_handover(
     تفکیک واقعی نقش‌های HR گام میان‌مدت همین یافته است.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(
@@ -1145,24 +1218,70 @@ def hr_handover(
     return _to_read(db, record)
 
 
+_OBJECTION_SEAT_LABEL = {"deputy_user_id": "معاونت", "ceo_user_id": "مدیرعامل"}
+
+
+def _ensure_can_resolve_objection(record: EvaluationRecord, current_user: CurrentUser) -> None:
+    """چه کسی حق دارد این اعتراض را ببندد.
+
+    برای پروندهٔ معمولی: منابع انسانی — منهای پروندهٔ خودش. برای پروندهٔ اعضای
+    واحدِ منابع انسانی: صندلیِ بالادستِ نمره‌دهنده، که
+    `workflow.objection_resolver_field` نامش را می‌دهد. آن‌جا نقشِ `hr` عمداً رد
+    می‌شود: هم‌تیمیِ معترض، بی‌طرف نیست.
+    """
+    field = objection_resolver_field(record)
+    if field is None:
+        if current_user.role is not UserRole.hr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="رسیدگی به اعتراضِ این پرونده با منابع انسانی است",
+            )
+        ensure_hr_may_handle(record, current_user)
+        return
+
+    stage_role = UserRole.ceo if field == "ceo_user_id" else UserRole.deputy
+    owner_id = getattr(record, field)
+    if (
+        owner_id is None
+        or current_user.id != owner_id
+        or not may_act_at(current_user.role, stage_role)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "این پرونده متعلق به واحد منابع انسانی است؛ رسیدگی به اعتراضِ آن با "
+                f"«{_OBJECTION_SEAT_LABEL[field]}» است، نه منابع انسانی."
+            ),
+        )
+    # و همان قاعدهٔ همیشگی، حتی برای صندلیِ زنجیره: کسی که موضوعِ پرونده است
+    # اعتراضِ خودش را نمی‌بندد.
+    ensure_hr_may_handle(record, current_user)
+
+
 @router.post("/{evaluation_id}/resolve-objection", response_model=EvaluationRead)
 def resolve_objection(
     evaluation_id: int,
     payload: ObjectionResolution,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
-    """ثبت پاسخ منابع انسانی به اعتراض کارمند.
+    """ثبت پاسخ به اعتراض کارمند.
 
     اعتراضی که کسی موظف به پاسخ‌گویی به آن نباشد، تشریفات است. این endpoint اعتراض
     را می‌بندد و پاسخ را کنار خودِ اعتراض در پرونده ثبت می‌کند.
+
+    در حالتِ عادی پاسخ‌دهنده منابع انسانی است. برای پروندهٔ اعضای همان واحد،
+    منابع انسانی خودش طرفِ ماجراست و پاسخ‌دهنده یک پله بالاتر می‌رود
+    (`_ensure_can_resolve_objection`) — وگرنه این اعتراض‌ها هیچ رسیدگی‌کننده‌ای
+    نداشتند.
 
     نتیجهٔ ارزیابی و سند نهایی عمداً دست‌نخورده می‌مانند: اگر واقعاً باید امتیاز عوض
     شود، مسیرش ارزیابی تازه است نه بازنویسی سندی که هش و امضا دارد.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    _ensure_can_resolve_objection(record, current_user)
 
     if record.objection_at is None:
         raise HTTPException(
@@ -1187,20 +1306,18 @@ def resolve_objection(
         new_value={"resolution": payload.resolution},
     )
 
-    # خودِ معترض باید پاسخ را ببیند، وگرنه اعتراضش در سکوت گم می‌شود
-    subject_user_ids = list(
-        db.scalars(
-            select(User.id).where(
-                User.role == UserRole.employee,
-                User.personnel_id == record.subject_personnel_id,
-                User.is_active.is_(True),
-            )
-        )
+    # خودِ معترض باید پاسخ را ببیند، وگرنه اعتراضش در سکوت گم می‌شود — ولی
+    # «دیدن» از راهِ «کارنامه من» است، و اگر آن صفحه در این سازمان چیزی نشان
+    # ندهد، اعلان فقط به دری می‌بَرد که بسته است.
+    recipients = (
+        subject_user_ids(db, record.subject_personnel_id)
+        if employee_results_are_visible(db)
+        else []
     )
-    if subject_user_ids:
+    if recipients:
         notify(
             db,
-            subject_user_ids,
+            recipients,
             type_="evaluation_objection_resolved",
             message=f"به اعتراض شما دربارهٔ پروندهٔ {record.evaluation_code} پاسخ داده شد",
             evaluation_record_id=record.id,
@@ -1232,6 +1349,10 @@ def reassign_stage_owner(
     قفل ردیف و همان مسیر audit استفاده می‌کند.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
+    # این‌جا گارد اصلاً نبود — و بازتخصیص، اثرگذارترین ابزارِ بیرون از زنجیره است:
+    # عوض‌کردنِ مسئولِ یک مرحله یعنی انتخابِ داورِ آن مرحله. منابع انسانی نباید
+    # آن را روی پروندهٔ خودش یا پروندهٔ در جریانِ واحدِ خودش داشته باشد.
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(

@@ -167,7 +167,9 @@ def test_deputy_cannot_return_on_manager_path(client, db_session):
         headers=auth_header(dep),
     )
     assert r.status_code == 400
-    assert "مسیر «مدیر»" in r.json()["detail"]
+    # پیام حالا *نمره‌دهندهٔ همین پرونده* را نام می‌برد، نه نامِ مسیر را: سه
+    # شکلِ زنجیره وجود دارد و «مسیر مدیر» فقط یکی‌شان بود.
+    assert "معاونت" in r.json()["detail"]
 
 
 def _notifications_for(db_session, user_id: int, type_prefix: str) -> int:

@@ -19,11 +19,18 @@ const CHAIN: { key: EvaluationStage; short: string }[] = [
 export function WorkflowStepper({
   status,
   returned = false,
+  hrSkipped = false,
   className = "",
 }: {
   status: EvaluationStatus;
   /** برگشت‌خورده: مرحلهٔ فعلی کهربایی می‌شود، نه قرمزِ «در جریانِ عادی». */
   returned?: boolean;
+  /** پروندهٔ کارمندِ منابع انسانی: مرحلهٔ منابع انسانی *وجود ندارد*.
+   *
+   * بی این، نوار آن مرحله را سبز نشان می‌داد — یعنی «انجام شد» برای کاری که
+   * هیچ‌کس انجامش نداده. نوارِ مراحل تنها جایی است که کاربر مسیرِ پرونده را
+   * می‌بیند؛ دروغِ آن، دروغِ کلِ سند است. */
+  hrSkipped?: boolean;
   className?: string;
 }) {
   // پروندهٔ لغوشده در هیچ مرحله‌ای نیست؛ نوارِ نیمه‌پر برایش گمراه‌کننده است.
@@ -40,30 +47,43 @@ export function WorkflowStepper({
       aria-label="جایگاه پرونده در زنجیرهٔ تأیید"
     >
       {CHAIN.map((step, i) => {
-        const done = i < currentIndex;
+        const skipped = hrSkipped && step.key === "hr_review";
+        const done = !skipped && i < currentIndex;
         const current = i === currentIndex;
         return (
           <li key={step.key} className="flex min-w-0 flex-1 flex-col gap-1">
             <span
               aria-hidden
+              /* مرحلهٔ رد‌شده نه سبز است و نه خاکستریِ «هنوز نرسیده»: خط‌چین
+                 می‌گوید این‌جا مرحله‌ای هست که طی نشد، و طی هم نخواهد شد. */
               className={`h-1.5 rounded-full transition-colors ${
-                done
-                  ? "bg-green-500"
-                  : current
-                    ? returned
-                      ? "bg-amber-500"
-                      : "bg-pulse-600"
-                    : "bg-gray-200"
+                skipped
+                  ? "border border-dashed border-gray-300"
+                  : done
+                    ? "bg-green-500"
+                    : current
+                      ? returned
+                        ? "bg-amber-500"
+                        : "bg-pulse-600"
+                      : "bg-gray-200"
               }`}
             />
             <span
               className={`truncate text-[11px] ${
-                current ? "font-bold text-gray-900" : done ? "text-gray-500" : "text-gray-400"
+                skipped
+                  ? "text-gray-400 line-through"
+                  : current
+                    ? "font-bold text-gray-900"
+                    : done
+                      ? "text-gray-500"
+                      : "text-gray-400"
               }`}
+              title={skipped ? "این پرونده مرحلهٔ منابع انسانی ندارد" : undefined}
             >
               {step.short}
             </span>
-            {current && <span className="sr-only">— مرحلهٔ فعلی</span>}
+            {skipped && <span className="sr-only">— بدون این مرحله</span>}
+            {current && !skipped && <span className="sr-only">— مرحلهٔ فعلی</span>}
           </li>
         );
       })}

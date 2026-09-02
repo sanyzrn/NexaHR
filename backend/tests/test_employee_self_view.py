@@ -3,7 +3,7 @@
 مهم‌ترین بخش: کارمند نباید چیزی بیش از نتیجه نهایی ارزیابی خودش ببیند —
 نه پرونده در جریان، نه پرونده دیگران، نه شواهد و کامنت‌های داخلی زنجیره.
 """
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.audit_log import AuditLog
 from app.models.notification import Notification
@@ -14,6 +14,7 @@ from tests.helpers import (
     make_access,
     make_personnel,
     make_user,
+    set_module,
 )
 
 
@@ -211,6 +212,9 @@ def test_finalize_notifies_employee(client, db_session):
     personnel = make_personnel(db_session, full_name="گیرنده ابلاغ")
     make_access(db_session, personnel, sup, dep, ceo)
     employee = make_user(db_session, "employee", personnel_id=personnel.id)
+    # اعلان به «کارنامه من» لینک می‌دهد، پس فقط وقتی معنا دارد که آن صفحه
+    # چیزی نشان بدهد. ماژول پیش‌فرض خاموش است و این‌جا صریح روشن می‌شود.
+    set_module(db_session, "employee_evaluation_visibility", True)
     db_session.commit()
 
     _finalize_evaluation(client, db_session, hr, sup, dep, ceo, personnel)
@@ -225,6 +229,39 @@ def test_finalize_notifies_employee(client, db_session):
     )
     assert len(notes) == 1
     assert notes[0].link == "/me"
+
+
+def test_no_notification_when_the_scorecard_page_is_switched_off(client, db_session):
+    """اعلانی که به دری ببرد که بسته است، از نبودنش بدتر است.
+
+    ماژول «نتیجه و وضعیت پروندهٔ کارمند» پیش‌فرض خاموش است — یعنی این حالت
+    نادر نیست، حالتِ پیش‌فرض است. تا پیش از این تأیید نهایی بی‌قید به کارمند
+    پیام می‌داد «نتیجه در کارنامه من قابل مشاهده است» و آن صفحه جواب می‌داد
+    «نمایش جزئیات کارنامه در این سازمان فعال نشده است».
+
+    و بی‌صدا نمی‌ماند: هر اعلان به صندوقِ خروجی هم می‌رود، پس همان جملهٔ نادرست
+    می‌توانست با ایمیل و پیامک هم برود.
+    """
+    hr, sup, dep, ceo = _make_chain(db_session)
+    personnel = make_personnel(db_session, full_name="بدون دسترسی کارنامه")
+    make_access(db_session, personnel, sup, dep, ceo)
+    employee = make_user(db_session, "employee", personnel_id=personnel.id)
+    set_module(db_session, "employee_evaluation_visibility", False)
+    db_session.commit()
+
+    _finalize_evaluation(client, db_session, hr, sup, dep, ceo, personnel)
+
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(Notification)
+            .where(
+                Notification.user_id == employee.id,
+                Notification.type == "evaluation_finalized_self",
+            )
+        )
+        == 0
+    )
 
 
 def test_employee_cannot_touch_workflow_or_admin_endpoints(client, db_session):

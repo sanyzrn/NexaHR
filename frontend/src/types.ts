@@ -53,6 +53,10 @@ export interface Personnel {
   full_name: string;
   job_title: string;
   is_manager: boolean;
+  /** کدام صندلیِ زنجیره به این فرد نمره می‌دهد — `null` یعنی دسترسی ارزیابی
+   *  هنوز تعریف نشده. تنها سرنخِ درست برای «چه کسی می‌تواند پرونده را باز کند»:
+   *  `is_manager` پرچمی روی خودِ پرسنل است و شکلِ زنجیره را نمی‌گوید. */
+  scored_by?: "unit_supervisor" | "deputy" | "ceo" | null;
   org_unit: string;
   contract_start_date: string;
   contract_end_date: string;
@@ -95,6 +99,9 @@ export interface OrgUnitCatalogueItem {
   /** همان رشته‌ای که در `personnel.org_unit` می‌نشیند. */
   full_name: string;
   is_active: boolean;
+  /** واحدِ منابع انسانی. تنها اثرش شکلِ زنجیرهٔ ارزیابیِ اعضای همین واحد است:
+   *  پروندهٔ آن‌ها مرحلهٔ بررسیِ منابع انسانی را ندارد. */
+  is_hr_unit: boolean;
   display_order: number;
   personnel_count: number;
 }
@@ -164,6 +171,9 @@ export type EvaluationStatus =
 
 export interface EvaluationRecord {
   id: number;
+  /** این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است.
+   *  نوارِ مراحل بی این، آن مرحله را «انجام‌شده» نشان می‌داد. */
+  hr_review_skipped?: boolean;
   /** آخرین روزِ مهلتِ ثبت — پایانِ دوره، یا تمدیدی که منابع انسانی داده.
    *  `null` یعنی این پرونده به دوره‌ای وصل نیست و مهلتی ندارد. */
   submission_deadline?: string | null;
@@ -174,7 +184,10 @@ export interface EvaluationRecord {
   subject_full_name: string;
   period_id: number | null;
   unit_supervisor_user_id: number | null;
-  deputy_user_id: number;
+  /** `null` یعنی این پرونده مرحلهٔ معاونت ندارد و از منابع انسانی مستقیم به
+   *  مدیرعامل می‌رود. بک‌اند از ابتدا nullable بود و این‌جا `number` نوشته شده
+   *  بود — یعنی هر شرطی که می‌خواست بپرسد «معاونت دارد یا نه» بسته می‌ماند. */
+  deputy_user_id: number | null;
   ceo_user_id: number;
   // مسئولِ منابع انسانیِ این پرونده؛ null یعنی هنوز در صف مشترک HR است
   hr_user_id: number | null;
@@ -234,6 +247,8 @@ export interface MyOpenEvaluation {
   stage_label: string;
   /** شاخص‌های همین پرونده (P1-05) — فرم خودارزیابی از روی این ساخته می‌شود. */
   indicator_ids: number[];
+  /** این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است. */
+  hr_review_skipped?: boolean;
   /** آیا پنجرهٔ خودارزیابی هنوز باز است — سرور تصمیم می‌گیرد، نه فرانت.
    *
    * سه شرط را با هم می‌سنجد: نقش خودارزیابی داشته باشد، پرونده در مرحلهٔ ثبت

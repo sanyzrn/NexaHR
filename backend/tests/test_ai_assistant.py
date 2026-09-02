@@ -12,7 +12,15 @@ from app.models.enums import Capability
 from app.schemas.auth import CurrentUser
 from app.services.ai.prompt import build_system_prompt
 from app.services.ai.tools import base as tools_base
-from tests.fake_llm import FailingAdapter, NoToolsAdapter, ScriptedAdapter, reset, response, tool_call
+from tests.fake_llm import (
+    FailingAdapter,
+    NoToolsAdapter,
+    ScriptedAdapter,
+    broken_call,
+    reset,
+    response,
+    tool_call,
+)
 from tests.helpers import auth_header, enable_ai_provider, make_user
 
 # ── پروتکلِ جایگزین: تجزیه‌کننده، برابر پاسخ‌هایی که مدل‌ها *واقعاً* می‌دهند ──
@@ -90,15 +98,8 @@ def test_allowed_tools_never_offers_writes_when_writes_are_off(db_session):
     assert all(spec.name != "create_personnel" for spec in specs)
 
 
-def test_prompt_only_advertises_tools_the_executor_would_run(db_session):
-    """تستی که جلوی «پیشنهادِ مطمئن با دکمهٔ مرده» را می‌گیرد."""
-    user = make_user(
-        db_session, "hr", username="ai_prompt", capabilities=[Capability.manage_personnel]
-    )
-    db_session.commit()
-    caps = {Capability.manage_personnel}
-    specs = tools_base.allowed_tools(_current(user), caps, allow_writes=True)
-    prompt = build_system_prompt(
+def _prompt_for(user, caps, specs, *, fallback: bool):
+    return build_system_prompt(
         instructions="x",
         context="y",
         user=_current(user),
@@ -106,12 +107,66 @@ def test_prompt_only_advertises_tools_the_executor_would_run(db_session):
         allow_writes=True,
         restrict_to_platform=True,
         tools=specs,
+        fallback_protocol=fallback,
     )
+
+
+def test_prompt_only_advertises_tools_the_executor_would_run(db_session):
+    """تستی که جلوی «پیشنهادِ مطمئن با دکمهٔ مرده» را می‌گیرد.
+
+    فهرست در پروتکلِ *جایگزین* در متنِ پرامپت است (سرویس جای دیگری برای دیدنش
+    ندارد)، و در پروتکلِ بومی در فیلد `tools`. هر دو از یک `allowed_tools`
+    می‌آیند، پس قاعده یکی است و این تست هر دو سرش را می‌گیرد.
+    """
+    user = make_user(
+        db_session, "hr", username="ai_prompt", capabilities=[Capability.manage_personnel]
+    )
+    db_session.commit()
+    caps = {Capability.manage_personnel}
+    specs = tools_base.allowed_tools(_current(user), caps, allow_writes=True)
+
+    fallback_prompt = _prompt_for(user, caps, specs, fallback=True)
     for spec in specs:
-        assert spec.name in prompt
+        assert spec.name in fallback_prompt
     # ابزاری که مجاز نیست، تبلیغ هم نمی‌شود
-    assert "grant_capabilities" not in prompt
-    assert "search_users" not in prompt
+    assert "grant_capabilities" not in fallback_prompt
+    assert "search_users" not in fallback_prompt
+
+    advertised = {s["function"]["name"] for s in tools_base.openai_tools_schema(specs)}
+    assert advertised == {spec.name for spec in specs}
+    assert "grant_capabilities" not in advertised
+    assert "search_users" not in advertised
+
+
+def test_the_native_prompt_does_not_repeat_the_tool_catalogue(db_session):
+    """۴۷ ابزار دو بار در هر پله، هم گران بود و هم انتخابِ ابزار را بد می‌کرد.
+
+    در پروتکلِ بومی، شِمای کاملِ ابزارها در فیلد `tools` می‌رود؛ تکرارِ نام و
+    توضیحشان در متنِ پرامپت دو تعریفِ رقیب از یک چیز می‌ساخت — یکی با پارامتر و
+    یکی بی پارامتر — و حدود ۶ کیلوبایت به *هر* درخواستِ حلقه اضافه می‌کرد.
+
+    قواعدِ کار با ابزار می‌مانند: آن‌ها در شِما جایی ندارند.
+    """
+    user = make_user(
+        db_session, "hr", username="ai_no_dup", capabilities=[Capability.manage_personnel]
+    )
+    db_session.commit()
+    caps = {Capability.manage_personnel}
+    specs = tools_base.allowed_tools(_current(user), caps, allow_writes=True)
+
+    native = _prompt_for(user, caps, specs, fallback=False)
+    fallback = _prompt_for(user, caps, specs, fallback=True)
+
+    # قواعدِ کار با ابزار در هر دو می‌مانند — در شِما جایی ندارند.
+    assert "هرگز شناسه نساز" in native
+    # و همین‌طور نامِ کنش‌های نیازمند تأیید: شِما نمی‌گوید کدام‌ها تأیید لازم دارند.
+    assert "create_personnel" in native
+
+    # ولی *توضیحِ* ابزارها — همان چیزی که وزن دارد — فقط یک بار می‌رود.
+    descriptions = [spec.description for spec in specs]
+    assert not [d for d in descriptions if d in native]
+    assert len([d for d in descriptions if d in fallback]) == len(descriptions)
+    assert len(fallback) - len(native) > 3000
 
 
 def test_risky_tools_are_always_flagged_for_confirmation():
@@ -278,6 +333,119 @@ def test_unsupported_tool_protocol_falls_back_to_json(client, db_session, monkey
     ).json()
     assert body["reply"] == "فهرست واحد خالی است."
     assert [s["tool"] for s in body["steps"]] == ["list_org_units"]
+
+
+def test_a_truncated_tool_call_is_never_executed(client, db_session, monkeypatch):
+    """پاسخِ بریده‌شده سرِ سقفِ توکن، آرگومانِ نیمه‌کاره دارد — و اجرا نمی‌شود.
+
+    این بدترین حالتِ بی‌صدای حلقه بود: `_parse_arguments` روی JSONِ ناقص `{}`
+    برمی‌گرداند، ابزار با آرگومانِ *خالی* اجرا می‌شد (جست‌وجو بی عبارت، فهرست
+    بی فیلتر)، موفق برمی‌گشت، و مدل روی نتیجهٔ بی‌ربط جواب می‌ساخت. هیچ‌جا هم
+    خطایی ثبت نمی‌شد.
+    """
+    from app.services.ai.tools import people  # noqa: F401  (ثبت ابزارها)
+
+    user = make_user(
+        db_session, "hr", username="ai_cut", capabilities=[Capability.manage_personnel]
+    )
+    _enable_for(db_session, user)
+    monkeypatch.setattr("app.api.routers.ai.OpenAiCompatibleAdapter", ScriptedAdapter)
+    reset(ScriptedAdapter)
+    ScriptedAdapter.script = [
+        response(
+            calls=[broken_call("c1", "search_personnel", '{"q": "احمد')],
+            truncated=True,
+        ),
+        response(content="نباید به این پله برسد"),
+    ]
+
+    body = client.post(
+        "/api/ai/chat", json={"message": "احمدی را پیدا کن"}, headers=auth_header(user)
+    ).json()
+
+    assert "سقفِ توکن" in body["reply"]
+    assert [s["status"] for s in body["steps"]] == ["error"]
+    # حلقه همان‌جا ایستاد: پلهٔ دومی به سرویس نرفت.
+    assert len(ScriptedAdapter.seen) == 1
+
+
+def test_truncation_is_reported_on_a_plain_answer_too(client, db_session, monkeypatch):
+    """جوابِ نیمه‌جمله نباید به‌جای جوابِ کامل نمایش داده شود."""
+    user = make_user(db_session, "hr", username="ai_cut2", capabilities=[])
+    _enable_for(db_session, user)
+    monkeypatch.setattr("app.api.routers.ai.OpenAiCompatibleAdapter", ScriptedAdapter)
+    reset(ScriptedAdapter)
+    ScriptedAdapter.script = [response(content="جدول واحدها: ردیف اول", truncated=True)]
+
+    body = client.post(
+        "/api/ai/chat", json={"message": "جدول بده"}, headers=auth_header(user)
+    ).json()
+    assert body["reply"].startswith("جدول واحدها: ردیف اول")
+    assert "سقفِ توکن" in body["reply"]
+
+
+def test_bad_tool_arguments_go_back_to_the_model(client, db_session, monkeypatch):
+    """JSONِ نامعتبر یعنی «دوباره صدا بزن»، نه «با آرگومانِ خالی اجرا کن»."""
+    from app.services.ai.tools import people  # noqa: F401
+
+    user = make_user(
+        db_session, "hr", username="ai_badargs", capabilities=[Capability.manage_personnel]
+    )
+    _enable_for(db_session, user)
+    monkeypatch.setattr("app.api.routers.ai.OpenAiCompatibleAdapter", ScriptedAdapter)
+    reset(ScriptedAdapter)
+    ScriptedAdapter.script = [
+        response(calls=[broken_call("c1", "search_personnel", "{ خراب }")]),
+        response(content="با آرگومانِ درست دوباره تلاش کردم."),
+    ]
+
+    body = client.post(
+        "/api/ai/chat", json={"message": "بگرد"}, headers=auth_header(user)
+    ).json()
+
+    assert body["steps"][0]["status"] == "error"
+    assert "خوانا" in body["steps"][0]["summary"]
+    # پیامِ خطا به خودِ مدل رفته است تا اصلاحش کند
+    second_turn = ScriptedAdapter.seen[1]
+    tool_replies = [m for m in second_turn if m.role == "tool"]
+    assert tool_replies and "معتبر نبود" in tool_replies[-1].content
+
+
+def test_the_last_step_keeps_the_tool_schema_and_only_forbids_calling(
+    client, db_session, monkeypatch
+):
+    """«الان حرف بزن» با «ابزاری وجود ندارد» یکی نیست.
+
+    پلهٔ آخر پیش از این شِمای ابزار را *حذف* می‌کرد. گفت‌وگویی که پیام‌های
+    `tool` در خود دارد، بی `tools` از سوی چند درگاهِ سازگار با ۴۰۰ رد می‌شود —
+    یعنی همان پله‌ای که باید نوبت را جمع کند خطا می‌داد. راهِ درست
+    `tool_choice="none"` است.
+    """
+    from app.services.ai.tools import people  # noqa: F401
+
+    user = make_user(
+        db_session, "hr", username="ai_lastcall", capabilities=[Capability.manage_personnel]
+    )
+    _enable_for(db_session, user, )
+    # سقفِ حلقه را روی ۲ می‌گذاریم تا پلهٔ دوم همان پلهٔ آخر باشد.
+    from app.models.ai import AiSettings
+
+    db_session.merge(AiSettings(id=1, max_tool_iterations=2))
+    db_session.commit()
+    monkeypatch.setattr("app.api.routers.ai.OpenAiCompatibleAdapter", ScriptedAdapter)
+    reset(ScriptedAdapter)
+    ScriptedAdapter.script = [
+        response(calls=[tool_call("c1", "search_personnel", {"q": "x"})]),
+        response(content="جمع‌بندی."),
+    ]
+
+    client.post("/api/ai/chat", json={"message": "بگرد"}, headers=auth_header(user))
+
+    assert len(ScriptedAdapter.wire) == 2
+    first, last = ScriptedAdapter.wire
+    assert first["tools"] and first["tool_choice"] is None
+    assert last["tools"], "شِمای ابزار در پلهٔ آخر هم باید فرستاده شود"
+    assert last["tool_choice"] == "none"
 
 
 def test_off_platform_answers_are_a_setting(db_session):

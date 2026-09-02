@@ -10,15 +10,30 @@ import { apiClient, extractErrorMessage } from "../api/client";
 import { useToast } from "./Toast";
 import { Button } from "../ui/Button";
 import { formatDateTime } from "../utils/dates";
-import type { EvaluationDetail } from "../types";
+import type { CurrentUser, EvaluationDetail } from "../types";
+
+/** چه کسی به این اعتراض پاسخ می‌دهد — قرینهٔ `workflow.objection_resolver_field`.
+ *
+ *  در حالتِ عادی منابع انسانی. برای پروندهٔ اعضای واحدِ منابع انسانی، منابع
+ *  انسانی خودش طرفِ ماجراست، پس پاسخ‌دهنده صندلیِ بالادستِ نمره‌دهنده است:
+ *  معاونت برای کارشناسِ HR، و مدیرعامل برای مدیرِ HR (که خودِ معاونت نمره‌اش
+ *  را داده). دومی وقتی هم پیش می‌آید که پرونده معاونتی در زنجیره نداشته باشد.
+ */
+function resolverSeatId(evaluation: EvaluationDetail): number | null {
+  if (!evaluation.hr_review_skipped) return null;
+  if (evaluation.unit_supervisor_user_id === null || evaluation.deputy_user_id === null) {
+    return evaluation.ceo_user_id;
+  }
+  return evaluation.deputy_user_id;
+}
 
 export function ObjectionPanel({
   evaluation,
-  isHr,
+  user,
   onChanged,
 }: {
   evaluation: EvaluationDetail;
-  isHr: boolean;
+  user: CurrentUser;
   onChanged: () => void;
 }) {
   const { showSuccess, showError } = useToast();
@@ -26,6 +41,16 @@ export function ObjectionPanel({
   const [busy, setBusy] = useState(false);
 
   if (!evaluation.objection_at) return null;
+
+  const resolverId = resolverSeatId(evaluation);
+  const canResolve =
+    resolverId === null
+      ? user.role === "hr" && user.personnel_id !== evaluation.subject_personnel_id
+      : user.id === resolverId;
+  const pendingLabel =
+    resolverId === null
+      ? "در انتظار پاسخ منابع انسانی…"
+      : "در انتظار پاسخ مسئول بالادستِ زنجیره…";
 
   async function submit() {
     setBusy(true);
@@ -52,11 +77,11 @@ export function ObjectionPanel({
       {evaluation.objection_resolved_at ? (
         <div className="mt-4 rounded-xl bg-white/80 p-3">
           <p className="text-xs font-medium text-gray-500">
-            پاسخ منابع انسانی — {formatDateTime(evaluation.objection_resolved_at)}
+            پاسخ به اعتراض — {formatDateTime(evaluation.objection_resolved_at)}
           </p>
           <p className="mt-1 text-sm text-gray-800">{evaluation.objection_resolution}</p>
         </div>
-      ) : isHr ? (
+      ) : canResolve ? (
         <div className="mt-4">
           <label htmlFor="objection-resolution" className="mb-1.5 block text-sm font-medium text-amber-900">
             پاسخ شما به این اعتراض
@@ -74,7 +99,7 @@ export function ObjectionPanel({
           </Button>
         </div>
       ) : (
-        <p className="mt-3 text-xs text-amber-700">در انتظار پاسخ منابع انسانی…</p>
+        <p className="mt-3 text-xs text-amber-700">{pendingLabel}</p>
       )}
     </div>
   );

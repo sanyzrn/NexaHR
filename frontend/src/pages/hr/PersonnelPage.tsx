@@ -172,7 +172,9 @@ function AccessFields({
             })
           }
         >
-          <option value="">— انتخاب کنید —</option>
+          {/* خالی‌گذاشتنش — مثل معاونت — یک انتخاب است نه یک فراموشی. اگر
+              معاونت هم خالی بماند، نمره‌دهنده خودِ مدیرعامل است. */}
+          <option value="">بدون مسئول واحد</option>
           {supervisors.map((u) => (
             <option key={u.id} value={u.id}>
               {u.username}
@@ -180,6 +182,13 @@ function AccessFields({
           ))}
         </select>
       </label>
+      {!isManager && access.unit_supervisor_user_id == null && access.deputy_user_id == null && (
+        <p className="-mt-1 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800 sm:col-span-2">
+          نه مسئول واحد و نه معاونت: این فرد مستقیم زیر نظر مدیرعامل است. نمره‌دهی و
+          تأیید نهایی هر دو با مدیرعامل است و پرونده در میان راه از منابع انسانی
+          می‌گذرد.
+        </p>
+      )}
       {isManager && (
         <p className="-mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 sm:col-span-2">
           چون این فرد به‌عنوان «مدیر» علامت خورده است، دسترسی مسئول واحد غیرفعال است؛ این فرد مستقیماً
@@ -375,14 +384,9 @@ export function PersonnelPage({ showAccountsTab = true }: { showAccountsTab?: bo
       showError(message);
       return;
     }
-    // دست‌کم یکی از دو مرحلهٔ میانی باید باشد، وگرنه هیچ‌کس نمره نمی‌دهد. سرور
-    // هم همین را رد می‌کند؛ این‌جا فقط زودتر و با پیام روشن‌تر گفته می‌شود.
-    if (access.unit_supervisor_user_id == null && access.deputy_user_id == null) {
-      const message = "دست‌کم یکی از «مسئول واحد» یا «معاونت» باید انتخاب شود";
-      setError(message);
-      showError(message);
-      return;
-    }
+    // هر دو مرحلهٔ میانی می‌توانند خالی باشند: مدیرعامل خودش نمره‌دهنده است
+    // (کادر راهنما در `AccessFields` همین را می‌گوید). تنها صندلیِ اجباری،
+    // مدیرعامل است — که بالاتر سنجیده شد.
     try {
       // ثبت پرسنل و سپس تنظیم دسترسی در همان جریان؛ دسترسی بخشی از ایجاد پرسنل است.
       // حساب کاربری در همان درخواستِ ساخت پرسنل می‌رود تا اگر نام کاربری تکراری بود،
@@ -805,12 +809,6 @@ function EditPersonnelModal({
     setError(null);
     if (access.ceo_user_id == null) {
       const message = "مدیرعامل زنجیره ارزیابی الزامی است";
-      setError(message);
-      showError(message);
-      return;
-    }
-    if (access.unit_supervisor_user_id == null && access.deputy_user_id == null) {
-      const message = "دست‌کم یکی از «مسئول واحد» یا «معاونت» باید انتخاب شود";
       setError(message);
       showError(message);
       return;
