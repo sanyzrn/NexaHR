@@ -53,6 +53,10 @@ export interface Personnel {
   full_name: string;
   job_title: string;
   is_manager: boolean;
+  /** کدام صندلیِ زنجیره به این فرد نمره می‌دهد — `null` یعنی دسترسی ارزیابی
+   *  هنوز تعریف نشده. تنها سرنخِ درست برای «چه کسی می‌تواند پرونده را باز کند»:
+   *  `is_manager` پرچمی روی خودِ پرسنل است و شکلِ زنجیره را نمی‌گوید. */
+  scored_by?: "unit_supervisor" | "deputy" | "ceo" | null;
   org_unit: string;
   contract_start_date: string;
   contract_end_date: string;

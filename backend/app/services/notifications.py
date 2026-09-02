@@ -119,16 +119,68 @@ def _hr_queue_ids(db: Session, record: EvaluationRecord) -> list[int]:
     )
 
 
+def employee_results_are_visible(db: Session) -> bool:
+    """آیا «کارنامه من» در این سازمان چیزی نشان می‌دهد؟
+
+    اعلانی که به صفحه‌ای لینک بدهد که «این بخش فعال نشده است» می‌گوید، بدتر از
+    نبودنِ اعلان است: کارمند خبردار می‌شود تصمیمی درباره‌اش گرفته شده و بعد به
+    دری می‌رسد که بسته است — و چون اعلان‌ها به صندوقِ خروجی هم می‌روند
+    (`_queue_outbound`)، همان پیام ممکن است با ایمیل و پیامک هم برود.
+
+    ماژول `employee_evaluation_visibility` پیش‌فرض *خاموش* است، پس این حالت
+    نادر نیست؛ حالتِ پیش‌فرض است.
+
+    گاردِ `require_module` روی این مسیر نمی‌نشیند: آن گارد برای *نوشتن* است و
+    این‌جا اصلاً درخواستی از کارمند نیامده — تأییدِ مدیرعامل است که اعلان را
+    می‌سازد.
+    """
+    from app.services.authorization import is_module_enabled
+
+    return is_module_enabled(db, "employee_evaluation_visibility")
+
+
+def subject_user_ids(db: Session, personnel_id: int) -> list[int]:
+    """حساب‌های فعالِ کارمندیِ متصل به این پرسنل — گیرندهٔ اعلان‌های «دربارهٔ خودت»."""
+    from app.models.user import User
+
+    return list(
+        db.scalars(
+            select(User.id).where(
+                User.role == UserRole.employee,
+                User.personnel_id == personnel_id,
+                User.is_active.is_(True),
+            )
+        )
+    )
+
+
+def _tell_the_scorer(record: EvaluationRecord, evaluator_id: int | None) -> list[int]:
+    """نمره‌دهنده را خبر کن — مگر همان کسی باشد که این کار را کرد.
+
+    در مسیرِ «مستقیمِ مدیرعامل» نمره‌دهنده و تأییدکنندهٔ نهایی یک نفرند، و
+    اعلانِ «پروندهٔ … تأیید نهایی شد» به کسی که همین حالا خودش تأییدش کرده،
+    فقط سر و صداست. اعلانی که هیچ‌وقت کاری به دنبال ندارد، بقیهٔ اعلان‌ها را
+    هم بی‌ارزش می‌کند.
+    """
+    if evaluator_id is None or evaluator_id == record.ceo_user_id:
+        return []
+    return [evaluator_id]
+
+
 def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: str) -> None:
     """نفر بعدی زنجیره (یا نفر قبلی، در برگشت پرونده) را از رویداد باخبر می‌کند."""
     code = record.evaluation_code
     name = record.subject.full_name
     link = f"/evaluations/{record.id}"
 
+    # نمره‌دهندهٔ اولِ *این* پرونده: مسئول واحد، یا معاونت (مسیر «مدیر»)، یا
+    # خودِ مدیرعامل (کسی که بالای سرش دیگر کسی نیست). سومی تا امروز `None`
+    # می‌شد و هر اعلانی که به «نمره‌دهنده» می‌رفت — برگشتِ منابع انسانی، خبرِ
+    # تأیید نهایی — بی‌صدا به هیچ‌کس نمی‌رسید.
     evaluator_id = (
-        record.deputy_user_id
-        if record.unit_supervisor_user_id is None
-        else record.unit_supervisor_user_id
+        record.unit_supervisor_user_id
+        or record.deputy_user_id
+        or record.ceo_user_id
     )
     # زنجیره می‌تواند معاونت نداشته باشد؛ آن‌وقت نفرِ بعد از منابع انسانی خودِ
     # مدیرعامل است. بدون این، اعلان به `None` فرستاده می‌شد و کل گذارِ تأیید
@@ -138,7 +190,7 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
 
     recipients: list[int] = []
     message = ""
-    if action in ("submit", "manager_submit"):
+    if action in ("submit", "manager_submit", "ceo_submit"):
         recipients = _hr_queue_ids(db, record)
         message = f"پرونده {code} ({name}) در صف بررسی منابع انسانی قرار گرفت"
     # پروندهٔ بی‌مرحلهٔ HR: ثبتِ نمره مستقیم روی میزِ نفرِ بعدیِ زنجیره می‌نشیند.
@@ -147,8 +199,8 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
     elif action == "submit_hr_subject":
         recipients = [after_hr_id]
         message = f"پرونده {code} ({name}) در انتظار بررسی و تأیید شماست"
-    elif action == "manager_submit_hr_subject":
-        # هر دو مرحلهٔ میانی غایب‌اند؛ تنها تأییدکنندهٔ باقی‌مانده مدیرعامل است.
+    elif action in ("manager_submit_hr_subject", "ceo_submit_hr_subject"):
+        # مرحله‌های میانی غایب‌اند؛ تنها تأییدکنندهٔ باقی‌مانده مدیرعامل است.
         recipients = [record.ceo_user_id]
         message = f"پرونده {code} ({name}) در انتظار تأیید نهایی شماست"
     elif action == "hr_approve":
@@ -162,7 +214,7 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
         recipients = [record.ceo_user_id]
         message = f"پرونده {code} ({name}) در انتظار تأیید نهایی شماست"
     elif action == "ceo_finalize":
-        recipients = [evaluator_id] if evaluator_id is not None else []
+        recipients = _tell_the_scorer(record, evaluator_id)
         message = f"پرونده {code} ({name}) تأیید نهایی شد"
     elif action == "hr_return":
         # `evaluator_id` نه `unit_supervisor_user_id`: در مسیر «مدیر» دومی خالی
@@ -174,8 +226,12 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
         recipients = _hr_queue_ids(db, record)
         message = f"پرونده {code} ({name}) توسط معاونت برگشت داده شد؛ دلیل در کامنت‌های پرونده"
     # بی‌مرحلهٔ HR، برگشت یک پله بیشتر عقب می‌رود: تا خودِ نمره‌دهنده.
-    elif action in ("deputy_return_hr_subject", "ceo_return_manager_hr_subject"):
-        recipients = [evaluator_id] if evaluator_id is not None else []
+    elif action in (
+        "deputy_return_hr_subject",
+        "ceo_return_manager_hr_subject",
+        "ceo_return_ceo_only",
+    ):
+        recipients = _tell_the_scorer(record, evaluator_id)
         message = (
             f"پرونده {code} ({name}) برگشت داده شد و در انتظار اصلاح شماست؛ "
             "دلیل در کامنت‌های پرونده"
@@ -208,22 +264,13 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
         )
 
     if action == "ceo_finalize":
-        # اگر خود کارمند حساب فعال دارد، نتیجه نهایی به او هم ابلاغ می‌شود («کارنامه من»)
-        from app.models.user import User
-
-        employee_ids = list(
-            db.scalars(
-                select(User.id).where(
-                    User.role == UserRole.employee,
-                    User.personnel_id == record.subject_personnel_id,
-                    User.is_active.is_(True),
-                )
-            )
-        )
-        if employee_ids:
+        # اگر خود کارمند حساب فعال دارد، نتیجه نهایی به او هم ابلاغ می‌شود
+        # («کارنامه من») — ولی فقط اگر آن صفحه اصلاً چیزی نشان بدهد.
+        subject_ids = subject_user_ids(db, record.subject_personnel_id)
+        if subject_ids and employee_results_are_visible(db):
             notify(
                 db,
-                employee_ids,
+                subject_ids,
                 type_="evaluation_finalized_self",
                 message=f"ارزیابی عملکرد شما ({code}) نهایی شد؛ نتیجه در «کارنامه من» قابل مشاهده است",
                 evaluation_record_id=record.id,

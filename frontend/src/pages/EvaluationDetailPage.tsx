@@ -34,6 +34,21 @@ import {
 /** پیشوندی که سرور موقع برگشت پرونده جلوی کامنت می‌گذارد (routers/evaluations.py). */
 const RETURN_COMMENT_PREFIX = "برگشت پرونده";
 
+/** جایگاه هر نقش در زنجیره — قرینهٔ `workflow._CHAIN_RANK`.
+ *
+ *  مافوق می‌تواند کارِ مرحلهٔ پایین‌تر را بکند (مدیرعاملی که برای چند نفر خودش
+ *  نمره‌دهندهٔ اول است). نقشی که این‌جا نیست، در هیچ مرحله‌ای از زنجیره
+ *  نمی‌نشیند — و `-1` یعنی هیچ مقایسه‌ای را نمی‌برد. */
+const RANK: Record<string, number> = { unit_supervisor: 1, deputy: 2, ceo: 3 };
+const rankOf = (role: string) => RANK[role] ?? -1;
+
+/** برچسبِ «نظر کلی» — به همان صندلی که نمره می‌دهد. */
+const SCORER_COMMENT_LABEL: Record<string, string> = {
+  unit_supervisor: "نظر کلی مسئول واحد",
+  deputy: "نظر کلی معاونت",
+  ceo: "نظر کلی مدیرعامل",
+};
+
 export function EvaluationDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -176,24 +191,27 @@ export function EvaluationDetailPage() {
     );
   }
 
-  // مسیر «مدیر»: مسئول واحد ندارد و معاونت خودش نمره‌دهندهٔ اول است. حالا این
-  // مسیر هم از `draft` شروع می‌شود و مرحلهٔ بررسی منابع انسانی را دارد — پس
-  // تفاوت دو مسیر فقط در *کیست*، نه در وضعیت.
+  // نمره‌دهندهٔ *این* پرونده — قرینهٔ `evaluations._scorer_seat` در بک‌اند.
+  //
+  // زنجیره از پایین خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است:
+  // مسئول واحد، یا معاونت (مسیر «مدیر»)، یا خودِ مدیرعامل (کسی که بالای سرش
+  // دیگر کسی نیست). هر سه از `draft` شروع می‌شوند و مرحلهٔ بررسی منابع انسانی
+  // را دارند — تفاوتشان فقط در *کیست*، نه در وضعیت.
   const isManagerPath = evaluation.unit_supervisor_user_id === null;
-  const scorerUserId = isManagerPath
-    ? evaluation.deputy_user_id
-    : evaluation.unit_supervisor_user_id;
+  const isCeoOnlyPath = isManagerPath && evaluation.deputy_user_id === null;
+  const scorerRole = isCeoOnlyPath ? "ceo" : isManagerPath ? "deputy" : "unit_supervisor";
+  const scorerUserId = isCeoOnlyPath
+    ? evaluation.ceo_user_id
+    : isManagerPath
+      ? evaluation.deputy_user_id
+      : evaluation.unit_supervisor_user_id;
 
-  const isSupervisorDraft =
-    user.role === "unit_supervisor" && evaluation.status === "draft" && scorerUserId === user.id;
-
-  const isManagerInitialScoring =
-    user.role === "deputy" &&
+  // نقشِ بالاتر می‌تواند در مرحلهٔ پایین‌تر بنشیند (`may_act_at`)، ولی مالکیت را
+  // شناسهٔ همان صندلی تعیین می‌کند — همان دو شرطی که سرور هم می‌سنجد.
+  const isEditableScoring =
     evaluation.status === "draft" &&
-    isManagerPath &&
-    evaluation.deputy_user_id === user.id;
-
-  const isEditableScoring = isSupervisorDraft || isManagerInitialScoring;
+    scorerUserId === user.id &&
+    rankOf(user.role) >= rankOf(scorerRole);
 
   const canHrApprove = user.role === "hr" && evaluation.status === "submitted";
   const canDeputyApprove =
@@ -354,8 +372,8 @@ export function EvaluationDetailPage() {
           existing={evaluation.scores}
           evaluatorComment={evaluatorComment}
           setEvaluatorComment={setEvaluatorComment}
-          showEvaluatorComment={isSupervisorDraft || isManagerInitialScoring}
-          commentLabel={isManagerInitialScoring ? "نظر کلی معاونت" : "نظر کلی مسئول واحد"}
+          showEvaluatorComment
+          commentLabel={SCORER_COMMENT_LABEL[scorerRole] ?? "نظر کلی ارزیاب"}
           bonusPoints={bonusPoints}
           setBonusPoints={setBonusPoints}
           bonusReason={bonusReason}

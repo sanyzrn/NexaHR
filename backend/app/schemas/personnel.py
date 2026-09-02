@@ -94,6 +94,14 @@ class PersonnelRead(BaseModel):
     self_assessment_state: str = "no_case"
     #: پروندهٔ باز، برای لینک‌دادن از فهرست پرسنل.
     open_evaluation_id: int | None = None
+    #: کدام صندلیِ زنجیره به این فرد نمره می‌دهد:
+    #: `"unit_supervisor"`، `"deputy"` (مسیر «مدیر»)، `"ceo"` (کسی که مستقیم
+    #: زیر نظرِ مدیرعامل است) یا `None` اگر دسترسیِ ارزیابی هنوز تعریف نشده.
+    #:
+    #: رابط تا امروز این را از `is_manager` حدس می‌زد — پرچمی روی *پرسنل* که
+    #: قرار نیست شکلِ زنجیره را بگوید. آن حدس برای مسیرِ «مستقیمِ مدیرعامل»
+    #: اصلاً کار نمی‌کرد، چون آن مسیر با هیچ ترکیبی از پرچم‌ها قابل تشخیص نبود.
+    scored_by: str | None = None
     created_at: datetime
     updated_at: datetime
 

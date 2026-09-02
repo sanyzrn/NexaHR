@@ -12,7 +12,6 @@ from app.models.indicator import Indicator
 from app.models.personnel import Personnel
 from app.models.self_assessment import SelfAssessmentScore
 from app.models.user import User
-from app.services.workflow import is_manager_path
 
 # ۴: افزودن `self_assessment` — برگهٔ مقایسهٔ «خود فرد / مسئول مستقیم» داخل سند.
 # ۳: افزودن `single_decider` — نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند.
@@ -20,6 +19,15 @@ from app.services.workflow import is_manager_path
 # افزودنی است، پس قالب PDF هر دو نسخه را رندر می‌کند: در snapshot نسخهٔ ۱ این
 # کلیدها نیستند و بخشِ مربوطه اصلاً چاپ نمی‌شود.
 SNAPSHOT_VERSION = 4
+
+
+def _evaluator_seat(record: EvaluationRecord) -> tuple[int | None, str]:
+    """کدام صندلی به این پرونده نمره داد، و در سند چه نامیده می‌شود."""
+    if record.unit_supervisor_user_id is not None:
+        return record.unit_supervisor_user_id, "مسئول واحد"
+    if record.deputy_user_id is not None:
+        return record.deputy_user_id, "معاونت"
+    return record.ceo_user_id, "مدیرعامل"
 
 
 def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
@@ -42,9 +50,14 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         )
     ).all()
 
-    manager_path = is_manager_path(record)
-    evaluator_user_id = record.deputy_user_id if manager_path else record.unit_supervisor_user_id
-    evaluator = db.get(User, evaluator_user_id)
+    # نمره‌دهندهٔ *این* پرونده و عنوانِ درستش، هر دو از یک جا: زنجیره از پایین
+    # خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است.
+    #
+    # پیش از این دو حالت داشت (مسئول واحد / معاونت) و برای مسیرِ «مستقیمِ
+    # مدیرعامل» به `db.get(User, None)` می‌رسید: سندِ نهایی — همان چیزی که
+    # امضا و هش می‌شود — با نامِ ارزیابِ *خالی* چاپ می‌شد.
+    evaluator_user_id, evaluator_label = _evaluator_seat(record)
+    evaluator = db.get(User, evaluator_user_id) if evaluator_user_id is not None else None
 
     return {
         "snapshot_version": SNAPSHOT_VERSION,
@@ -56,7 +69,7 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         },
         "evaluator": {
             "username": evaluator.username if evaluator else None,
-            "role_label": "معاونت" if manager_path else "مسئول واحد",
+            "role_label": evaluator_label,
         },
         # اگر نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند، سند باید همین
         # را بگوید. دو تأیید در لاگ، بدون این جمله، دو بررسی مستقل به‌نظر می‌رسد.

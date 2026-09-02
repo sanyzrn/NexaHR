@@ -17,6 +17,7 @@ import type {
 import { Markdown } from "./Markdown";
 import { PendingActionCard, StepTrace, UploadCard } from "./Cards";
 import { Mascot, MascotFace } from "./Mascot";
+import { useCopilotSession } from "./CopilotSession";
 
 /**
  * سطحِ گفت‌وگوی همکار — بین پنجرهٔ شناور و صفحهٔ کامل مشترک است.
@@ -58,12 +59,24 @@ export function CopilotPanel({
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
-  const [conversationId, setConversationId] = useState<number | null>(null);
-  const [messages, setMessages] = useState<AiMessage[]>([]);
-  const [draft, setDraft] = useState("");
-  const [failure, setFailure] = useState("");
-  const [pendingList, setPendingList] = useState<AiPendingAction[]>([]);
-  const [uploads, setUploads] = useState<AiUploadInfo[]>([]);
+  // حالتِ گفت‌وگو بیرون از این کامپوننت زندگی می‌کند (`CopilotSession`): پنجرهٔ
+  // شناور با هر بستن از درخت برداشته می‌شود، و اگر پیام‌ها این‌جا بودند هر
+  // بستن — حتی یک کلیک اتفاقی بیرون کادر — گفت‌وگو را پاک می‌کرد.
+  const {
+    conversationId,
+    setConversationId,
+    messages,
+    setMessages,
+    pendingList,
+    setPendingList,
+    uploads,
+    setUploads,
+    draft,
+    setDraft,
+    failure,
+    setFailure,
+    reset: resetSession,
+  } = useCopilotSession();
   const [showHistory, setShowHistory] = useState(variant === "page");
   const [uploading, setUploading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -120,7 +133,9 @@ export function CopilotPanel({
 
   function openConversation(id: number) {
     setConversationId(id);
-    setShowHistory(false);
+    // در صفحهٔ کامل ستون کنارِ گفت‌وگوست و بستنش یعنی کاربر برای گفت‌وگوی بعدی
+    // باید دوباره بازش کند. در پنجرهٔ شناور روی گفت‌وگو می‌نشیند، پس باید برود.
+    if (variant === "drawer") setShowHistory(false);
     void loadConversation(id);
   }
 
@@ -139,11 +154,7 @@ export function CopilotPanel({
   }
 
   function newConversation() {
-    setConversationId(null);
-    setMessages([]);
-    setPendingList([]);
-    setUploads([]);
-    setFailure("");
+    resetSession();
     setShowHistory(false);
   }
 
@@ -290,7 +301,7 @@ export function CopilotPanel({
   const busy = sendMutation.isPending || confirmMutation.isPending || rejectMutation.isPending;
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="relative flex h-full min-h-0">
       {/* ستونِ تاریخچه — در پنجرهٔ شناور جمع است، در صفحهٔ کامل باز */}
       <AnimatePresence>
         {showHistory && (
@@ -299,7 +310,12 @@ export function CopilotPanel({
             animate={{ width: 220, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease: EASE_SOFT }}
-            className="hidden shrink-0 flex-col overflow-hidden border-e border-gray-100 md:flex"
+            /* زیر ۷۶۸ پیکسل روی گفت‌وگو *می‌نشیند* و کنارش نمی‌ایستد: ۲۲۰
+               پیکسل ستون در پنجره‌ای که خودش به عرضِ صفحه است، جای پیام
+               نمی‌گذارد. پیش از این به‌جای این، کلِ ستون `hidden` بود — و
+               دکمه‌اش هم — یعنی روی موبایل نه تاریخچه‌ای در دسترس بود و نه
+               «گفت‌وگوی تازه». */
+            className="absolute inset-y-0 start-0 z-10 flex shrink-0 flex-col overflow-hidden border-e border-gray-100 bg-white shadow-lg md:static md:z-auto md:shadow-none"
           >
             <div className="flex items-center justify-between px-3 pt-3">
               <p className="text-xs font-bold text-gray-500">گفت‌وگوها</p>
@@ -361,7 +377,8 @@ export function CopilotPanel({
           <button
             type="button"
             onClick={() => setShowHistory((prev) => !prev)}
-            className="hidden rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 md:block"
+            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            aria-expanded={showHistory}
             aria-label="تاریخچهٔ گفت‌وگوها"
             title="تاریخچهٔ گفت‌وگوها"
           >

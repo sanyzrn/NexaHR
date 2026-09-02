@@ -148,6 +148,13 @@ def _with_accounts(db: Session, rows: list[Personnel]) -> list[PersonnelRead]:
             .order_by(EvaluationRecord.created_at)
         )
     }
+    # شکلِ زنجیرهٔ هر نفر، برای رابط: «چه کسی به این فرد نمره می‌دهد».
+    access_by_person = {
+        access.personnel_id: access
+        for access in db.scalars(
+            select(EvaluationAccess).where(EvaluationAccess.personnel_id.in_(ids))
+        )
+    }
     items = []
     for row in rows:
         item = PersonnelRead.model_validate(row)
@@ -155,8 +162,24 @@ def _with_accounts(db: Session, rows: list[Personnel]) -> list[PersonnelRead]:
         record = open_records.get(row.id)
         item.open_evaluation_id = record.id if record else None
         item.self_assessment_state = self_assessment_state(record, row.id in usernames)
+        item.scored_by = _scored_by(access_by_person.get(row.id))
         items.append(item)
     return items
+
+
+def _scored_by(access) -> str | None:
+    """کدام صندلیِ زنجیره به این فرد نمره می‌دهد.
+
+    قرینهٔ `workflow._scorer_seat` روی *دسترسی* به‌جای پرونده: زنجیره از پایین
+    خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است.
+    """
+    if access is None:
+        return None
+    if access.unit_supervisor_user_id is not None:
+        return "unit_supervisor"
+    if access.deputy_user_id is not None:
+        return "deputy"
+    return "ceo"
 
 
 @router.get("", response_model=PersonnelPage)

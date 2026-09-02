@@ -70,6 +70,26 @@ def is_manager_path(record: EvaluationRecord) -> bool:
     return record.unit_supervisor_user_id is None
 
 
+def is_ceo_only_path(record: EvaluationRecord) -> bool:
+    """نه مسئول واحدی هست و نه معاونتی: خودِ مدیرعامل نمره‌دهندهٔ اول است.
+
+    عضوِ چهارمِ همان خانواده (`is_manager_path`، `skips_deputy`،
+    `skips_hr_review`) و حالتِ حدیِ هر دوی اولی: کسی که مستقیم زیر نظرِ
+    مدیرعامل کار می‌کند و بالای سرِ او کسِ دیگری *وجود ندارد*.
+
+    تا امروز این شکل قابل ثبت نبود — `upsert_access` خالی‌بودنِ هر دو صندلیِ
+    میانی را رد می‌کرد با این استدلال که «نمره‌دهنده‌ای وجود ندارد». استدلال
+    درست بود و نتیجه‌گیری غلط: نمره‌دهنده وجود دارد، مدیرعامل است. تنها راهِ
+    باقی‌مانده این بود که مدیرعامل را در صندلیِ «مسئول واحد» بنشانند — که
+    `may_act_at` اجازه‌اش را می‌دهد، ولی در رابط قابل انتخاب نبود و در سند
+    هم دروغ می‌گفت.
+
+    زیرمجموعهٔ `is_manager_path` است، پس هر گاردی که بر آن بنا شده باید
+    این حالت را هم صریح ببیند؛ گذارهای `ceo_submit*` همان‌جا هستند.
+    """
+    return record.unit_supervisor_user_id is None and record.deputy_user_id is None
+
+
 def skips_hr_review(record: EvaluationRecord) -> bool:
     """این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است.
 
@@ -145,7 +165,11 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.submitted,
         allowed_role=UserRole.deputy,
         assignee_field="deputy_user_id",
-        guard=lambda record: is_manager_path(record) and not skips_hr_review(record),
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and not skips_hr_review(record)
+        ),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
     ),
@@ -158,7 +182,36 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.deputy_approved,
         allowed_role=UserRole.deputy,
         assignee_field="deputy_user_id",
-        guard=lambda record: is_manager_path(record) and skips_hr_review(record),
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and skips_hr_review(record)
+        ),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
+    ),
+    # مسیرِ «مستقیمِ مدیرعامل»: نمره‌دهنده خودِ مدیرعامل است. مرحلهٔ معاونت
+    # وجود ندارد (نه اینکه مصرف شده باشد)، ولی مرحلهٔ منابع انسانی می‌ماند و
+    # همان یک جفت‌چشمِ مستقلِ این زنجیره است — این‌جا لازم‌تر از هر پروندهٔ
+    # دیگری، چون تنها تصمیم‌گیرِ زنجیره یک نفر است.
+    "ceo_submit": Transition(
+        from_statuses=frozenset({EvaluationStatus.draft}),
+        to_status=EvaluationStatus.submitted,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: is_ceo_only_path(record) and not skips_hr_review(record),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
+    ),
+    # همان مسیر، برای عضوِ واحدِ منابع انسانی که مستقیم زیر نظرِ مدیرعامل است:
+    # هر سه مرحلهٔ میانی غایب‌اند و مدیرعامل تنها داورِ پرونده است. حالتِ نادری
+    # است، ولی اگر گذارش نبود پرونده در `draft` قفل می‌شد.
+    "ceo_submit_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.draft}),
+        to_status=EvaluationStatus.deputy_approved,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: is_ceo_only_path(record) and skips_hr_review(record),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله ثبت توسط شما نیست",
     ),
@@ -260,7 +313,23 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.submitted,
         allowed_role=UserRole.ceo,
         assignee_field="ceo_user_id",
-        guard=lambda record: is_manager_path(record) and not skips_hr_review(record),
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and not skips_hr_review(record)
+        ),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
+    ),
+    # مسیرِ «مستقیمِ مدیرعامل»: برگشت به «صفِ منابع انسانی» بی‌معناست، چون
+    # چیزی که باید عوض شود نمرهٔ خودِ مدیرعامل است. تنها پلهٔ عقب‌ترش خودِ
+    # نمره‌دهی است.
+    "ceo_return_ceo_only": Transition(
+        from_statuses=frozenset({EvaluationStatus.deputy_approved}),
+        to_status=EvaluationStatus.draft,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=is_ceo_only_path,
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
     ),
@@ -271,7 +340,11 @@ TRANSITIONS: dict[str, Transition] = {
         to_status=EvaluationStatus.draft,
         allowed_role=UserRole.ceo,
         assignee_field="ceo_user_id",
-        guard=lambda record: is_manager_path(record) and skips_hr_review(record),
+        guard=lambda record: (
+            is_manager_path(record)
+            and not is_ceo_only_path(record)
+            and skips_hr_review(record)
+        ),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
     ),

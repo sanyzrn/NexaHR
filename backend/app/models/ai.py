@@ -65,7 +65,11 @@ class AiSettings(Base):
     provider: Mapped[str] = mapped_column(String(40), default="custom", nullable=False)
 
     temperature: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
-    max_tokens: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
+    #: سقفِ توکنِ *پاسخ*. برای یک چت ساده ۱۲۰۰ کافی بود؛ برای حلقهٔ ابزار نه:
+    #: مدل باید هم خواستهٔ ابزار را بنویسد و هم در پایان یک جدولِ خوانا. هر بار
+    #: که این سقف می‌خورَد، یا جواب نیمه‌جمله می‌ماند یا — بدتر — آرگومانِ ابزار
+    #: نصفه می‌شود (`port.ChatResponse.truncated`).
+    max_tokens: Mapped[int] = mapped_column(Integer, default=4000, nullable=False)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
 
     #: «چطور جواب بده» — متنی که سرِ هر گفت‌وگو به مدل داده می‌شود.

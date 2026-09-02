@@ -17,6 +17,7 @@ from tests.helpers import (
     make_access,
     make_personnel,
     make_user,
+    set_module,
 )
 
 
@@ -274,6 +275,10 @@ def test_the_objection_does_not_alter_the_result_or_the_document(client, db_sess
 
 def test_hr_resolves_the_objection_and_the_employee_is_told(client, db_session):
     case = _case(client, db_session, finalize=True)
+    # پاسخِ اعتراض را کارمند از «کارنامه من» می‌خواند، پس اعلانش فقط وقتی
+    # فرستاده می‌شود که آن صفحه روشن باشد. ماژول پیش‌فرض خاموش است.
+    set_module(db_session, "employee_evaluation_visibility", True)
+    db_session.commit()
     client.post(f"/api/me/evaluations/{case['id']}/acknowledge", headers=auth_header(case["employee"]))
     client.post(
         f"/api/me/evaluations/{case['id']}/object",

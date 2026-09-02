@@ -188,6 +188,39 @@ def test_a_case_with_no_period_has_no_deadline(client, db_session):
     assert rows[0]["self_assessment_open"] is True
 
 
+def test_the_window_closes_the_moment_it_is_used(client, db_session):
+    """پرچمِ «باز» پس از ثبت باید بسته شود — سه شرط بود و باید چهار می‌بود.
+
+    خودارزیابی یک‌بار ثبت می‌شود و قفل است؛ سرور ثبتِ دوم را با ۴۰۰ رد می‌کند.
+    ولی `self_assessment_open` این را نمی‌سنجید و پس از ثبت همچنان `true`
+    می‌ماند — یعنی همان پرچمی که کامنتش می‌گوید «فرانت نباید هیچ‌کدام را خودش
+    حساب کند»، رابط را وامی‌داشت شرطِ دوم را خودش نگه دارد. دو منبعِ حقیقت برای
+    یک پنجره، و پرچم سمتِ غلط را می‌گفت.
+    """
+    case = _open_case(client, db_session)
+    rows = client.get("/api/me/evaluations/open", headers=auth_header(case["subject"])).json()
+    assert rows[0]["self_assessment_open"] is True
+
+    submitted = client.post(
+        f"/api/me/evaluations/{case['id']}/self-assessment",
+        json=_payload(db_session, 4),
+        headers=auth_header(case["subject"]),
+    )
+    assert submitted.status_code == 200, submitted.text
+
+    rows = client.get("/api/me/evaluations/open", headers=auth_header(case["subject"])).json()
+    assert rows[0]["self_assessment_submitted_at"] is not None
+    assert rows[0]["self_assessment_open"] is False
+
+    # و همان چیزی که پرچم می‌گوید، سرور هم اعمالش می‌کند.
+    again = client.post(
+        f"/api/me/evaluations/{case['id']}/self-assessment",
+        json=_payload(db_session, 2),
+        headers=auth_header(case["subject"]),
+    )
+    assert again.status_code == 400, again.text
+
+
 # ── تمدید ───────────────────────────────────────────────────────────────
 
 def test_hr_can_reopen_one_case_after_the_deadline(client, db_session):

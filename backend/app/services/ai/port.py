@@ -62,6 +62,13 @@ class ChatResponse:
     tool_calls: tuple[ToolCall, ...] = ()
     #: چیزی که برای نمایش «چقدر خرج شد» لازم است. سرویس‌ها همیشه نمی‌دهند.
     usage: dict = field(default_factory=dict)
+    #: پاسخ سرِ سقفِ `max_tokens` بریده شد (`finish_reason == "length"`).
+    #:
+    #: تا امروز خوانده نمی‌شد و همین یک خط دو خرابیِ بی‌صدا می‌ساخت: جوابِ
+    #: نیمه‌جمله به‌جای جوابِ نهایی به کاربر می‌رفت، و — بدتر — اگر بُرش وسطِ
+    #: نوشتنِ `tool_calls` افتاده بود، آرگومان‌ها JSONِ ناقص بودند و ابزار با
+    #: آرگومانِ *خالی* اجرا می‌شد. یعنی کاری غیر از آن‌که مدل خواسته بود.
+    truncated: bool = False
 
 
 class AiUnavailable(Exception):
@@ -93,5 +100,9 @@ class ChatAdapter(Protocol):
     def available(self) -> bool: ...
 
     async def send(
-        self, messages: list[ChatMessage], *, tools: list[dict] | None = None
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> ChatResponse: ...

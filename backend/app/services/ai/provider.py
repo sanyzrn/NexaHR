@@ -48,7 +48,11 @@ class OpenAiCompatibleAdapter:
         return bool(self._base_url and self._api_key and self._model)
 
     async def send(
-        self, messages: list[ChatMessage], *, tools: list[dict] | None = None
+        self,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict] | None = None,
+        tool_choice: str | None = None,
     ) -> ChatResponse:
         if not self.available:
             raise AiUnavailable("دستیار هوشمند هنوز پیکربندی نشده است")
@@ -74,6 +78,13 @@ class OpenAiCompatibleAdapter:
         }
         if tools:
             payload["tools"] = tools
+            # «الان حرف بزن، ابزار نزن» با «ابزاری وجود ندارد» یکی نیست. راهِ
+            # اولی همین است و نه *حذفِ* شِما: گفت‌وگویی که پیام‌های `tool` در
+            # خود دارد، بی `tools` از سوی چند سرویس (از جمله درگاه‌های سازگارِ
+            # Anthropic و Gemini) با ۴۰۰ رد می‌شود — یعنی پلهٔ آخرِ حلقه، همان
+            # پله‌ای که باید جمع‌بندی کند، خطا می‌داد.
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
 
         url = f"{self._base_url}/chat/completions"
 
@@ -120,6 +131,7 @@ class OpenAiCompatibleAdapter:
             message = choice["message"]
             content = message.get("content") or ""
             raw_calls = message.get("tool_calls") or []
+            finish_reason = str(choice.get("finish_reason") or "")
         except (ValueError, KeyError, IndexError, TypeError):
             raise AiRequestFailed(
                 "پاسخ سرویس قابل خواندن نبود. معمولاً یعنی آدرس سرویس به یک نقطهٔ "
@@ -144,6 +156,7 @@ class OpenAiCompatibleAdapter:
             content=content or "",
             tool_calls=tuple(calls),
             usage=body.get("usage") or {},
+            truncated=finish_reason == "length",
         )
 
 

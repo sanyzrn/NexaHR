@@ -104,8 +104,14 @@ def test_a_chain_with_a_deputy_still_has_to_go_through_them(client, db_session):
     assert db_session.get(EvaluationRecord, record_id).status is EvaluationStatus.hr_approved
 
 
-def test_both_middle_stages_empty_is_refused(client, db_session):
-    """اگر نه مسئول واحد باشد و نه معاونت، هیچ‌کس نمره نمی‌دهد."""
+def test_both_middle_stages_empty_is_now_a_chain_of_its_own(client, db_session):
+    """قاعده عوض شد: خالی‌بودنِ هر دو صندلیِ میانی رد نمی‌شود.
+
+    پیش از این ۴۰۰ می‌گرفت با استدلالِ «هیچ‌کس نمره نمی‌دهد» — استدلالی که
+    درست بود و نتیجه‌گیری‌اش غلط: نمره‌دهنده وجود داشت (خودِ مدیرعامل)، فقط
+    گذارش نوشته نشده بود. گردشِ کاملِ آن مسیر در `test_ceo_only_chain.py` است؛
+    این‌جا فقط ثابت می‌شود که این فایل دیگر آن را ممنوع نمی‌داند.
+    """
     hr = make_user(db_session, "hr")
     ceo = make_user(db_session, "ceo", capabilities=[])
     personnel = make_personnel(db_session)
@@ -116,8 +122,7 @@ def test_both_middle_stages_empty_is_refused(client, db_session):
         json={"unit_supervisor_user_id": None, "deputy_user_id": None, "ceo_user_id": ceo.id},
         headers=auth_header(hr),
     )
-    assert response.status_code == 400, response.text
-    assert "نمره‌دهنده" in response.json()["detail"]
+    assert response.status_code == 200, response.text
 
 
 def test_hr_can_save_a_chain_without_a_deputy(client, db_session):

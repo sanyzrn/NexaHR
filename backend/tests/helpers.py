@@ -153,3 +153,21 @@ def make_hr_unit(db: Session, name: str = "منابع انسانی", site: str |
     db.add(unit)
     db.flush()
     return unit.full_name
+
+
+def set_module(db: Session, key: str, enabled: bool) -> None:
+    """ماژول را روشن/خاموش می‌کند — همان کاری که پنل مدیریت می‌کند.
+
+    لازم است چون چند ماژولِ نمایشِ کارمند پیش‌فرض *خاموش*‌اند
+    (`core/modules.py`)، و تستی که رفتارِ روشن را می‌سنجد باید صریح روشنش کند —
+    نه اینکه به پیش‌فرض تکیه کند و روزی که پیش‌فرض عوض شد بی‌صدا چیزِ دیگری
+    بسنجد.
+    """
+    from app.models.module import ModuleSetting
+
+    row = db.get(ModuleSetting, key)
+    if row is None:
+        db.add(ModuleSetting(key=key, enabled=enabled))
+    else:
+        row.enabled = enabled
+    db.flush()

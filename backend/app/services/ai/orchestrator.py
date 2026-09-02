@@ -215,12 +215,31 @@ def tools_uploads_ttl() -> int:
     return PENDING_TTL_HOURS
 
 
+class BadToolArguments(Exception):
+    """آرگومان‌های ابزار JSONِ معتبر نبودند."""
+
+
 def _parse_arguments(raw: str) -> dict:
-    try:
-        parsed = json.loads(raw or "{}")
-        return parsed if isinstance(parsed, dict) else {}
-    except ValueError:
+    """آرگومان‌های ابزار — و اگر خوانا نبودند، *صریح* شکست بخور.
+
+    نسخهٔ قبلی روی JSONِ نامعتبر `{}` برمی‌گرداند. آن بی‌صدایی گران بود: پاسخِ
+    بریده‌شده سرِ سقفِ `max_tokens` دقیقاً همین شکل است (آرگومانِ نصفه)، و
+    نتیجه‌اش اجرای ابزار با آرگومانِ *خالی* بود — جست‌وجو بی عبارت، فهرست بی
+    فیلتر. ابزار موفق برمی‌گشت، مدل نتیجهٔ بی‌ربط می‌گرفت، و کاربر پاسخی
+    می‌دید که به پرسشش نمی‌خورد بی‌آنکه هیچ‌جا خطایی ثبت شده باشد.
+
+    حالا خطا به خودِ مدل برمی‌گردد تا با آرگومانِ درست دوباره صدا بزند.
+    """
+    text = (raw or "").strip()
+    if not text:
         return {}
+    try:
+        parsed = json.loads(text)
+    except ValueError as err:
+        raise BadToolArguments(str(err)) from None
+    if not isinstance(parsed, dict):
+        raise BadToolArguments("آرگومان‌ها باید یک شیء JSON باشند")
+    return parsed
 
 
 async def run_turn(
@@ -266,14 +285,24 @@ async def run_turn(
             ))]
             messages += _history_messages(db, conversation.id, exclude_id=user_message_id)
             messages.append(ChatMessage("user", user_text))
-        # پلهٔ آخر بدون ابزار: مدلِ حرف‌نزن‌گرده وادار به جمع‌بندی می‌شود.
+        # پلهٔ آخر: مدلِ حرف‌نزن‌گرد وادار به جمع‌بندی می‌شود — با
+        # `tool_choice="none"` و نه با *حذفِ* شِمای ابزار. تفاوتش را چند سرویس
+        # جدی می‌گیرند: گفت‌وگویی که پیام‌های `tool` در خود دارد، بی `tools`
+        # با ۴۰۰ رد می‌شود، پس همان پله‌ای که باید نوبت را ببندد خطا می‌داد و
+        # کاربر جملهٔ «چند پله پیش رفت» را می‌گرفت به‌جای جواب.
         force_text = iteration == max_iterations - 1
-        wire_specs = tools_base.openai_tools_schema(specs) if (specs and not force_text and not fallback_mode) else None
+        wire_specs = (
+            tools_base.openai_tools_schema(specs) if (specs and not fallback_mode) else None
+        )
 
         adapter = adapter_factory()
         try:
             if wire_specs:
-                response: ChatResponse = await adapter.send(messages, tools=wire_specs)
+                response: ChatResponse = await adapter.send(
+                    messages,
+                    tools=wire_specs,
+                    tool_choice="none" if force_text else None,
+                )
             else:
                 response = await adapter.send(messages)
         except ToolProtocolUnsupported:
@@ -308,12 +337,33 @@ async def run_turn(
                 for index, (name, arguments) in enumerate(tools_base.parse_fallback_blocks(response.content))
             ]
 
+        # پاسخِ بریده‌شده سرِ سقفِ `max_tokens`: اگر وسطِ نوشتنِ خواستهٔ ابزار
+        # بریده باشد، آرگومان‌ها JSONِ ناقص‌اند و اجرای آن‌ها یعنی انجامِ کاری
+        # غیر از آن‌که مدل خواسته. حلقه را قطع می‌کنیم و *می‌گوییم* چه شد، چون
+        # رفعش دستِ مدیر سامانه است (سقفِ توکن در تنظیمات دستیار).
+        if response.truncated and calls:
+            steps.append(
+                StepTrace(
+                    tool=calls[0].name or "؟",
+                    status="error",
+                    summary="پاسخ سرویس سرِ سقفِ توکن برید و خواستهٔ ابزار ناقص ماند",
+                )
+            )
+            reply = (
+                "پاسخ سرویس سرِ سقفِ توکن برید و خواستهٔ ابزار نیمه‌کاره ماند، پس اجرا "
+                "نشد. «حداکثر توکن پاسخ» را در تنظیمات دستیار بالا ببرید یا پرسش را "
+                "کوچک‌تر بپرسید."
+            )
+            break
+
         if not calls:
             reply = (
                 tools_base.strip_fallback_blocks(response.content)
                 if fallback_mode
                 else response.content
             ).strip()
+            if response.truncated and reply:
+                reply += "\n\n_(پاسخ سرِ سقفِ توکن برید. «حداکثر توکن پاسخ» را در تنظیمات دستیار بالا ببرید.)_"
             break
 
         if fallback_mode:
@@ -344,9 +394,25 @@ async def run_turn(
                 )
                 steps.append(StepTrace(tool=call.name, status="error", summary="ابزار شناخته نشد"))
                 continue
-            arguments = _parse_arguments(call.arguments_json)
             if not fallback_mode and not call.id:
                 call = ToolCall(id="call_0", name=call.name, arguments_json=call.arguments_json)
+            try:
+                arguments = _parse_arguments(call.arguments_json)
+            except BadToolArguments as err:
+                messages.append(
+                    ChatMessage(
+                        "tool",
+                        json_content({
+                            "error": f"آرگومان‌های این فراخوانی JSONِ معتبر نبود: {err}",
+                            "note": "با آرگومان‌های درست دوباره صدا بزن.",
+                        }),
+                        tool_call_id=call.id,
+                    )
+                )
+                steps.append(
+                    StepTrace(tool=spec.name, status="error", summary="آرگومان‌های ابزار خوانا نبود")
+                )
+                continue
             try:
                 result_text = _execute_call(
                     ctx, spec, arguments, allow_writes=allow_writes, steps=steps, created_pending=created_pending

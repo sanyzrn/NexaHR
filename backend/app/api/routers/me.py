@@ -97,13 +97,22 @@ def my_open_evaluation(
             MyOpenEvaluation.model_validate(record).model_copy(
                 update={
                     "indicator_ids": sorted(indicator_ids_for_record(db, record)),
-                    # سه شرط، و هر سه لازم: نقش خودارزیابی داشته باشد، پرونده
-                    # هنوز در مرحلهٔ ثبت باشد، و مهلتِ دوره نگذشته باشد. فرانت
-                    # نباید هیچ‌کدام را خودش حساب کند.
+                    # چهار شرط، و هر چهار لازم: نقش خودارزیابی داشته باشد،
+                    # پرونده هنوز در مرحلهٔ ثبت باشد، مهلتِ دوره نگذشته باشد، و
+                    # قبلاً ثبت نکرده باشد. فرانت نباید هیچ‌کدام را خودش حساب
+                    # کند — و شرطِ چهارم تا امروز این‌جا نبود، پس دقیقاً همان
+                    # چیزی می‌شد که این کامنت منعش می‌کرد: پرچم پس از ثبت
+                    # همچنان `true` می‌ماند و تنها چیزی که فرم را پنهان
+                    # می‌کرد، شرطِ *دومِ* خودِ رابط بود.
+                    #
+                    # سرور خودش همین ثبتِ دوم را با ۴۰۰ رد می‌کند
+                    # (`submit_self_assessment`)، پس پرچمی که «باز» بگوید فقط
+                    # به دکمه‌ای می‌رسد که خطا می‌دهد.
                     "self_assessment_open": (
                         eligible
                         and record.status in SELF_ASSESSMENT_OPEN_STATUSES
                         and window.is_open
+                        and record.self_assessment_submitted_at is None
                     ),
                     "submission_deadline": window.closes_on,
                     "submission_deadline_extended": window.extended,
