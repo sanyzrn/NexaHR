@@ -147,7 +147,11 @@ def test_they_cannot_resolve_their_own_objection(client, db_session, hr_under_re
 
 
 def test_the_case_cannot_be_handed_over_to_the_subject(client, hr_under_review):
-    """گاردِ بالا از راهِ دیگر: یک HR دیگر پرونده را به خودِ او بدهد."""
+    """گاردِ بالا از راهِ دیگر: یک HR دیگر پرونده را به خودِ او بدهد.
+
+    حالا حتی یک پله زودتر بسته می‌شود: هیچ کاربر HRای — نه فقط خودِ موضوع —
+    روی پروندهٔ بازِ واحدِ منابع انسانی دستی ندارد.
+    """
     response = client.post(
         f"/api/evaluations/{hr_under_review['record_id']}/hr-handover",
         json={
@@ -156,7 +160,7 @@ def test_the_case_cannot_be_handed_over_to_the_subject(client, hr_under_review):
         },
         headers=auth_header(hr_under_review["other_hr"]),
     )
-    assert response.status_code == 400, response.text
+    assert response.status_code == 403, response.text
 
 
 def test_not_even_another_hr_user_reviews_it(client, hr_under_review):
@@ -166,13 +170,16 @@ def test_not_even_another_hr_user_reviews_it(client, hr_under_review):
     شمرده می‌شد. در تیمِ واقعیِ منابع انسانی آن راه به دو بن‌بست رسید:
     تنها HR دیگری که بالای سرِ کارشناس بود، همان کسی بود که نمره را داده، و
     برای پروندهٔ مدیرِ HR تنها داورِ باقی‌مانده زیردستِ خودش بود.
+
+    پاسخ ۴۰۳ است و نه ۴۰۰: گاردِ دسترسی پیش از گاردِ وضعیت می‌ایستد و
+    می‌گوید این پرونده *مالِ او نیست*، نه اینکه «هنوز نوبتش نشده».
     """
     response = client.post(
         f"/api/evaluations/{hr_under_review['record_id']}/hr-approve",
         headers=auth_header(hr_under_review["other_hr"]),
     )
-    assert response.status_code == 400, response.text
-    assert "در انتظار بررسی منابع انسانی نیست" in response.json()["detail"]
+    assert response.status_code == 403, response.text
+    assert "پیش از ثبت نهایی" in response.json()["detail"]
 
 
 def test_they_still_see_their_own_result_through_their_own_panel(client, db_session, hr_under_review):

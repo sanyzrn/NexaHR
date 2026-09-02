@@ -63,17 +63,19 @@ from app.services.self_assessment import may_view as may_view_self_assessment
 from app.services.self_evaluation import (
     ensure_chain_stages_are_not_redundant,
     ensure_evaluators_are_not_the_subject,
-    ensure_not_deciding_about_oneself,
+    ensure_hr_may_handle,
     subject_belongs_to_hr,
 )
 from app.services.snapshot import build_final_snapshot
 from app.services.workflow import (
     IS_OPEN_RECORD,
+    IS_SHIELDED_FROM_HR_PANEL,
     OPEN_STATUSES,
     apply_transition,
     finalize_scoring,
     is_manager_path,
     may_act_at,
+    objection_resolver_field,
     skips_hr_review,
 )
 
@@ -140,7 +142,10 @@ def _ensure_can_view(record: EvaluationRecord, current_user: CurrentUser) -> Non
     # شواهدِ ارزیاب را دارد و پنل HR کاملش را نشان می‌دهد؛ کارمندِ منابع انسانی
     # نباید ارزیابیِ خودش را از آن‌جا بخواند. مسیر خودش
     # (`/api/me/evaluations`) جداست و فقط نتیجهٔ نهایی را می‌دهد.
-    ensure_not_deciding_about_oneself(record, current_user)
+    #
+    # و همان استدلال، یک قدم فراتر: پروندهٔ *هم‌تیمی‌های* واحد منابع انسانی هم
+    # تا پیش از ثبت نهایی از این پنجره دیده نمی‌شود.
+    ensure_hr_may_handle(record, current_user)
     if current_user.role == UserRole.hr:
         return
     allowed_ids = {record.unit_supervisor_user_id, record.deputy_user_id, record.ceo_user_id}
@@ -531,6 +536,9 @@ def scope_evaluations_for_role(query, user: CurrentUser):
         # جزئیات را بسته دیده، فرض می‌کند فهرست هم بسته است.
         #
         # مسیرِ خودش جداست و دست‌نخورده می‌ماند (`/api/me/evaluations`).
+        # و پروندهٔ اعضای واحدِ منابع انسانی، تا وقتی باز است
+        # (`workflow.hr_panel_is_shielded` — همان قاعده، برای کوئری).
+        query = query.where(~IS_SHIELDED_FROM_HR_PANEL)
         if user.personnel_id is None:
             return query
         return query.where(EvaluationRecord.subject_personnel_id != user.personnel_id)
@@ -643,9 +651,15 @@ def export_evaluations_excel(
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> Response:
     """خروجی Excel از ارزیابی‌ها (فقط HR) — همان فیلترهای فهرست را می‌پذیرد تا HR
-    دقیقاً همان چیزی را که روی صفحه فیلتر کرده است دریافت کند."""
+    دقیقاً همان چیزی را که روی صفحه فیلتر کرده است دریافت کند.
+
+    «همان چیز» شامل دامنهٔ دید هم می‌شود، نه فقط فیلترها: این‌جا
+    `scope_evaluations_for_role` صدا نمی‌شد، پس خروجیِ Excel همان ستونِ نتیجه‌ای
+    را می‌داد که فهرست عمداً پنهان می‌کند — پروندهٔ خودِ کاربر HR و پروندهٔ در
+    جریانِ واحدش. گاردی که فقط روی صفحه باشد و روی «دریافت خروجی» نه، گارد نیست.
+    """
     query = _apply_evaluation_filters(
-        select(EvaluationRecord),
+        scope_evaluations_for_role(select(EvaluationRecord), current_user),
         q=q,
         status_filter=status_filter,
         org_unit=org_unit,
@@ -825,9 +839,9 @@ def hr_approve(
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> EvaluationRead:
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش. مسیر گذارها از `_ensure_can_view` نمی‌گذرد،
-    # پس گارد این‌جا صریح است نه ضمنی.
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش. مسیر گذارها از `_ensure_can_view`
+    # نمی‌گذرد، پس گارد این‌جا صریح است نه ضمنی.
+    ensure_hr_may_handle(record, current_user)
     # در مسیر «مدیر»، تأیید منابع انسانی پرونده را مستقیم روی میز مدیرعامل
     # می‌گذارد: مرحلهٔ معاونت مصرف شده، چون خودش نمره داده است.
     action = "hr_approve_manager" if is_manager_path(record) else "hr_approve"
@@ -900,6 +914,10 @@ def return_evaluation(
 ) -> EvaluationRead:
     """برگشت پرونده یک مرحله به عقب با ذکر دلیل اجباری؛ امتیازهای قبلی حفظ می‌شوند."""
     record = _get_record_or_404_for_update(db, evaluation_id)
+    # گاردِ گذار (`hr_return`) پروندهٔ بی‌مرحلهٔ HR را هم رد می‌کند، ولی با پیامِ
+    # «در انتظار بررسی منابع انسانی نیست» — درست، و گمراه‌کننده: انگار روزی
+    # نوبتش می‌شود. این‌جا زودتر و با پیامِ درست می‌ایستد.
+    ensure_hr_may_handle(record, current_user)
     action, comment_stage = _RETURN_ACTION_BY_ROLE[current_user.role]
 
     if action == "ceo_return" and is_manager_path(record):
@@ -956,8 +974,8 @@ def cancel_evaluation(
     غیرقابل‌ارزیابی می‌ماند و تنها درمانش SQL دستی روی پروداکشن بود.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
+    ensure_hr_may_handle(record, current_user)
 
     def _before() -> None:
         # دلیل هم به‌صورت کامنت در خود پرونده می‌ماند و هم در audit — تصمیم است، نه پاک‌کردن.
@@ -1002,8 +1020,9 @@ def extend_submission_window(
     بازبینی از تمدیدِ خودسرانه قابل تشخیص نیست.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # همان قاعدهٔ همیشگی: منابع انسانی دربارهٔ پروندهٔ خودش تصمیم نمی‌گیرد.
-    ensure_not_deciding_about_oneself(record, current_user)
+    # همان قاعدهٔ همیشگی: منابع انسانی دربارهٔ پروندهٔ خودش — و پروندهٔ واحدِ
+    # خودش — تصمیم نمی‌گیرد.
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in _EXTENDABLE_STATUSES:
         raise HTTPException(
@@ -1074,8 +1093,8 @@ def hr_claim(
     هم‌زمان روی یک پرونده کار نکنند.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(
@@ -1119,8 +1138,8 @@ def hr_handover(
     تفکیک واقعی نقش‌های HR گام میان‌مدت همین یافته است.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(
@@ -1172,24 +1191,70 @@ def hr_handover(
     return _to_read(db, record)
 
 
+_OBJECTION_SEAT_LABEL = {"deputy_user_id": "معاونت", "ceo_user_id": "مدیرعامل"}
+
+
+def _ensure_can_resolve_objection(record: EvaluationRecord, current_user: CurrentUser) -> None:
+    """چه کسی حق دارد این اعتراض را ببندد.
+
+    برای پروندهٔ معمولی: منابع انسانی — منهای پروندهٔ خودش. برای پروندهٔ اعضای
+    واحدِ منابع انسانی: صندلیِ بالادستِ نمره‌دهنده، که
+    `workflow.objection_resolver_field` نامش را می‌دهد. آن‌جا نقشِ `hr` عمداً رد
+    می‌شود: هم‌تیمیِ معترض، بی‌طرف نیست.
+    """
+    field = objection_resolver_field(record)
+    if field is None:
+        if current_user.role is not UserRole.hr:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="رسیدگی به اعتراضِ این پرونده با منابع انسانی است",
+            )
+        ensure_hr_may_handle(record, current_user)
+        return
+
+    stage_role = UserRole.ceo if field == "ceo_user_id" else UserRole.deputy
+    owner_id = getattr(record, field)
+    if (
+        owner_id is None
+        or current_user.id != owner_id
+        or not may_act_at(current_user.role, stage_role)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "این پرونده متعلق به واحد منابع انسانی است؛ رسیدگی به اعتراضِ آن با "
+                f"«{_OBJECTION_SEAT_LABEL[field]}» است، نه منابع انسانی."
+            ),
+        )
+    # و همان قاعدهٔ همیشگی، حتی برای صندلیِ زنجیره: کسی که موضوعِ پرونده است
+    # اعتراضِ خودش را نمی‌بندد.
+    ensure_hr_may_handle(record, current_user)
+
+
 @router.post("/{evaluation_id}/resolve-objection", response_model=EvaluationRead)
 def resolve_objection(
     evaluation_id: int,
     payload: ObjectionResolution,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
-    """ثبت پاسخ منابع انسانی به اعتراض کارمند.
+    """ثبت پاسخ به اعتراض کارمند.
 
     اعتراضی که کسی موظف به پاسخ‌گویی به آن نباشد، تشریفات است. این endpoint اعتراض
     را می‌بندد و پاسخ را کنار خودِ اعتراض در پرونده ثبت می‌کند.
+
+    در حالتِ عادی پاسخ‌دهنده منابع انسانی است. برای پروندهٔ اعضای همان واحد،
+    منابع انسانی خودش طرفِ ماجراست و پاسخ‌دهنده یک پله بالاتر می‌رود
+    (`_ensure_can_resolve_objection`) — وگرنه این اعتراض‌ها هیچ رسیدگی‌کننده‌ای
+    نداشتند.
 
     نتیجهٔ ارزیابی و سند نهایی عمداً دست‌نخورده می‌مانند: اگر واقعاً باید امتیاز عوض
     شود، مسیرش ارزیابی تازه است نه بازنویسی سندی که هش و امضا دارد.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
-    # اقدام HR روی پروندهٔ خودش (همان دلیل بالا).
-    ensure_not_deciding_about_oneself(record, current_user)
+    _ensure_can_resolve_objection(record, current_user)
 
     if record.objection_at is None:
         raise HTTPException(
@@ -1259,6 +1324,10 @@ def reassign_stage_owner(
     قفل ردیف و همان مسیر audit استفاده می‌کند.
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
+    # این‌جا گارد اصلاً نبود — و بازتخصیص، اثرگذارترین ابزارِ بیرون از زنجیره است:
+    # عوض‌کردنِ مسئولِ یک مرحله یعنی انتخابِ داورِ آن مرحله. منابع انسانی نباید
+    # آن را روی پروندهٔ خودش یا پروندهٔ در جریانِ واحدِ خودش داشته باشد.
+    ensure_hr_may_handle(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(

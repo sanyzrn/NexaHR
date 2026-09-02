@@ -44,7 +44,7 @@ from app.services.indicator_framework import indicator_ids_for_record
 from app.services.notifications import notify
 from app.services.self_assessment import OPEN_STATUSES as SELF_ASSESSMENT_OPEN_STATUSES
 from app.services.self_assessment import may_self_assess
-from app.services.workflow import IS_OPEN_RECORD
+from app.services.workflow import IS_OPEN_RECORD, objection_resolver_field
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -328,20 +328,30 @@ def file_objection(
     )
 
 
-    hr_ids = list(
-        db.scalars(select(User.id).where(User.role == UserRole.hr, User.is_active.is_(True)))
-    )
-    notify(
-        db,
-        hr_ids,
-        type_="evaluation_objection_filed",
-        message=(
-            f"کارمند {record.subject.full_name} به نتیجهٔ پروندهٔ "
-            f"{record.evaluation_code} اعتراض ثبت کرد"
-        ),
-        evaluation_record_id=record.id,
-        link=f"/evaluations/{record.id}",
-    )
+    # اعلان به همان کسی می‌رود که موظف به پاسخ است. برای پروندهٔ اعضای واحدِ
+    # منابع انسانی آن کس، منابع انسانی نیست (`workflow.objection_resolver_field`)
+    # — و فرستادنِ اعلان به صفی که اجازهٔ پاسخ ندارد، یعنی اعتراض بی‌پاسخ می‌ماند
+    # و کسی که باید پاسخ بدهد اصلاً خبردار نمی‌شود.
+    resolver_field = objection_resolver_field(record)
+    if resolver_field is None:
+        recipients = list(
+            db.scalars(select(User.id).where(User.role == UserRole.hr, User.is_active.is_(True)))
+        )
+    else:
+        owner_id = getattr(record, resolver_field)
+        recipients = [owner_id] if owner_id is not None else []
+    if recipients:
+        notify(
+            db,
+            recipients,
+            type_="evaluation_objection_filed",
+            message=(
+                f"کارمند {record.subject.full_name} به نتیجهٔ پروندهٔ "
+                f"{record.evaluation_code} اعتراض ثبت کرد"
+            ),
+            evaluation_record_id=record.id,
+            link=f"/evaluations/{record.id}",
+        )
 
     db.commit()
     db.refresh(record)

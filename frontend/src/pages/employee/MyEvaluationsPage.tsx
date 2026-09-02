@@ -185,12 +185,12 @@ function ObjectionSection({ item }: { item: MyEvaluation }) {
         {item.objection_resolved_at ? (
           <div className="mt-3 rounded-lg bg-white/70 p-2.5">
             <p className="text-xs font-medium text-gray-500">
-              پاسخ منابع انسانی — {formatDateTime(item.objection_resolved_at)}
+              پاسخ به اعتراض شما — {formatDateTime(item.objection_resolved_at)}
             </p>
             <p className="mt-1 text-gray-800">{item.objection_resolution}</p>
           </div>
         ) : (
-          <p className="mt-2 text-xs text-amber-700">در انتظار بررسی منابع انسانی…</p>
+          <p className="mt-2 text-xs text-amber-700">در انتظار بررسی و پاسخ…</p>
         )}
       </div>
     );

@@ -24,6 +24,8 @@
 `skips_deputy` (معاونت نیست). مرحله‌ای که داورِ بی‌طرف ندارد، پرونده را نگه
 نمی‌دارد.
 """
+import pytest
+
 from app.models.enums import EvaluationStatus
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_access import EvaluationAccess
@@ -48,6 +50,17 @@ def _score_and_submit(client, db_session, record_id: int, scorer) -> None:
         f"/api/evaluations/{record_id}/submit", headers=auth_header(scorer)
     )
     assert response.status_code == 200, response.text
+
+
+def _finish(client, record_id: int, deputy, ceo) -> None:
+    """پرونده را تا `finalized` جلو می‌برد — از هر مرحله‌ای که هست.
+
+    مرحلهٔ معاونت در مسیرِ «مدیر» وجود ندارد، پس ۴۰۳ گرفتن از آن اشکال نیست؛
+    شرطِ واقعی همان تأیید نهایی است.
+    """
+    client.post(f"/api/evaluations/{record_id}/deputy-approve", headers=auth_header(deputy))
+    final = client.post(f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo))
+    assert final.status_code == 200, final.text
 
 
 def _specialist(client, db_session):
@@ -147,6 +160,9 @@ def test_the_specialist_never_sees_their_own_case_in_the_hr_panel(client, db_ses
     `_ensure_can_view` صفحهٔ جزئیات را می‌بست ولی `scope_evaluations_for_role`
     برای HR کلِ پرس‌وجو را بی‌قید برمی‌گرداند — یعنی نمرهٔ نهاییِ خودش را در
     فهرست می‌دید، فقط نمی‌توانست رویش کلیک کند.
+
+    و برخلاف بقیهٔ پرونده‌ها، *نهایی‌شدن* هم این در را باز نمی‌کند: مسیر خودش
+    (`/api/me/evaluations`) جداست و همان است که باید نتیجه را به او بدهد.
     """
     case = _specialist(client, db_session)
     _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
@@ -154,9 +170,119 @@ def test_the_specialist_never_sees_their_own_case_in_the_hr_panel(client, db_ses
     listing = client.get("/api/evaluations", headers=auth_header(case["ali"])).json()
     assert all(row["id"] != case["record_id"] for row in listing["items"])
 
-    # و همان پرونده برای HR دیگری دیده می‌شود — گاردی که همه را ببندد، قفل است.
-    other = client.get("/api/evaluations", headers=auth_header(case["other_hr"])).json()
-    assert any(row["id"] == case["record_id"] for row in other["items"])
+    _finish(client, case["record_id"], case["deputy"], case["ceo"])
+    after = client.get("/api/evaluations", headers=auth_header(case["ali"])).json()
+    assert all(row["id"] != case["record_id"] for row in after["items"])
+
+
+def test_a_colleague_in_hr_sees_the_case_only_after_it_is_final(client, db_session):
+    """قاعدهٔ دوم: پروندهٔ در جریانِ واحدِ HR را هم‌تیمی‌ها هم نمی‌بینند.
+
+    دو خواستهٔ ظاهراً متضاد در یک جمله جا می‌شوند وقتی مرزشان *زمان* باشد و نه
+    شخص: «علی پروندهٔ حسین را اصلاً نبیند» دربارهٔ پروندهٔ در جریان است، و
+    «بعد از تأیید نهایی به پنل مدیریت HR برود» دربارهٔ همان پرونده پس از بسته
+    شدنش. تا وقتی باز است، منابع انسانی ابزارِ اثرگذاری دارد (لغو، تمدید مهلت،
+    تغییر مسئولِ مرحله) و شواهدِ ارزیاب هم روی پرونده است؛ پس از آن، هیچ‌کدام.
+    """
+    case = _specialist(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
+    other_hr = auth_header(case["other_hr"])
+
+    listing = client.get("/api/evaluations", headers=other_hr).json()
+    assert all(row["id"] != case["record_id"] for row in listing["items"])
+    detail = client.get(f"/api/evaluations/{case['record_id']}", headers=other_hr)
+    assert detail.status_code == 403, detail.text
+    assert "پیش از ثبت نهایی" in detail.json()["detail"]
+
+    _finish(client, case["record_id"], case["deputy"], case["ceo"])
+
+    listing = client.get("/api/evaluations", headers=other_hr).json()
+    assert any(row["id"] == case["record_id"] for row in listing["items"])
+    assert (
+        client.get(f"/api/evaluations/{case['record_id']}", headers=other_hr).status_code
+        == 200
+    )
+
+
+def test_the_excel_export_hides_what_the_list_hides(client, db_session):
+    """دامنهٔ دید باید در «دریافت خروجی» هم همان باشد که در صفحه است.
+
+    خروجیِ Excel همان فیلترهای فهرست را می‌پذیرد ولی
+    `scope_evaluations_for_role` را صدا نمی‌زد — یعنی هر کاربر HR می‌توانست
+    ستونِ نتیجهٔ پروندهٔ خودش و پروندهٔ در جریانِ واحدش را از همان صفحه‌ای که
+    آن‌ها را پنهان می‌کند دانلود کند.
+    """
+    case = _specialist(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
+    code = (
+        db_session.get(EvaluationRecord, case["record_id"]).evaluation_code.encode()
+    )
+
+    for actor in (case["ali"], case["other_hr"]):
+        response = client.get("/api/evaluations/export.xlsx", headers=auth_header(actor))
+        assert response.status_code == 200, response.text
+        # کدِ پرونده در xlsx به‌صورت رشته می‌نشیند؛ zip فشرده است، پس همین که
+        # جایی در بایت‌ها نباشد کافی نیست — فایل را باز می‌کنیم.
+        assert code not in _xlsx_text(response.content)
+
+
+def _xlsx_text(content: bytes) -> bytes:
+    """متنِ همهٔ برگه‌های یک xlsx، بی‌آنکه به کتابخانهٔ خواندن نیاز باشد."""
+    import io as _io
+    import zipfile
+
+    with zipfile.ZipFile(_io.BytesIO(content)) as book:
+        return b"".join(book.read(name) for name in book.namelist())
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("cancel", {"reason": "دلیلِ دلخواه برای لغو"}),
+        ("extend-submission", {"until": "2099-01-01", "reason": "دلیلِ دلخواه برای تمدید"}),
+        ("hr-claim", None),
+    ],
+)
+def test_a_colleague_in_hr_cannot_touch_the_open_case(client, db_session, path, payload):
+    """ابزارهای بیرونِ زنجیره هم بسته‌اند، نه فقط پنجرهٔ دیدن.
+
+    این سه، تنها راه‌هایی هستند که نقشِ `hr` بی‌آنکه صندلی‌ای در زنجیره داشته
+    باشد روی یک پروندهٔ باز اثر می‌گذارد. بستنِ فهرست بدون بستنِ این‌ها، گاردی
+    است که فقط چشم را می‌بندد.
+    """
+    case = _specialist(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
+
+    response = client.post(
+        f"/api/evaluations/{case['record_id']}/{path}",
+        json=payload,
+        headers=auth_header(case["other_hr"]),
+    )
+    assert response.status_code == 403, response.text
+    assert "پیش از ثبت نهایی" in response.json()["detail"]
+
+
+def test_a_colleague_in_hr_cannot_pick_the_judges_of_an_open_case(client, db_session):
+    """بازتخصیص از این هم مؤثرتر است: انتخابِ داورِ یک مرحله.
+
+    و تا پیش از این، *هیچ* گاردی نداشت — نه حتی همان «پروندهٔ خودت» که بقیهٔ
+    مسیرهای HR داشتند.
+    """
+    case = _specialist(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
+    stand_in = make_user(db_session, "deputy")
+    db_session.commit()
+
+    response = client.post(
+        f"/api/evaluations/{case['record_id']}/reassign",
+        json={
+            "stage_field": "deputy_user_id",
+            "new_user_id": stand_in.id,
+            "reason": "تلاش برای انتخاب داورِ دلخواه",
+        },
+        headers=auth_header(case["other_hr"]),
+    )
+    assert response.status_code == 403, response.text
 
 
 def test_the_specialist_gets_no_notification_about_their_own_case(client, db_session):
@@ -254,11 +380,15 @@ def test_the_hr_manager_s_case_never_returns_to_hr(client, db_session):
     case = _hr_manager(client, db_session)
     _score_and_submit(client, db_session, case["record_id"], case["deputy"])
 
+    # ۴۰۳ و نه ۴۰۰: گاردِ دسترسی پیش از گاردِ وضعیت می‌ایستد. ترتیبش معنا دارد —
+    # پیام باید بگوید «این پرونده به تو ربطی ندارد»، نه «هنوز نوبتش نشده»؛
+    # دومی درست ولی گمراه‌کننده است و انگار روزی نوبتش می‌شود.
     refused = client.post(
         f"/api/evaluations/{case['record_id']}/hr-approve",
         headers=auth_header(case["ali"]),
     )
-    assert refused.status_code == 400, refused.text
+    assert refused.status_code == 403, refused.text
+    assert "پیش از ثبت نهایی" in refused.json()["detail"]
 
     final = client.post(
         f"/api/evaluations/{case['record_id']}/ceo-finalize",
@@ -425,3 +555,143 @@ def test_hr_can_flag_a_unit_from_the_panel(client, db_session):
     )
     assert response.status_code == 200, response.text
     assert response.json()["is_hr_unit"] is True
+
+
+# ── رسیدگی به اعتراض ────────────────────────────────────────────────────
+
+
+def _object_to(client, db_session, record_id: int, person) -> None:
+    """کارمند نتیجه را می‌بیند و به آن اعتراض می‌کند.
+
+    حسابِ `employee` جداست از حسابِ کاریِ همان فرد در واحد منابع انسانی —
+    مسیرِ «کارنامهٔ من» فقط با آن کار می‌کند، و همین جدایی است که به موضوعِ
+    پرونده اجازه می‌دهد نتیجهٔ خودش را ببیند بی‌آنکه به پنلِ HR راه پیدا کند.
+    """
+    employee = make_user(db_session, "employee", personnel_id=person.id)
+    db_session.commit()
+    client.post(
+        f"/api/me/evaluations/{record_id}/acknowledge", headers=auth_header(employee)
+    )
+    filed = client.post(
+        f"/api/me/evaluations/{record_id}/object",
+        json={"reason": "با این نتیجه موافق نیستم"},
+        headers=auth_header(employee),
+    )
+    assert filed.status_code == 200, filed.text
+
+
+def _resolve(client, record_id: int, actor):
+    return client.post(
+        f"/api/evaluations/{record_id}/resolve-objection",
+        json={"resolution": "بررسی شد و پاسخ در پرونده ثبت شد"},
+        headers=auth_header(actor),
+    )
+
+
+def test_the_specialist_s_objection_goes_to_the_deputy_not_to_hr(client, db_session):
+    """اعتراض به نخستین سطحی می‌رود که در تهیهٔ همان ارزیابی دست نداشته.
+
+    نمره‌دهندهٔ علی، حسین است (مسئولِ واحد)؛ پس معاونت نخستین سطحِ بی‌طرف است.
+    منابع انسانی این‌جا اصلاً گزینه نیست: یا خودِ معترض است یا هم‌تیمی‌اش.
+
+    بی این مسیر، اعتراضِ این پرونده‌ها *هیچ رسیدگی‌کننده‌ای نداشت* — مسیر پاسخ
+    نقشِ `hr` می‌خواست و گاردِ «دربارهٔ خودت تصمیم نگیر» تنها HRِ ممکن را رد
+    می‌کرد. اعتراضی که کسی موظف به پاسخش نباشد، تشریفات است.
+    """
+    case = _specialist(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
+    _finish(client, case["record_id"], case["deputy"], case["ceo"])
+    _object_to(client, db_session, case["record_id"], case["person"])
+
+    refused = _resolve(client, case["record_id"], case["other_hr"])
+    assert refused.status_code == 403, refused.text
+    assert "معاونت" in refused.json()["detail"]
+
+    answered = _resolve(client, case["record_id"], case["deputy"])
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["objection_resolved_at"] is not None
+
+
+def test_the_hr_manager_s_objection_goes_to_the_ceo(client, db_session):
+    """یک پله بالاتر، چون نمره‌دهندهٔ حسین خودِ معاونت است.
+
+    همان قاعده، همان تابع؛ فقط شکلِ زنجیره فرق دارد. اگر رسیدگی به معاونت
+    می‌رسید، ارزیاب به اعتراضِ ارزیابیِ خودش پاسخ می‌داد.
+    """
+    case = _hr_manager(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["deputy"])
+    _finish(client, case["record_id"], case["deputy"], case["ceo"])
+    _object_to(client, db_session, case["record_id"], case["person"])
+
+    scorer = _resolve(client, case["record_id"], case["deputy"])
+    assert scorer.status_code == 403, scorer.text
+    assert "مدیرعامل" in scorer.json()["detail"]
+
+    answered = _resolve(client, case["record_id"], case["ceo"])
+    assert answered.status_code == 200, answered.text
+
+
+def test_the_resolver_is_the_one_who_gets_the_notification(client, db_session):
+    """اعلان به صفی که اجازهٔ پاسخ ندارد، یعنی اعتراض بی‌صدا می‌ماند."""
+    case = _specialist(client, db_session)
+    _score_and_submit(client, db_session, case["record_id"], case["supervisor"])
+    _finish(client, case["record_id"], case["deputy"], case["ceo"])
+    _object_to(client, db_session, case["record_id"], case["person"])
+
+    def objection_notices(actor):
+        notes = client.get("/api/notifications", headers=auth_header(actor)).json()
+        rows = notes["items"] if isinstance(notes, dict) else notes
+        return [row for row in rows if row["type"] == "evaluation_objection_filed"]
+
+    assert objection_notices(case["deputy"])
+    assert not objection_notices(case["other_hr"])
+
+
+# ── مهم ۵: دستهٔ «مستقیمِ مدیرعامل» مرحلهٔ منابع انسانی را نگه می‌دارد ──
+
+
+def test_a_direct_report_of_the_ceo_still_passes_through_hr(client, db_session):
+    """کسی که مدیرعامل هم نمره‌دهنده‌اش است و هم تأییدکنندهٔ نهایی.
+
+    این‌جا تضاد منافعی نیست که مرحله‌ای را حذف کند — منابع انسانی نه موضوع
+    است و نه هم‌تیمیِ موضوع — و چون تنها تصمیم‌گیرِ زنجیره یک نفر است، آن یک
+    جفت‌چشمِ مستقل از هر پروندهٔ دیگری این‌جا لازم‌تر است. حذفِ مرحله فقط جایی
+    است که داورِ بی‌طرفی برایش نمانده باشد.
+    """
+    make_hr_unit(db_session)  # واحد HR هست، ولی این فرد در آن نیست
+    person = make_personnel(db_session, full_name="دستیار مدیرعامل")
+    ceo = make_user(db_session, "ceo", capabilities=[])
+    hr = make_user(db_session, "hr")
+    db_session.add(
+        EvaluationAccess(
+            personnel_id=person.id,
+            # مدیرعامل خودش در صندلیِ نمره‌دهنده می‌نشیند (`may_act_at`)، و
+            # معاونتی در کار نیست.
+            unit_supervisor_user_id=ceo.id,
+            deputy_user_id=None,
+            ceo_user_id=ceo.id,
+        )
+    )
+    db_session.commit()
+
+    record_id = client.post(
+        "/api/evaluations",
+        json={"subject_personnel_id": person.id},
+        headers=auth_header(ceo),
+    ).json()["id"]
+    _score_and_submit(client, db_session, record_id, ceo)
+
+    record = db_session.get(EvaluationRecord, record_id)
+    db_session.refresh(record)
+    assert record.hr_review_skipped is False
+    assert record.status is EvaluationStatus.submitted
+
+    approved = client.post(
+        f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr)
+    )
+    assert approved.status_code == 200, approved.text
+
+    final = client.post(
+        f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
+    )
+    assert final.status_code == 200, final.text

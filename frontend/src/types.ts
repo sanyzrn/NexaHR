@@ -180,7 +180,10 @@ export interface EvaluationRecord {
   subject_full_name: string;
   period_id: number | null;
   unit_supervisor_user_id: number | null;
-  deputy_user_id: number;
+  /** `null` یعنی این پرونده مرحلهٔ معاونت ندارد و از منابع انسانی مستقیم به
+   *  مدیرعامل می‌رود. بک‌اند از ابتدا nullable بود و این‌جا `number` نوشته شده
+   *  بود — یعنی هر شرطی که می‌خواست بپرسد «معاونت دارد یا نه» بسته می‌ماند. */
+  deputy_user_id: number | null;
   ceo_user_id: number;
   // مسئولِ منابع انسانیِ این پرونده؛ null یعنی هنوز در صف مشترک HR است
   hr_user_id: number | null;

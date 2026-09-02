@@ -19,11 +19,13 @@ from fastapi import status as http_status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.models.enums import UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_access import EvaluationAccess
 from app.models.org_unit import OrgUnit
 from app.models.personnel import Personnel
 from app.models.user import User
+from app.services.workflow import hr_panel_is_shielded
 
 _CONFLICT_DETAIL = (
     "یک نفر نمی‌تواند ارزیابِ خودش باشد؛ کاربر «{username}» به همین پرسنل متصل است."
@@ -191,6 +193,38 @@ def ensure_not_deciding_about_oneself(record, current_user) -> None:
         detail=(
             "این پروندهٔ ارزیابیِ خودِ شماست؛ رسیدگی به آن باید توسط کاربر دیگری از "
             "منابع انسانی انجام شود."
+        ),
+    )
+
+
+def ensure_hr_may_handle(record, current_user) -> None:
+    """گاردِ کاملِ منابع انسانی روی یک پرونده — دو قاعده، یک در.
+
+    `ensure_not_deciding_about_oneself` پروندهٔ *خودِ* کاربر را می‌بندد. این تابع
+    آن را نگه می‌دارد و قاعدهٔ دوم را رویش می‌گذارد: پروندهٔ *هم‌تیمی‌ها* هم تا
+    وقتی باز است بسته می‌ماند (`workflow.hr_panel_is_shielded` می‌گوید چرا و تا
+    کِی).
+
+    یک تابع و نه دو، چون این گارد باید در *هر* نقطه‌ای که منابع انسانی به یک
+    پرونده دست می‌زند بنشیند — دیدن، لغو، تمدید مهلت، برداشتن از صف، واگذاری،
+    تغییر مسئولِ مرحله. نسخهٔ قبلی همین را با فراخوانیِ پراکندهٔ
+    `ensure_not_deciding_about_oneself` انجام می‌داد و در یکی از آن نقطه‌ها
+    (`reassign`) اصلاً فراخوانی نشده بود.
+
+    برای نقش‌های زنجیره بی‌اثر است: آن‌ها پرونده را از راهِ صندلیِ خودشان
+    می‌بینند، نه از پنلِ منابع انسانی، و بستنِ این در روی آن‌ها یعنی قطعِ خودِ
+    زنجیره.
+    """
+    ensure_not_deciding_about_oneself(record, current_user)
+    if current_user.role is not UserRole.hr:
+        return
+    if not hr_panel_is_shielded(record):
+        return
+    raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail=(
+            "این پرونده متعلق به واحد منابع انسانی است و تا پیش از ثبت نهایی از "
+            "پنل منابع انسانی قابل دسترسی نیست؛ رسیدگی به آن با معاونت و مدیرعامل است."
         ),
     )
 

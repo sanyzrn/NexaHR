@@ -506,7 +506,7 @@ export function EvaluationDetailPage() {
       <SelfAssessmentPanel evaluation={evaluation} indicators={indicators} />
 
       {/* اعتراض ثبت‌شدهٔ کارمند + پاسخ منابع انسانی */}
-      <ObjectionPanel evaluation={evaluation} isHr={user.role === "hr"} onChanged={load} />
+      <ObjectionPanel evaluation={evaluation} user={user} onChanged={load} />
 
       {/* مسئولِ HR پرونده — تا وقتی کسی برنداشته، در صف مشترک است. */}
       {canRecoverStuckCase && (
