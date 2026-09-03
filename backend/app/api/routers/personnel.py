@@ -518,11 +518,20 @@ def _close_out_departure(db: Session, personnel: Personnel, actor: CurrentUser) 
     ادامه‌پذیر نیست؛ مجبورکردن HR به لغو دستی پیش از غیرفعال‌کردن، فقط دو کلیک
     اضافه برای رسیدن به همان نتیجه است.
     """
+    # قفلِ ردیفی، مثل هر مسیرِ دیگری که وضعیتِ پرونده را عوض می‌کند.
+    #
+    # بی آن، «بخوان، بسنج، بنویس» اتمی نیست: اگر مدیرعامل در همین لحظه پرونده
+    # را نهایی کند، `open_evaluation` که ما خوانده‌ایم کهنه است، گاردِ گذار با
+    # وضعیتِ کهنه می‌گذرد، و پروندهٔ *نهایی‌شده* به `cancelled` برمی‌گردد —
+    # یعنی سندِ امضاشده و هش‌شده باطل می‌شود. هر مسیرِ دیگری در سامانه این
+    # قفل را می‌گیرد (`_get_record_or_404_for_update`)؛ این یکی جا افتاده بود.
     open_evaluation = db.scalar(
-        select(EvaluationRecord).where(
+        select(EvaluationRecord)
+        .where(
             EvaluationRecord.subject_personnel_id == personnel.id,
             IS_OPEN_RECORD,
         )
+        .with_for_update(of=EvaluationRecord)
     )
     if open_evaluation is not None:
         reason = personnel.separation_reason.value if personnel.separation_reason else "—"

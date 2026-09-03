@@ -28,3 +28,10 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     dispatchEvent: () => false,
   })) as unknown as typeof window.matchMedia;
 }
+
+// jsdom چیدمان ندارد، پس `scrollIntoView` را هم پیاده نمی‌کند. هر کامپوننتی که
+// خودش را داخل دید می‌آورد — گفت‌وگوی همکار پس از هر پیام — بدون این در تست
+// می‌ترکد، و شکست چیزی دربارهٔ خودِ رفتار نمی‌گوید.
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

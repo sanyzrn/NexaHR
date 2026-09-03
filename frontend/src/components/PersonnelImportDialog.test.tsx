@@ -27,6 +27,23 @@ describe("buildAccountsCsv", () => {
     expect(csv).toContain('"a""b"');
   });
 
+  // N17: نقل‌قول جلوی تفسیرِ فرمول را نمی‌گیرد؛ اکسل سلولی که با `=`، `+`،
+  // `-` یا `@` شروع شود را حتی داخل نقل‌قول فرمول حساب می‌کند. نامِ پرسنل از
+  // یک اکسلِ ورودی می‌آید، یعنی از متنِ کسی بیرون از سامانه.
+  it.each(["=cmd|'/c calc'!A1", "+1+1", "-2+3", "@SUM(A1)", "\tx", "\rx"])(
+    "پیشوندِ فرمولِ %j با آپاستروف خنثی می‌شود",
+    (raw) => {
+      const csv = buildAccountsCsv([account({ full_name: raw })]);
+      expect(csv).toContain(`"'${raw}"`);
+    },
+  );
+
+  it("نامِ بی‌خطر آپاستروفِ اضافه نمی‌گیرد", () => {
+    const csv = buildAccountsCsv([account({ full_name: "سارا احمدی" })]);
+    expect(csv).toContain('"سارا احمدی"');
+    expect(csv).not.toContain("\"'سارا");
+  });
+
   it("هر حساب یک ردیف می‌شود", () => {
     const csv = buildAccountsCsv([
       account({ username: "one" }),

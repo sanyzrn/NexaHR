@@ -88,6 +88,20 @@ def _local_templates_only_url_fetcher(url: str, *args, **kwargs):
     return _default_url_fetcher(url, *args, **kwargs)
 
 
+#: نامِ فارسیِ مرحلهٔ هر کامنت.
+#:
+#: قالب پیش از این `{{ c.stage }}` خام را چاپ می‌کرد، پس در ستونِ «مرحله»ی
+#: سندِ رسمی — همان سندی که امضا و هش می‌شود و به دستِ کارمند می‌رسد —
+#: `hr_review` نوشته می‌شد. `snapshot` مقدارِ خامِ enum را نگه می‌دارد و باید
+#: نگه بدارد (سندِ آرشیوی نباید به برچسب‌های امروز بند باشد)، پس ترجمه در
+#: لحظهٔ رندر انجام می‌شود و اسنپ‌شات‌های قدیمی هم درست چاپ می‌شوند.
+_STAGE_LABELS = {
+    "hr_review": "بررسی منابع انسانی",
+    "deputy_review": "بررسی معاونت",
+    "ceo_final": "تأیید نهایی مدیرعامل",
+}
+
+
 def render_evaluation_summary_pdf(
     snapshot: dict, verify_url: str | None = None
 ) -> bytes:
@@ -101,6 +115,7 @@ def render_evaluation_summary_pdf(
         snapshot=snapshot,
         verify_url=verify_url,
         verify_qr=qr_data_uri(verify_url) if verify_url else None,
+        stage_labels=_STAGE_LABELS,
     )
     return _WeasyPrintHTML(
         string=html,

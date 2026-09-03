@@ -336,7 +336,11 @@ function OrgSummaryCard({ overview }: { overview: DashboardOverviewData }) {
       <SharePanel
         label="افراد نیازمند بهبود"
         value={mix.needs_improvement_pct}
-        hint={`امتیاز ${mix.improvement_threshold_pct.toLocaleString("fa-IR")}٪ و پایین‌تر — واجد برنامهٔ بهبود`}
+        // «پایین‌تر از» و نه «و پایین‌تر»: مرز باز است و خودِ عدد داخلش نیست —
+        // همان مرزی که `create_plan` دارد (`>= آستانه` رد می‌شود). با متنِ
+        // قبلی، پروندهٔ دقیقاً روی آستانه در این قیف شمرده می‌شد و بعد
+        // ساختنِ همان برنامه ۴۰۰ می‌گرفت.
+        hint={`امتیاز پایین‌تر از ${mix.improvement_threshold_pct.toLocaleString("fa-IR")}٪ — واجد برنامهٔ بهبود`}
         people={mix.people_counted}
         bar="bg-amber-500"
         text="text-amber-700"

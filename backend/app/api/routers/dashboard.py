@@ -112,7 +112,14 @@ def _outcome_mix(db: Session, in_site) -> OutcomeMix:
         )
 
     strong = sum(1 for pct, _ in rows if float(pct) >= strong_threshold)
-    weak = sum(1 for pct, _ in rows if float(pct) <= improvement_threshold)
+    # `<` و نه `<=` — همان مرزی که واجد بودنِ برنامهٔ بهبود از آن می‌خواند
+    # (`improvement_plans.create_plan`: امتیازِ `>= improvement_plan_max_pct`
+    # رد می‌شود).
+    #
+    # با `<=`، پروندهٔ دقیقاً ۷۵٫۰ در قیفِ «نیازمند بهبود» شمرده می‌شد و بعد
+    # ساختنِ همان برنامه‌ای که این قیف وعده می‌دهد ۴۰۰ می‌گرفت. یک عدد در دو
+    # جای سامانه دو معنا داشت، و منابع انسانی روی همین قیف برنامه‌ریزی می‌کند.
+    weak = sum(1 for pct, _ in rows if float(pct) < improvement_threshold)
     # چند نفر از این‌ها نتیجه‌شان زیر نسخهٔ *دیگری* از طرح حساب شده است.
     #
     # `final_weighted_pct`ِ هر پرونده با قواعدِ خودش حساب شده و دست‌نخورده

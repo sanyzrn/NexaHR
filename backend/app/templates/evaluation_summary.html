@@ -189,7 +189,7 @@
     <thead><tr><th>مرحله</th><th>متن</th></tr></thead>
     <tbody>
       {% for c in snapshot.comments %}
-      <tr><td>{{ c.stage }}</td><td>{{ c.comment_text }}</td></tr>
+      <tr><td>{{ stage_labels.get(c.stage, c.stage) }}</td><td>{{ c.comment_text }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
