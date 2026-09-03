@@ -3,6 +3,7 @@
 اعلان‌ها در همان تراکنشِ رویداد ساخته می‌شوند (بدون commit جدا) تا با خود گذار
 atomic باشند؛ اگر گذار rollback شود اعلانی هم باقی نمی‌ماند.
 """
+import hashlib
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 
@@ -181,6 +182,84 @@ def _tell_the_scorer(record: EvaluationRecord, evaluator_id: int | None) -> list
     if evaluator_id is None or evaluator_id == record.ceo_user_id:
         return []
     return [evaluator_id]
+
+
+def _active_hr_ids(db: Session) -> list[int]:
+    from app.models.user import User
+
+    return list(
+        db.scalars(select(User.id).where(User.role == UserRole.hr, User.is_active.is_(True)))
+    )
+
+
+#: چند کدِ پرونده در متنِ اعلان بیاید. بیشتر از این، پیام از حدِ خواندنی بیرون
+#: می‌زند و مابقی با «و N مورد دیگر» شمرده می‌شوند.
+_MAX_LISTED_SEATS = 10
+
+
+def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int:
+    """صندلی‌هایی که با رفتنِ یک نفر بی‌صاحب شدند را به منابع انسانی گزارش می‌کند.
+
+    این مکملِ `scheduled.run_orphaned_case_sweep` است و تکرارش نیست. آن جارو
+    فقط پرونده‌ای را می‌گیرد که صاحبِ *مرحلهٔ فعلی*‌اش مرده باشد — یعنی همین
+    حالا گیر کرده — و شبانه اجرا می‌شود. این‌جا دو چیزِ دیگر لازم بود:
+
+    * **زمان.** خروج از سازمان یک اقدامِ آگاهانهٔ منابع انسانی است. اینکه
+      نتیجه‌اش را فردا شب از یک جارو بشنود، دیر است؛ همان لحظه باید بداند.
+    * **صندلی‌هایی که هنوز گیر نکرده‌اند.** مسئولِ واحدی که می‌رود، پروندهٔ
+      زیرمجموعه‌اش ممکن است الان روی میزِ معاونت باشد. چیزی گیر نکرده و جارو
+      هم درست ردش می‌کند — تا روزی که پرونده *برگردد* و آن صندلی مرده باشد.
+      آن روز کسی نمی‌داند چرا.
+
+    یک اعلانِ *تجمیعی* و نه یکی به‌ازای هر پرونده: مدیرِ سی‌نفره‌ای که می‌رود،
+    در ضربِ تعدادِ کارشناسانِ HR صد اعلان می‌ساخت و صندوقِ همه را بی‌مصرف
+    می‌کرد. پیگیریِ تک‌تکِ پرونده‌ها کارِ همان جاروی شبانه است.
+
+    پروندهٔ *خودِ* این فرد در این فهرست نمی‌آید، چون
+    `personnel._close_out_departure` پیش از این تماس لغوش کرده و دیگر باز
+    نیست — پس این تابع باید *پس از* آن صدا زده شود.
+
+    خروجی: تعداد اعلانِ ساخته‌شده (صفر یعنی صندلیِ بی‌صاحبی نبود).
+    """
+    from app.core.config import settings
+    from app.services.evaluation import occupied_seats_in_open_records
+
+    seats = occupied_seats_in_open_records(db, user_id)
+    if not seats:
+        return 0
+
+    listed = "، ".join(f"{code} ({label})" for code, label in seats[:_MAX_LISTED_SEATS])
+    hidden = len(seats) - _MAX_LISTED_SEATS
+    more = f" و {hidden} مورد دیگر" if hidden > 0 else ""
+    message = (
+        f"«{person_label}» از سازمان خارج شد و در {len(seats)} پروندهٔ باز مسئولِ "
+        f"مرحله بود: {listed}{more}. برای هرکدام با «تغییر مسئول مرحله» جایگزین "
+        "تعیین کنید، وگرنه آن پرونده‌ها در همان مرحله می‌مانند."
+    )
+
+    # کلیدِ dedup به *مجموعهٔ* پرونده‌ها گره خورده و نه فقط به فرد: اگر فردا
+    # پروندهٔ تازه‌ای روی همان صندلیِ مرده باز شود، مجموعه عوض می‌شود و اعلانِ
+    # تازه می‌آید. بی این، فقط شمارش در کلید بود و دو مجموعهٔ هم‌اندازه یکی
+    # دیده می‌شدند.
+    #
+    # و *هش* می‌شود و نه فهرست: `dedup_key` ستونی ۱۲۰ نویسه‌ای است و مدیرِ
+    # دوازده‌زیرمجموعه‌ای از آن بیرون می‌زد — با `DataError` روی مسیرِ خروجِ
+    # پرسنل، یعنی خودِ اقدام شکست می‌خورد. تستِ فهرستِ بلند همین را گرفت.
+    fingerprint = hashlib.sha256(
+        ",".join(sorted({code for code, _ in seats})).encode()
+    ).hexdigest()[:16]
+    created = 0
+    for hr_id in _active_hr_ids(db):
+        if notify_once(
+            db,
+            user_id=hr_id,
+            type_="seats_vacated",
+            message=message,
+            dedup_key=f"seats_vacated:{user_id}:{fingerprint}",
+            within_days=settings.notification_dedup_days,
+        ):
+            created += 1
+    return created
 
 
 def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: str) -> None:

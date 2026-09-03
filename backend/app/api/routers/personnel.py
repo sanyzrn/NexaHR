@@ -27,6 +27,7 @@ from app.schemas.personnel import (
 from app.services.audit import log_event
 from app.services.authorization import ensure_module_enabled
 from app.services.excel import build_personnel_workbook
+from app.services.notifications import notify_vacated_seats
 from app.services.org_unit import known_sites, units_in_site
 from app.services.personnel_import import ImportPreview, build_template, commit_import, parse_workbook
 from app.services.self_assessment import OPEN_STATUSES as SELF_ASSESSMENT_OPEN_STATUSES
@@ -565,6 +566,19 @@ def _close_out_departure(db: Session, personnel: Personnel, actor: CurrentUser) 
             old_value={"username": account.username, "is_active": True},
             new_value={"username": account.username, "is_active": False},
         )
+
+    # صندلی‌هایی که این حساب در پروندهٔ *دیگران* داشت.
+    #
+    # این تنها راهی است که یک صندلی می‌تواند بی‌صاحب شود: تغییر نقش و
+    # غیرفعال‌کردنِ دستی با ۴۰۹ رد می‌شوند
+    # (`evaluation.ensure_no_open_chain_seat`). خروج از سازمان را نمی‌شود رد
+    # کرد — طرف رفته — پس این‌جا به‌جای مسدودکردن، *خبر* داده می‌شود.
+    #
+    # پس از غیرفعال‌شدنِ حساب و پس از لغوِ پروندهٔ خودش، عمداً: تا اگر خودش
+    # کارشناسِ منابع انسانی بود در گیرندگان نیاید، و پروندهٔ خودش که همین حالا
+    # لغو شد در فهرست نباشد.
+    if account is not None:
+        notify_vacated_seats(db, user_id=account.id, person_label=personnel.full_name)
 
 
 @router.patch("/{personnel_id}", response_model=PersonnelRead)
