@@ -552,7 +552,7 @@ def search_improvement_plans(ctx: ToolContext, status: str = "", limit: int = 15
     if status:
         stmt = stmt.where(ImprovementPlan.status == status)
     rows = list(db.scalars(stmt.order_by(ImprovementPlan.id.desc()).limit(max(1, min(int(limit or 15), 50)))))
-    names = dict(db.execute(select(PersonnelLite.id, PersonnelLite.full_name)))
+    names = dict(db.execute(select(PersonnelLite.id, PersonnelLite.full_name)).all())
     items = [
         {
             "id": p.id,

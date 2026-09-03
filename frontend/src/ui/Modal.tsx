@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
+import { useFocusTrap } from "./focusTrap";
 import { EASE_SOFT, SPRING_SOFT } from "./motion";
 
 const SIZES = {
@@ -10,9 +11,6 @@ const SIZES = {
 } as const;
 
 export type ModalSize = keyof typeof SIZES;
-
-const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** مودال استاندارد و مشترک برنامه.
  * با createPortal روی body رندر می‌شود تا موقعیت‌دهی fixed هیچ‌وقت تحت‌تأثیر
@@ -43,51 +41,12 @@ export function Modal({
   initialFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  // onClose در ref نگه داشته می‌شود تا این effect فقط یک‌بار (هنگام mount) اجرا شود.
-  // اگر به onClose وابسته بود، هر re-render والد (مثلاً هر کیبردِ فرمی که state آن
-  // در والد است) این effect را دوباره اجرا و فوکوس را از فیلد در حال تایپ می‌دزدید.
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    document.body.style.overflow = "hidden";
-
-    const dialog = dialogRef.current;
-    const firstFocusable = dialog?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-    (initialFocusRef?.current ?? firstFocusable ?? dialog)?.focus();
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onCloseRef.current();
-        return;
-      }
-      if (e.key !== "Tab" || !dialog) return;
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
-      if (focusable.length === 0) {
-        e.preventDefault();
-        return;
-      }
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", onKeyDown);
-      previouslyFocused?.focus();
-    };
-    // فقط یک‌بار هنگام mount اجرا می‌شود (onClose از طریق ref خوانده می‌شود)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // قفلِ فوکوس، Escape و قفلِ اسکرول همه از هوکِ مشترک می‌آیند
+  // (`ui/focusTrap`). کشوی ناوبریِ موبایل همین رفتار را لازم داشت و نداشتش،
+  // و دو نسخهٔ جدا از این منطق یعنی روزی یکی از حالت‌های مرزی فقط در یکی
+  // درست است.
+  useFocusTrap(dialogRef, { onEscape: onClose, initialFocusRef });
 
   return createPortal(
     <AnimatePresence>

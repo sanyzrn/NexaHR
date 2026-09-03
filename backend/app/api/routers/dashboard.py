@@ -34,6 +34,7 @@ from app.schemas.dashboard import (
     UnitStat,
 )
 from app.schemas.notification import ExpiringContract
+from app.services.authorization import is_module_enabled
 from app.services.org_unit import site_of, units_in_site
 from app.services.privacy import suppressed_avg
 from app.services.scoring_scheme import current_rules
@@ -615,7 +616,16 @@ def role_overview(
     cards: list[RoleOverviewCard] = []
 
     if scope == "self":
-        if current_user.personnel_id is None:
+        # دو سوییچ، و هر دو لازم: کاشی‌ها خودشان یک ماژول‌اند
+        # (`employee_overview_cards`)، و محتوایشان *نتیجهٔ* ارزیابی است، پس
+        # به سوییچِ نمایشِ نتیجه هم بند است. پیش از این هیچ‌کدام سنجیده
+        # نمی‌شد و میانگینِ نمرهٔ فرد بی‌توجه به هر دو سوییچ برمی‌گشت — یعنی
+        # یک درخواستِ ناموفقِ `/my-permissions` در رابط کافی بود.
+        if (
+            current_user.personnel_id is None
+            or not is_module_enabled(db, "employee_overview_cards")
+            or not is_module_enabled(db, "employee_evaluation_visibility")
+        ):
             return RoleOverview(role=role.value, cards=[])
         return RoleOverview(role=role.value, cards=_self_cards(db, current_user.personnel_id))
 

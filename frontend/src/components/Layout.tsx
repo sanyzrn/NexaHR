@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "../auth/AuthContext";
@@ -12,6 +12,7 @@ import { ThemeToggle } from "../ui/ThemeToggle";
 import { ProfileMenu } from "./ProfileMenu";
 import { Sidebar } from "./Sidebar";
 import { navItemsFor } from "./nav";
+import { useFocusTrap } from "../ui/focusTrap";
 import { EASE_SOFT } from "../ui/motion";
 
 const COLLAPSE_KEY = "nexahr:sidebar-collapsed";
@@ -30,29 +31,21 @@ export function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
   // کشوی موبایل با تغییر مسیر بسته می‌شود. بدون این، کاربر روی یک لینک می‌زند،
   // صفحه عوض می‌شود و کشو باز جلوی همان صفحه می‌ماند.
   useEffect(() => setDrawerOpen(false), [location.pathname]);
 
-  // پشتِ کشوی باز نباید صفحه اسکرول شود.
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previous;
-    };
-  }, [drawerOpen]);
-
-  useEffect(() => {
-    function onEscape(e: KeyboardEvent) {
-      if (e.key === "Escape") setDrawerOpen(false);
-    }
-    document.addEventListener("keydown", onEscape);
-    return () => document.removeEventListener("keydown", onEscape);
-  }, []);
+  // کشو یک لایهٔ روی‌هم است، پس همان قراردادِ مودال را دارد: قفلِ اسکرول،
+  // Escape، *و* قفلِ فوکوس.
+  //
+  // دو تای اول از قبل بودند و سومی نبود، پس کاربرِ کیبورد یا صفحه‌خوان با Tab
+  // از کشویِ باز مستقیم به صفحهٔ پشتِ پرده می‌رفت — در فهرستی حرکت می‌کرد که
+  // نمی‌دید (WCAG 2.1، بند ۲٫۴٫۳). حالا همان هوکی را می‌گیرد که `Modal`
+  // می‌گیرد، تا دو نسخهٔ جدا از این منطق نباشد.
+  useFocusTrap(drawerRef, { active: drawerOpen, onEscape: () => setDrawerOpen(false) });
 
   function toggleCollapse() {
     setCollapsed((value) => {
@@ -122,7 +115,16 @@ export function Layout() {
             />
             <motion.aside
               key="drawer"
-              className="fixed inset-y-3 right-3 z-50 w-64 lg:hidden"
+              ref={drawerRef}
+              // یک لایهٔ روی‌هم است، پس باید *بگوید* که هست: بی
+              // `role="dialog"` و `aria-modal`، صفحه‌خوان آن را یک بخشِ
+              // معمولیِ کنارِ صفحه اعلام می‌کند و کاربر نمی‌فهمد چیزی روی
+              // صفحه باز شده.
+              role="dialog"
+              aria-modal="true"
+              aria-label="منوی ناوبری"
+              tabIndex={-1}
+              className="fixed inset-y-3 right-3 z-50 w-64 lg:hidden outline-none"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
@@ -164,6 +166,8 @@ export function Layout() {
             </p>
 
             <div className="flex shrink-0 items-center gap-1">
+              {/* روی صفحهٔ پهن، دم‌دستی می‌ماند. روی موبایل داخلِ «حساب من»
+                  است (`ProfileMenu`) و نه هیچ‌جا — که حالتِ قبلی بود. */}
               <span className="hidden sm:inline-flex">
                 <ThemeToggle />
               </span>

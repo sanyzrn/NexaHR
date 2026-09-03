@@ -237,19 +237,27 @@ def search_audit_log(
         from datetime import timedelta
 
         stmt = stmt.where(AuditLog.created_at < to_dt + timedelta(days=1))
-    # دامنهٔ دید: دارندهٔ گزارش کامل همه‌چیز؛ دارندهٔ سلامت فقط رویدادهای سامانه‌ای
+    # دامنهٔ دید: دارندهٔ گزارش کامل همه‌چیز؛ دارندهٔ سلامت فقط رویدادهای
+    # سامانه‌ای — و *همان* فهرستِ رابط، نه یک نسخهٔ دستیِ موازی.
+    #
+    # نسخهٔ قبلی فهرستِ خودش را داشت و دو نامِ اولش (`user_login`،
+    # `user_login_failed`) هیچ‌وقت emit نمی‌شدند؛ نام‌های واقعی
+    # `login_succeeded` و `login_failed`اند. یعنی تنها کاربردی که برای این
+    # مجوز اعلام شده — «چرا این حساب وارد نمی‌شود» — از راه دستیار هیچ
+    # برنمی‌گرداند. کمربندِ دومِ رابط (`evaluation_record_id is None`) هم
+    # نبود.
     if not can_full:
-        system_events = {
-            "user_login", "user_login_failed", "account_locked", "ai_settings_changed",
-            "ai_access_changed", "ai_tool_invoked", "ai_tool_failed", "ai_action_confirmed",
-            "ai_action_rejected", "capabilities_changed",
-        }
-        stmt = stmt.where(AuditLog.event_type.in_(system_events))
+        from app.api.routers.audit_log import SYSTEM_EVENT_TYPES
+
+        stmt = stmt.where(
+            AuditLog.event_type.in_(SYSTEM_EVENT_TYPES),
+            AuditLog.evaluation_record_id.is_(None),
+        )
 
     rows = list(db.scalars(stmt.order_by(AuditLog.id.desc()).limit(max(1, min(int(limit or 20), 100)))))
     actor_ids = {r.actor_user_id for r in rows if r.actor_user_id}
     usernames = (
-        dict(db.execute(select(User.id, User.username).where(User.id.in_(actor_ids))))
+        dict(db.execute(select(User.id, User.username).where(User.id.in_(actor_ids))).all())
         if actor_ids
         else {}
     )

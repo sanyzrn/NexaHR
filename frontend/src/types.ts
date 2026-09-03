@@ -144,6 +144,11 @@ export interface Indicator {
   // به این شاخص در چند ارزیابی نمره داده شده (P1-05). تفاوت «۰» و «۲۳۰» تفاوت
   // یک ویرایش بی‌ضرر و بازنویسی معنای دو سال تاریخ است.
   usage_count: number;
+  /** وزنِ این شاخص در طرحِ نمره‌دهیِ فعال. شاخصی که وزن ندارد ۱ می‌گیرد.
+   *
+   *  «جایگزینی» شناسهٔ تازه می‌سازد و وزن‌ها با شناسه کلید خورده‌اند، پس وزن
+   *  با جایگزینی می‌افتد روی ۱. دیالوگ باید *پیش از* کلیک بگویدش. */
+  scheme_weight: number;
 }
 
 /** نسخهٔ چارچوب شاخص‌ها و اثرِ تغییر بعدی (P1-05). */
@@ -578,6 +583,12 @@ export interface AppConfig {
   bonus_max_points: number;
   /** حداقل تعداد نویسهٔ توضیح، وقتی امتیاز ویژه بیشتر از صفر است. */
   bonus_reason_min_length: number;
+  /** `{شناسهٔ شاخص: وزن}` — شاخصی که این‌جا نیست وزن ۱ دارد.
+   *
+   *  کلیدها در JSON رشته‌اند، پس با `String(indicator_id)` خوانده می‌شوند.
+   *  بی این، پیش‌نمایشِ فرم *نمی‌توانست* درست باشد: سرور از وزنِ هر شاخص
+   *  استفاده می‌کند و فرم همه را ۱ می‌گرفت. */
+  indicator_weights: Record<string, number>;
 }
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
@@ -588,6 +599,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
   specialized_section_weight: 0.4,
   bonus_max_points: 5,
   bonus_reason_min_length: 10,
+  indicator_weights: {},
 };
 
 export interface AppNotification {

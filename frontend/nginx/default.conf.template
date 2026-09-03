@@ -31,7 +31,13 @@ server {
     # روی دکمه‌های تأیید)، منع MIME sniffing و محدودکردن Referrer.
     # توجه: در nginx اگر یک location خودش add_header داشته باشد، هدرهای سطح server
     # را به ارث نمی‌برد؛ برای همین در /assets/ هدر nosniff تکرار شده است.
-    add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'" always;
+    # `script-src` صریح نوشته می‌شود و نه ارثی از `default-src`: قاعده‌اش
+    # همان است، ولی نوشتنش یعنی هر کسی که این خط را می‌خواند می‌داند
+    # اسکریپتِ درون‌خطی مجاز نیست. یک بار همین ارثِ نانوشته باعث شد بلوکِ
+    # تعیینِ تمِ پیش از رنگ‌آمیزی در استقرار اجرا نشود، بی آن‌که در
+    # `npm run dev` (که CSP ندارد) دیده شود. حالا آن بلوک فایلِ هم‌اصلِ
+    # `/theme-init.js` است.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'" always;
     add_header X-Frame-Options "DENY" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "same-origin" always;

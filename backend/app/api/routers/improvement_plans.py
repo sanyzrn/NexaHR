@@ -39,9 +39,11 @@ from app.schemas.improvement_plan import (
     ImprovementPlanUpdate,
 )
 from app.services.audit import log_event
+from app.services.authorization import ensure_module_enabled
 from app.services.excel import build_improvement_plans_workbook
 from app.services.notifications import notify
 from app.services.scoring_scheme import rules_for_record
+from app.services.self_evaluation import ensure_hr_may_handle
 
 router = APIRouter(prefix="/api/improvement-plans", tags=["improvement-plans"])
 
@@ -186,9 +188,18 @@ def create_plan(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> ImprovementPlan:
+    # گارد روی *ساختِ* برنامهٔ تازه است و نه روی پیگیریِ برنامه‌های موجود:
+    # خاموش‌کردن ماژول نباید برنامه‌هایی را که کسی روی آن‌ها تعهد داده بی‌صاحب
+    # کند. به‌روزرسانیِ هدف و بستنِ برنامه عمداً بی‌گارد می‌مانند.
+    ensure_module_enabled(db, "improvement_plans")
     record = db.get(EvaluationRecord, payload.evaluation_record_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ارزیابی یافت نشد")
+    # تفکیکِ وظایف، این‌جا هم. تنها نقطهٔ لمسِ منابع انسانی روی یک پرونده بود
+    # که این گارد را نداشت، پس کارمندِ منابع انسانی می‌توانست برای پروندهٔ
+    # نهایی‌شدهٔ *خودش* برنامهٔ بهبود باز کند — و برنامهٔ بهبود سندی است که
+    # اهداف و تاریخ بازنگری برای همان فرد تعیین می‌کند.
+    ensure_hr_may_handle(record, current_user)
     if record.status != EvaluationStatus.finalized:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

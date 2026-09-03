@@ -38,6 +38,7 @@ from app.schemas.evaluation import (
 )
 from app.schemas.improvement_plan import ImprovementPlanDetail
 from app.services.audit import log_event
+from app.services.authorization import ensure_module_enabled, is_module_enabled
 from app.services.evaluation_window import ensure_open as ensure_submission_window_open
 from app.services.evaluation_window import window_for
 from app.services.indicator_framework import indicator_ids_for_record
@@ -49,12 +50,28 @@ from app.services.workflow import IS_OPEN_RECORD, objection_resolver_field
 router = APIRouter(prefix="/api/me", tags=["me"])
 
 
+#: ماژولی که «کارمند نتیجهٔ خودش را می‌بیند» را روشن/خاموش می‌کند.
+#:
+#: تنها ماژولی است که روی *خواندن* هم می‌نشیند، و این تناقض با قاعدهٔ
+#: «گارد روی نوشتن است» نیست: کارِ خودِ این سوییچ همین است. پیش‌فرضش خاموش
+#: است و رابط هم بر همین اساس بخش را پنهان می‌کند
+#: (`MyEvaluationsPage.showEvaluationDetails`) — ولی سرور نتیجه را همچنان
+#: می‌داد، یعنی دو نیمهٔ یک سامانه دو حرفِ مختلف می‌زدند و نیمهٔ قابل‌اعتماد
+#: (سرور) حرفِ شل‌تر را می‌زد. یک درخواستِ ناموفقِ `/my-permissions` کافی بود
+#: تا رابط بخش را نشان بدهد و نتیجه لو برود.
+#:
+#: پاسخ «صفحهٔ تهی» است و نه ۴۰۳: خاموش‌بودنِ سوییچ خطای کاربر نیست، و دادهٔ
+#: موجود هم پاک نمی‌شود — منابع انسانی و زنجیره همه‌چیز را در
+#: `/api/evaluations` می‌بینند. تنها *نمای خودِ فرد* بسته است.
+_VISIBILITY_MODULE = "employee_evaluation_visibility"
+
+
 @router.get("/evaluations", response_model=MyEvaluationPage)
 def my_evaluations(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_own_personnel),
 ) -> MyEvaluationPage:
-    if current_user.personnel_id is None:
+    if current_user.personnel_id is None or not is_module_enabled(db, _VISIBILITY_MODULE):
         return MyEvaluationPage(total=0, items=[])
     query = select(EvaluationRecord).where(
         EvaluationRecord.subject_personnel_id == current_user.personnel_id,
@@ -173,6 +190,7 @@ def submit_self_assessment(
     یک‌بار ثبت می‌شود و قفل می‌ماند: اگر بعد از دیدن نمرهٔ ارزیاب قابل ویرایش بود،
     دیگر دیدگاه مستقلی نبود.
     """
+    ensure_module_enabled(db, "self_assessment")
     record = _my_record_or_404(db, evaluation_id, current_user, for_update=True)
 
     # قاعدهٔ «چه کسی خودارزیابی دارد» یک جا زندگی می‌کند
@@ -313,7 +331,12 @@ def file_objection(
 
     نتیجه را تغییر نمی‌دهد: سند نهایی و هشِ آن دست‌نخورده می‌مانند. اعتراض یک رکورد
     موازی است که HR باید به آن رسیدگی و پاسخش را ثبت کند.
+
+    ماژولِ «اعتراض به نتیجه» پیش‌فرض *خاموش* است، پس این گارد حالتِ پیش‌فرض را
+    می‌سازد و نه یک حالتِ گوشه‌ای: سازمانی که کانالِ رسمیِ اعتراض را باز نکرده،
+    نباید اعتراض بپذیرد و بعد جایی برای رسیدگی‌اش نداشته باشد.
     """
+    ensure_module_enabled(db, "objections")
     record = _my_record_or_404(db, evaluation_id, current_user, for_update=True)
 
     if record.status != EvaluationStatus.finalized:
@@ -389,6 +412,7 @@ def acknowledge_evaluation(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_own_personnel),
 ) -> EvaluationRecord:
+    ensure_module_enabled(db, "employee_result_acknowledgement")
     record = _my_record_or_404(db, evaluation_id, current_user, for_update=True)
     if record.status != EvaluationStatus.finalized:
         raise HTTPException(

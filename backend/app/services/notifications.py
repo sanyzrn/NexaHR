@@ -24,9 +24,18 @@ def _queue_outbound(db: Session, notification: Notification) -> None:
 
     فقط *ثبت* می‌شود؛ هیچ ارسالی این‌جا رخ نمی‌دهد. اگر ارسال روی مسیر درخواست
     بود، کندی سرویس پیامک به شکست «تأیید پرونده» ترجمه می‌شد.
+
+    ماژولِ «اعلان بیرونی» این‌جا سنجیده می‌شود و نه در فرستنده: نقطهٔ درستِ
+    خاموش‌کردن، *صف نریختن* است. اگر ردیف‌ها ساخته می‌شدند و فرستنده ردشان
+    می‌کرد، خاموش‌کردن سوییچ یک صفِ روبه‌رشدِ ردیف‌های مرده می‌ساخت که روزی
+    که کسی سوییچ را برگرداند، همه‌شان یک‌جا بیرون می‌رفتند. اعلانِ
+    درون‌برنامه‌ای دست‌نخورده می‌ماند — آن هسته است، نه کانال.
     """
+    from app.services.authorization import is_module_enabled
     from app.services.delivery import enqueue_for
 
+    if not is_module_enabled(db, "outbound_notifications"):
+        return
     # شناسه لازم است تا ردیف تحویل به آن ارجاع دهد
     db.flush()
     enqueue_for(db, notification)

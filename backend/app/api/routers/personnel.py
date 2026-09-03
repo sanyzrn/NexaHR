@@ -25,6 +25,7 @@ from app.schemas.personnel import (
     PersonnelUpdate,
 )
 from app.services.audit import log_event
+from app.services.authorization import ensure_module_enabled
 from app.services.excel import build_personnel_workbook
 from app.services.org_unit import known_sites, units_in_site
 from app.services.personnel_import import ImportPreview, build_template, commit_import, parse_workbook
@@ -248,6 +249,7 @@ def invite_to_self_assessment(
 
     یک‌بار برای هر پرونده: دکمه پس از ارسال غیرفعال می‌ماند تا پروندهٔ بعدی.
     """
+    ensure_module_enabled(db, "self_assessment")
     personnel = db.get(Personnel, personnel_id)
     if personnel is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="پرسنل یافت نشد")

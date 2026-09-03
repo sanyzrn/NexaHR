@@ -22,7 +22,7 @@ from app.services.login_guard import (
     purge_stale,
     record_failure,
 )
-from tests.helpers import make_user
+from tests.helpers import auth_header, make_user
 
 PASSWORD = "Correct-Horse-9"
 
@@ -221,3 +221,68 @@ def test_lockout_is_audited_and_hr_is_notified(client, db_session, account):
     notifications = client.get("/api/notifications", headers=auth_header(hr)).json()
     items = notifications["items"] if isinstance(notifications, dict) else notifications
     assert any("قفل" in row["message"] for row in items), "HR باید از قفل‌شدن حساب باخبر شود"
+
+
+# ------------------------------------------------------- باز کردنِ قفل (M-11)
+
+
+def test_an_admin_can_unlock_a_locked_account(client, db_session, account):
+    """قفل بی راهِ خروج، خودش اهرمِ مهاجم می‌شود.
+
+    پیام‌های متمایزِ ورود — که تصمیمِ آگاهانه‌ای است — شمردنِ حساب‌های معتبر را
+    ممکن می‌کنند، و بعد هر حساب با پنج درخواستِ احراز‌هویت‌نشده از کار می‌افتد.
+    تنها درمانِ موجود «پانزده دقیقه صبر کن» بود، که مهاجم می‌تواند تا ابد
+    تکرارش کند. این تست همان راهِ خروج را می‌سنجد؛ شکلِ خودِ قفل عوض نشده.
+    """
+    admin = make_user(db_session, "hr", capabilities=[Capability.manage_users])
+    db_session.commit()
+
+    _fail_n_times(db_session, account.username, settings.login_max_failed_attempts)
+    db_session.commit()
+    assert locked_until(db_session, account.username) is not None
+
+    refused = client.post(
+        "/api/auth/login", json={"username": account.username, "password": PASSWORD}
+    )
+    assert refused.status_code in (401, 429)
+
+    unlocked = client.post(f"/api/users/{account.id}/unlock", headers=auth_header(admin))
+    assert unlocked.status_code == 200, unlocked.text
+    db_session.expire_all()
+    assert locked_until(db_session, account.username) is None
+
+    ok = client.post(
+        "/api/auth/login", json={"username": account.username, "password": PASSWORD}
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_unlocking_is_audited(client, db_session, account):
+    admin = make_user(
+        db_session, "hr", capabilities=[Capability.manage_users, Capability.view_audit_log]
+    )
+    db_session.commit()
+    _fail_n_times(db_session, account.username, settings.login_max_failed_attempts)
+    db_session.commit()
+
+    client.post(f"/api/users/{account.id}/unlock", headers=auth_header(admin))
+    events = client.get(
+        "/api/audit-log", params={"event_type": "account_unlocked"}, headers=auth_header(admin)
+    ).json()["items"]
+    assert events and events[0]["new_value"]["username"] == account.username
+    assert events[0]["new_value"]["was_locked"] is True
+
+
+def test_unlocking_needs_the_capability(client, db_session, account):
+    """گاردِ مجوز، نه نقش — مثل بقیهٔ کارهای اداری."""
+    plain_hr = make_user(db_session, "hr", capabilities=[])
+    db_session.commit()
+    refused = client.post(f"/api/users/{account.id}/unlock", headers=auth_header(plain_hr))
+    assert refused.status_code == 403
+
+
+def test_unlocking_an_account_that_is_not_locked_is_harmless(client, db_session, account):
+    admin = make_user(db_session, "hr", capabilities=[Capability.manage_users])
+    db_session.commit()
+    done = client.post(f"/api/users/{account.id}/unlock", headers=auth_header(admin))
+    assert done.status_code == 200

@@ -42,6 +42,7 @@ from app.schemas.analytics import (
     UnitPerformance,
 )
 from app.schemas.auth import CurrentUser
+from app.services.authorization import ensure_module_enabled
 from app.services.org_unit import site_of
 from app.services.privacy import is_below_cohort, suppressed_avg
 from app.services.scoring_scheme import current_rules
@@ -92,6 +93,7 @@ def my_scoring_profile(
     فقط پرونده‌های نهایی‌شده شمرده می‌شوند: نمرهٔ پیش‌نویس هنوز تصمیم نیست و
     واردکردنش، پروفایل ارزیاب را با چیزی که ممکن است هرگز ثبت نشود آلوده می‌کند.
     """
+    ensure_module_enabled(db, "role_analytics")
     uid = current_user.id
     if current_user.role == UserRole.deputy:
         mine = (EvaluationRecord.unit_supervisor_user_id == uid) | (
@@ -263,6 +265,7 @@ def executive_overview(
     توصیه‌ها به تمدید قرارداد چه می‌گوید، یا چرخهٔ تصمیم چقدر طول می‌کشد. این سه
     دقیقاً همان چیزهایی‌اند که بودجه و اختیار رویشان تصمیم می‌گیرد.
     """
+    ensure_module_enabled(db, "role_analytics")
     total = db.scalar(select(func.count()).select_from(EvaluationRecord).where(_FINALIZED)) or 0
     avg_final = suppressed_avg(
         _round(db.scalar(select(func.avg(EvaluationRecord.final_weighted_pct)).where(_FINALIZED)), 1),

@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.ai import AiPendingAction
-from app.models.enums import Capability, UserRole
+from app.models.enums import Capability, EvaluationStatus, UserRole
 from app.schemas.auth import CurrentUser
 from app.services.ai.tools import base as tools_base
 from tests.helpers import make_personnel, make_user
@@ -229,3 +229,113 @@ def test_someone_elses_pending_is_not_found(client, db_session):
 
     response = client.post(f"/api/ai/pending/{row.id}/confirm", headers=auth_header_of(stranger))
     assert response.status_code == 404
+
+
+# ── دامنهٔ عیب‌یابیِ لاگ (M-6) ──────────────────────────────────────────────
+
+
+def test_the_diagnostics_audit_scope_uses_the_names_the_code_actually_emits(db_session):
+    """تنها کاربردی که برای این مجوز اعلام شده، هیچ برنمی‌گرداند.
+
+    فهرستِ درون‌خطیِ ابزار با `"user_login"` و `"user_login_failed"` شروع
+    می‌شد؛ نام‌های واقعی `login_succeeded` و `login_failed`اند و هیچ‌جای کد آن
+    دو ساخته نمی‌شوند. یعنی «چرا این حساب وارد نمی‌شود» — همان جمله‌ای که در
+    مستندات برای `view_diagnostics` آمده — از راه دستیار جوابی نداشت.
+
+    حالا همان `SYSTEM_EVENT_TYPES`ِ رابط استفاده می‌شود، پس واگرایی ساختاراً
+    ناممکن است.
+    """
+    from app.api.routers.audit_log import SYSTEM_EVENT_TYPES
+    from app.services.audit import log_event
+
+    support = make_user(db_session, "support", capabilities=[Capability.view_diagnostics])
+    db_session.commit()
+    log_event(
+        db_session,
+        actor_user_id=support.id,
+        event_type="login_failed",
+        new_value={"username": "kaveh"},
+    )
+    db_session.commit()
+
+    ctx = _ctx(db_session, support, [Capability.view_diagnostics])
+    outcome = tools_base.execute_tool(
+        ctx, tools_base.REGISTRY["search_audit_log"], {"limit": 50}
+    )
+    kinds = {row["event_type"] for row in json.loads(outcome.content)["events"]}
+    assert "login_failed" in kinds
+    assert kinds <= SYSTEM_EVENT_TYPES, kinds - SYSTEM_EVENT_TYPES
+
+
+def test_the_diagnostics_scope_never_returns_a_row_tied_to_a_case(db_session):
+    """کمربندِ دومِ رابط، که در ابزار نبود.
+
+    حتی اگر روزی رویدادی از فهرستِ سامانه‌ای به پرونده‌ای گره بخورد، نباید
+    بیرون برود — چون بعضی ردیف‌های لاگ عیناً امتیاز و نتیجه در خود دارند.
+    """
+    from app.services.audit import log_event
+
+    sup = make_user(db_session, "unit_supervisor")
+    dep = make_user(db_session, "deputy")
+    ceo = make_user(db_session, "ceo")
+    personnel = make_personnel(db_session)
+    from tests.helpers import make_access
+
+    make_access(db_session, personnel, sup, dep, ceo)
+    support = make_user(db_session, "support", capabilities=[Capability.view_diagnostics])
+    db_session.commit()
+
+    from app.models.evaluation import EvaluationRecord
+
+    record = EvaluationRecord(
+        evaluation_code="EVL-DIAG-1",
+        subject_personnel_id=personnel.id,
+        unit_supervisor_user_id=sup.id,
+        deputy_user_id=dep.id,
+        ceo_user_id=ceo.id,
+        status=EvaluationStatus.draft,
+    )
+    db_session.add(record)
+    db_session.commit()
+    log_event(
+        db_session,
+        actor_user_id=support.id,
+        # نامی که *در* فهرستِ سامانه‌ای است، ولی به پرونده گره خورده.
+        event_type="module_toggled",
+        evaluation_record_id=record.id,
+        new_value={"key": "objections"},
+    )
+    db_session.commit()
+
+    ctx = _ctx(db_session, support, [Capability.view_diagnostics])
+    outcome = tools_base.execute_tool(
+        ctx, tools_base.REGISTRY["search_audit_log"], {"limit": 50}
+    )
+    rows = json.loads(outcome.content)["events"]
+    assert all(row["evaluation_record_id"] is None for row in rows)
+
+
+# ── `dict(Result)` — پنج ۵۰۰ِ خوابیده ─────────────────────────────────────
+
+
+def test_no_tool_builds_a_dict_straight_from_a_result_object():
+    """`dict(db.execute(...))` همیشه `TypeError` می‌دهد، نه گاهی.
+
+    `Result` متدِ `keys()` دارد، پس `dict()` آن را *نگاشت* می‌بیند و سراغِ
+    `result[key]` می‌رود — و `Result` قابلِ اندیس‌گذاری نیست. یعنی هر ابزاری
+    که نامِ افراد را این‌طور جمع می‌کرد، سرِ همان خط ۵۰۰ می‌داد؛ پنج جا بود و
+    هیچ تستی از آن مسیر نگذشته بود. راهِ درست `.all()` است.
+
+    این تست خودِ الگو را می‌بندد و نه یک نمونه‌اش: نمونه‌ها را می‌شود یکی‌یکی
+    درست کرد و ششمی را نوشت.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "app"
+    offenders = []
+    for path in root.rglob("*.py"):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if "dict(db.execute(" in stripped and ".all()" not in stripped:
+                offenders.append(f"{path.relative_to(root)}:{number}")
+    assert not offenders, "dict(db.execute(...)) بدون .all(): " + "، ".join(offenders)

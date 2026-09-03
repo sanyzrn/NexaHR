@@ -37,6 +37,31 @@ interface PermissionsValue {
   loading: boolean;
 }
 
+/** ماژولی که سرور دربارهٔ آن چیزی نگفته، *خاموش* است — نه روشن.
+ *
+ *  پیش از این روشن فرض می‌شد، با این استدلال که وگرنه در فاصلهٔ بارگذاری منو
+ *  بخش‌های سالم را پنهان می‌کند. آن نگرانی درست است ولی جایش `loading` است — و
+ *  همهٔ فراخوان‌های حساس همان را می‌سنجند
+ *  (`!permissionsLoading && moduleEnabled(...)`).
+ *
+ *  بهایش این بود: اگر `/administration/my-permissions` *شکست بخورد*، `loading`
+ *  دیگر true نیست و `data` هم نیست، پس هر ماژولی روشن دیده می‌شد — از جمله
+ *  «نمایش نتیجه به کارمند» که پیش‌فرضش خاموش است. یعنی یک درخواستِ ناموفق،
+ *  نتیجهٔ ارزیابی را روی استقراری نشان می‌داد که عمداً خاموشش کرده بود.
+ *  سوییچی که در حالتِ خطا باز می‌شود، سوییچ نیست.
+ *
+ *  سرور هم از سمتِ خودش بسته است (`ensure_module_enabled`، و گاردِ خواندنِ
+ *  `/api/me/evaluations`)، پس این‌جا فقط رابط را با آن هم‌داستان می‌کند.
+ *
+ *  جدا و صادرشده تا خودِ این قاعده — و نه مسیرِ شبکه‌اش — تست شود.
+ */
+export function isModuleEnabled(
+  modules: Record<string, boolean> | undefined,
+  key: string
+): boolean {
+  return modules?.[key] ?? false;
+}
+
 const PermissionsContext = createContext<PermissionsValue | undefined>(undefined);
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
@@ -52,10 +77,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const value: PermissionsValue = {
     can: (capability) => data?.capabilities.includes(capability) ?? false,
-    // ماژولی که سرور دربارهٔ آن چیزی نگفته، روشن فرض می‌شود. برعکسش یعنی در
-    // فاصلهٔ کوتاهِ بارگذاری، منو بخش‌های سالم را پنهان می‌کند و برنامه شکسته
-    // به‌نظر می‌رسد.
-    moduleEnabled: (key) => data?.modules[key] ?? true,
+    moduleEnabled: (key) => isModuleEnabled(data?.modules, key),
     loading: user != null && isPending,
   };
 

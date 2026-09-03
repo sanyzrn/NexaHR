@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -295,9 +296,39 @@ def _replace_scores(db: Session, record: EvaluationRecord, payload: ScoresUpsert
             {"indicator_id": item.indicator_id, "score": item.score, "evidence_text": item.evidence_text}
         )
 
-    db.query(EvaluationScore).filter(EvaluationScore.evaluation_record_id == record.id).delete()
-    for row in rows:
-        db.add(EvaluationScore(evaluation_record_id=record.id, **row))
+    # upsert روی `(evaluation_record_id, indicator_id)` — نه «همه را پاک کن و
+    # از نو بنویس».
+    #
+    # ذخیرهٔ خودکارِ فرم هر چند ثانیه یک‌بار همین تابع را صدا می‌زند. با
+    # delete+insert، شناسهٔ هر ردیفِ امتیاز در هر دسته‌ کلید تغییر می‌کرد و
+    # جدول در طولِ یک چرخهٔ گروهی پر از tuple مرده می‌شد (بیست شاخص × هر
+    # چند ثانیه × دویست نفر). ایندکسِ یکتای موجود دقیقاً همان کلیدِ upsert را
+    # می‌دهد.
+    #
+    # ردیف‌هایی که این بار نیامده‌اند حذف می‌شوند — قرارداد همان «جایگزینیِ
+    # کاملِ مجموعه» است که فراخوانندگان روی آن حساب می‌کنند (پاک‌کردنِ امتیازِ
+    # یک شاخص در فرم باید ردیفش را ببرد).
+    stale = db.query(EvaluationScore).filter(
+        EvaluationScore.evaluation_record_id == record.id
+    )
+    if indicator_ids_seen:
+        stale = stale.filter(EvaluationScore.indicator_id.notin_(indicator_ids_seen))
+    stale.delete(synchronize_session=False)
+
+    if rows:
+        db.execute(
+            pg_insert(EvaluationScore)
+            .values([{"evaluation_record_id": record.id, **row} for row in rows])
+            .on_conflict_do_update(
+                constraint="uq_evaluation_scores_record_indicator",
+                set_={
+                    "score": pg_insert(EvaluationScore).excluded.score,
+                    "evidence_text": pg_insert(EvaluationScore).excluded.evidence_text,
+                },
+            )
+        )
+    # ردیف‌های ORMِ در حافظه بعد از یک `execute`ِ خام کهنه‌اند.
+    db.expire_all()
     db.flush()
     return rows
 

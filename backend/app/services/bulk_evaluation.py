@@ -263,9 +263,10 @@ def execute(db: Session, cohort: CohortFilter) -> list[PersonPlan]:
         record = EvaluationRecord(
             evaluation_code=next_evaluation_code(db),
             subject_personnel_id=person_plan.personnel_id,
-            unit_supervisor_user_id=(
-                None if person_plan.manager_path else access.unit_supervisor_user_id
-            ),
+            # `manager_path` خودش همین شرط است
+            # (`access.unit_supervisor_user_id is None`, خط ۲۳۱)، پس شرطی که
+            # روی خالی‌بودن، خالی می‌گذاشت، بی‌اثر بود. مقدار مستقیم می‌نشیند.
+            unit_supervisor_user_id=access.unit_supervisor_user_id,
             deputy_user_id=access.deputy_user_id,
             ceo_user_id=access.ceo_user_id,
             period_id=open_period.id if open_period else None,

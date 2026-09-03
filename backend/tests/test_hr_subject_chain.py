@@ -39,6 +39,9 @@ from tests.helpers import (
     make_user,
 )
 
+#: نمایِ خودِ کارمند پیش‌فرض خاموش است و این فایل رفتارِ *روشن* را می‌سنجد.
+pytestmark = pytest.mark.usefixtures("employee_view_on")
+
 
 def _score_and_submit(client, db_session, record_id: int, scorer) -> None:
     client.put(

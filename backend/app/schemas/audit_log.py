@@ -34,3 +34,6 @@ class AuditIntegrityRead(BaseModel):
     checked: int
     broken_at_id: int | None
     reason: str | None
+    #: کلِ زنجیره سنجیده شد یا فقط پنجرهٔ انتهایی؟ «سبز» روی پنجره با «سبزِ
+    #: کامل» یکی نیست: پنجرهٔ انتهایی حذفِ ردیفی *پیش از* پنجره را نمی‌بیند.
+    full: bool = True

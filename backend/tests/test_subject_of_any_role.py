@@ -28,7 +28,6 @@ from tests.helpers import (
     make_access,
     make_personnel,
     make_user,
-    set_module,
 )
 
 #: نقش‌هایی که در زنجیره کار می‌کنند و *خودشان هم* ارزیابی می‌شوند. `support`
@@ -36,16 +35,8 @@ from tests.helpers import (
 SUBJECT_ROLES = ["employee", "unit_supervisor", "deputy", "ceo", "hr"]
 
 
-@pytest.fixture()
-def visible_modules(db_session):
-    """ماژول‌های نمایشِ کارمند صریح روشن — پیش‌فرضشان خاموش است."""
-    for key in (
-        "employee_evaluation_visibility",
-        "employee_result_acknowledgement",
-        "objections",
-    ):
-        set_module(db_session, key, True)
-    db_session.commit()
+#: نمایِ خودِ کارمند پیش‌فرض خاموش است و این فایل رفتارِ *روشن* را می‌سنجد.
+pytestmark = pytest.mark.usefixtures("employee_view_on")
 
 
 def _finalized_case_for(client, db_session, role: str):
@@ -83,7 +74,7 @@ def _finalized_case_for(client, db_session, role: str):
 
 
 @pytest.mark.parametrize("role", SUBJECT_ROLES)
-def test_a_subject_of_any_role_can_read_its_own_result(client, db_session, visible_modules, role):
+def test_a_subject_of_any_role_can_read_its_own_result(client, db_session, role):
     actor, record_id = _finalized_case_for(client, db_session, role)
     listed = client.get("/api/me/evaluations", headers=auth_header(actor))
     assert listed.status_code == 200, (role, listed.text)
@@ -91,9 +82,7 @@ def test_a_subject_of_any_role_can_read_its_own_result(client, db_session, visib
 
 
 @pytest.mark.parametrize("role", SUBJECT_ROLES)
-def test_a_subject_of_any_role_can_download_its_own_document(
-    client, db_session, visible_modules, role
-):
+def test_a_subject_of_any_role_can_download_its_own_document(client, db_session, role):
     """همان ۴۰۳ی که گزارش ممیزی با یک probe نشانش داد."""
     actor, record_id = _finalized_case_for(client, db_session, role)
     got = client.get(
@@ -109,9 +98,7 @@ def test_a_subject_of_any_role_can_download_its_own_document(
 
 
 @pytest.mark.parametrize("role", SUBJECT_ROLES)
-def test_a_subject_of_any_role_can_acknowledge_and_object(
-    client, db_session, visible_modules, role
-):
+def test_a_subject_of_any_role_can_acknowledge_and_object(client, db_session, role):
     actor, record_id = _finalized_case_for(client, db_session, role)
     acked = client.post(
         f"/api/me/evaluations/{record_id}/acknowledge", headers=auth_header(actor)
@@ -126,9 +113,7 @@ def test_a_subject_of_any_role_can_acknowledge_and_object(
 
 
 @pytest.mark.parametrize("role", SUBJECT_ROLES)
-def test_a_subject_of_any_role_is_told_its_case_was_finalized(
-    client, db_session, visible_modules, role
-):
+def test_a_subject_of_any_role_is_told_its_case_was_finalized(client, db_session, role):
     """اعلانِ «دربارهٔ خودت» — پیش از این `User.role == employee` فیلترش می‌کرد."""
     actor, record_id = _finalized_case_for(client, db_session, role)
     db_session.expire_all()

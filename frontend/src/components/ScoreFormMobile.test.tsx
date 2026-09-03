@@ -24,6 +24,7 @@ function indicator(id: number): Indicator {
     created_at: "",
     updated_at: "",
     usage_count: 0,
+    scheme_weight: 1,
   };
 }
 
@@ -130,12 +131,16 @@ describe("شمارندهٔ واژهٔ شواهد", () => {
     expect(screen.getByText(/۳ از ۴۰ واژه/)).toBeInTheDocument();
   });
 
-  it("برای امتیازی که شواهد لازم ندارد، شمارنده‌ای هم نیست", () => {
+  it("برای امتیازِ غیراجباری شمارنده می‌آید ولی هشدار نه", () => {
+    /* پیش از این نه شمارنده بود و نه جعبهٔ شواهد قابل نوشتن. سقفِ واژه اما
+       برای *هر* شواهدی اعمال می‌شود (`validate_evidence`)، پس شمارنده همان‌جا
+       هم حرف دارد — فقط «چند واژه کم است» نباید بگوید، چون چیزی کم نیست. */
     setNarrow(true);
     renderForm([
       { indicator_id: 1, score: 3, evidence_text: "" },
       { indicator_id: 2, score: 3, evidence_text: "" },
     ]);
-    expect(screen.queryByText(/واژه/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/واژهٔ دیگر لازم است/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/۰ از ۴۰ واژه/)).toHaveLength(2);
   });
 });

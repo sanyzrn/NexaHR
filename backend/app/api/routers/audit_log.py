@@ -29,30 +29,56 @@ router = APIRouter(prefix="/api/audit-log", tags=["audit-log"])
 #: این فهرست عمداً allowlist است. اگر روزی رویداد تازه‌ای اضافه شود و کسی یادش
 #: برود این‌جا بیاوردش، از دید پشتیبانی *پنهان* می‌ماند — نه اینکه ناخواسته
 #: افشا شود. همان درسی که در دامنهٔ دید پرونده‌ها گرفتیم.
+#: هر نامِ این فهرست باید *واقعاً* emit شود. دو نامِ مرده در آن بود
+#: (`password_reset_by_hr` و `sessions_revoked_all`) که هیچ‌جای کد ساخته
+#: نمی‌شوند: بازنشانیِ رمز توسط منابع انسانی و باطل‌کردنِ نشست‌ها هر دو زیر
+#: `user_updated` ثبت می‌شوند. نامِ مرده در یک allowlist بی‌خطر است ولی
+#: دروغ می‌گوید — کسی که فهرست را می‌خواند فکر می‌کند آن رویداد پوشیده شده.
 SYSTEM_EVENT_TYPES: frozenset[str] = frozenset(
     {
         # امنیت حساب
         "login_succeeded",
         "login_failed",
         "account_locked",
+        "account_unlocked",
         "password_changed_self",
-        "password_reset_by_hr",
         "session_revoked",
-        "sessions_revoked_all",
         # کاربران و مجوزها
         "user_created",
         "user_updated",
+        "user_deactivated",
+        "user_deleted",
         "capabilities_changed",
         # پیکربندی سامانه
         "module_toggled",
+        "policy_settings_changed",
+        "integration_settings_changed",
+        "integration_test_sent",
         "scheduled_jobs_run",
         "scoring_scheme_drafted",
+        "scoring_scheme_created",
         "scoring_scheme_activated",
         "scoring_scheme_draft_deleted",
         "indicator_created",
         "indicator_updated",
+        "indicator_replaced",
         "indicator_deleted",
         "indicators_reordered",
+        "org_unit_created",
+        "org_unit_updated",
+        "org_unit_deleted",
+        # دستیار: پیکربندی، دسترسی، و ردِ اجرای ابزارها. هیچ‌کدام نمره یا
+        # نتیجه در خود ندارند (`sanitize_arguments` هم رازها را ماسک می‌کند)،
+        # و «چرا دستیار این کار را کرد» دقیقاً پرسشِ پشتیبانی است.
+        "ai_settings_changed",
+        "ai_access_changed",
+        "ai_tool_invoked",
+        "ai_tool_failed",
+        "ai_action_confirmed",
+        "ai_action_rejected",
+        "ai_action_failed",
+        "ai_turn_failed",
+        "ai_upload_staged",
     }
 )
 

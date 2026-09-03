@@ -3,6 +3,7 @@
 مهم‌ترین بخش: کارمند نباید چیزی بیش از نتیجه نهایی ارزیابی خودش ببیند —
 نه پرونده در جریان، نه پرونده دیگران، نه شواهد و کامنت‌های داخلی زنجیره.
 """
+import pytest
 from sqlalchemy import func, select
 
 from app.models.audit_log import AuditLog
@@ -16,6 +17,9 @@ from tests.helpers import (
     make_user,
     set_module,
 )
+
+#: نمایِ خودِ کارمند پیش‌فرض خاموش است و این فایل رفتارِ *روشن* را می‌سنجد.
+pytestmark = pytest.mark.usefixtures("employee_view_on")
 
 
 def _make_chain(db):

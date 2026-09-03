@@ -154,14 +154,26 @@ export const NAV_BY_ROLE: Record<string, NavItem[]> = {
     // P2-01: تا پیش از این، ارزیاب هیچ راهی نداشت بفهمد نمره‌دهی‌اش نسبت به
     // بقیه کجاست — و این مفیدترین بازخوردی است که یک نمره‌دهنده می‌گیرد.
     { to: "/my-scoring", label: "الگوی نمره‌دهی من", icon: ICONS.chart, module: "role_analytics" },
-    { to: "/improvement-plans", label: "برنامه‌های بهبود", icon: ICONS.improvement },
+    {
+      to: "/improvement-plans",
+      label: "برنامه‌های بهبود",
+      icon: ICONS.improvement,
+      // نسخهٔ منابع انسانی از همان لینک گاردِ ماژول داشت و این دو نداشتند، پس
+      // با خاموش‌بودنِ ماژول، دو نقش لینکِ زنده نگه می‌داشتند.
+      module: "improvement_plans",
+    },
   ],
   // معاونت هم نمره می‌دهد (مسیر «مدیر») و هم تصمیم‌گیر است، پس هر دو نما را دارد.
   deputy: [
     { to: "/deputy", label: "پرونده‌های در انتظار", icon: ICONS.queue },
     { to: "/my-scoring", label: "الگوی نمره‌دهی من", icon: ICONS.chart, module: "role_analytics" },
     { to: "/executive", label: "تحلیل سازمان", icon: ICONS.org, module: "role_analytics" },
-    { to: "/improvement-plans", label: "برنامه‌های بهبود", icon: ICONS.improvement },
+    {
+      to: "/improvement-plans",
+      label: "برنامه‌های بهبود",
+      icon: ICONS.improvement,
+      module: "improvement_plans",
+    },
   ],
   ceo: [
     { to: "/ceo", label: "پرونده‌های در انتظار", icon: ICONS.queue },

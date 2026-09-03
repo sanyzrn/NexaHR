@@ -131,8 +131,25 @@ export interface ScorePreview {
   final_pct: number;
 }
 
-/** پیش‌نمایش محاسبه امتیازها با همان فرمول سرور — فقط وقتی همهٔ شاخص‌ها امتیاز گرفته باشند.
- * (محاسبه نهایی و معتبر همیشه سمت سرور انجام می‌شود.) */
+/** پیش‌نمایش محاسبه امتیازها با همان فرمول سرور — فقط وقتی همهٔ شاخص‌ها امتیاز
+ *  گرفته باشند. (محاسبه نهایی و معتبر همیشه سمت سرور انجام می‌شود.)
+ *
+ *  دو چیز این‌جا نبود و هر دو عددِ حلقهٔ پیش‌نمایش را با عددِ ثبت‌شده جدا
+ *  می‌کرد — و ارزیاب تصمیمش را روی همان حلقه می‌سازد:
+ *
+ *  **وزنِ هر شاخص.** سرور `rules.weight_for(indicator_id)` را در نمره و در
+ *  سقف ضرب می‌کند؛ این‌جا هر شاخص وزن ۱ داشت. روی هر طرحی با وزن‌های
+ *  نابرابر، عدد غلط بود — و «وزنِ هر شاخص» یکی از قابلیت‌های اصلیِ طرح است.
+ *
+ *  **بازتوزیعِ وزنِ بخشِ غایب.** چارچوبی که فقط شاخصِ «عمومی» دارد یک شکلِ
+ *  رسیدنی است (هیچ گاردی جلوی خالی‌شدنِ یک بخش را نمی‌گیرد). سرور وزنِ بخشِ
+ *  غایب را بین بخش‌های موجود پخش می‌کند تا سقف ۱۰۰ بماند؛ این‌جا
+ *  `general × 0.6 + 0 × 0.4` حساب می‌شد. یعنی فرمِ پُرِ ۵ به‌عنوان ۶۰٪
+ *  («تمدید مشروط») پیش‌نمایش می‌شد و ۱۰۰٪ ثبت می‌شد.
+ *
+ *  امتیازِ ویژه عمداً این‌جا نیست: مثل سرور، *پس از* این عدد اضافه می‌شود و
+ *  فرم آن را جداگانه نشان می‌دهد. این تابع «امتیازِ فرم» را می‌دهد، همان
+ *  `base_weighted_pct`. */
 export function computePreview(
   drafts: ScoreDraft[],
   indicators: Indicator[],
@@ -140,6 +157,7 @@ export function computePreview(
 ): ScorePreview | null {
   if (drafts.length === 0 || drafts.some((d) => d.score === null)) return null;
   const sectionById = new Map(indicators.map((i) => [i.id, i.section]));
+  const weightOf = (id: number) => config.indicator_weights?.[String(id)] ?? 1;
 
   let generalSum = 0;
   let generalMax = 0;
@@ -147,20 +165,34 @@ export function computePreview(
   let specializedMax = 0;
   for (const d of drafts) {
     const s = d.score as number;
+    const w = weightOf(d.indicator_id);
     if (sectionById.get(d.indicator_id) === "general") {
-      generalSum += s;
-      generalMax += 5;
+      generalSum += s * w;
+      generalMax += 5 * w;
     } else {
-      specializedSum += s;
-      specializedMax += 5;
+      specializedSum += s * w;
+      specializedMax += 5 * w;
     }
   }
   const round1 = (v: number) => Math.round(v * 10) / 10;
   const general = generalMax ? round1((generalSum / generalMax) * 100) : 0;
   const specialized = specializedMax ? round1((specializedSum / specializedMax) * 100) : 0;
-  const final = round1(
-    general * config.general_section_weight + specialized * config.specialized_section_weight
-  );
+
+  // فقط بخش‌هایی که در *این* پرونده شاخص دارند وارد جمع می‌شوند، و وزن‌ها
+  // به نسبتِ همان‌ها نرمال می‌شود — قرینهٔ دقیقِ `evaluation.compute_result`.
+  const present: Array<[number, number]> = [];
+  if (generalMax) present.push([general, config.general_section_weight]);
+  if (specializedMax) present.push([specialized, config.specialized_section_weight]);
+  const weightSum = present.reduce((sum, [, w]) => sum + w, 0);
+  let final: number;
+  if (present.length === 0) {
+    final = 0;
+  } else if (weightSum > 0) {
+    final = round1(present.reduce((sum, [pct, w]) => sum + pct * w, 0) / weightSum);
+  } else {
+    // طرح به همهٔ بخش‌های موجود وزنِ صفر داده — میانگینِ ساده، مثل سرور.
+    final = round1(present.reduce((sum, [pct]) => sum + pct, 0) / present.length);
+  }
   return { general_pct: general, specialized_pct: specialized, final_pct: final };
 }
 
@@ -497,20 +529,17 @@ function ScoreCardList({
                     rows={3}
                     value={draft.evidence_text}
                     onChange={(e) => onEvidenceChange(ind.id, clampEvidence(e.target.value, maxWords))}
-                    disabled={!needsEvidence}
                     placeholder={
-                      needsEvidence ? "شرح کوتاه شواهد عینی…" : "برای این امتیاز اختیاری است"
+                      needsEvidence ? "شرح کوتاه شواهد عینی…" : "اختیاری — اگر توضیحی دارید"
                     }
                   />
                 </label>
-                {needsEvidence && (
-                  <WordCounter
-                    count={count}
-                    required
-                    min={config.evidence_min_words}
-                    max={maxWords}
-                  />
-                )}
+                <WordCounter
+                  count={count}
+                  required={needsEvidence}
+                  min={config.evidence_min_words}
+                  max={maxWords}
+                />
               </div>
             )}
           </li>
@@ -624,20 +653,21 @@ function ScoreFormTableWide({
                       rows={2}
                       value={draft.evidence_text}
                       onChange={(e) => handleEvidenceChange(ind.id, e.target.value)}
-                      disabled={!needsEvidence}
                       placeholder={
                         needsEvidence
                           ? "شرح کوتاه شواهد عینی…"
-                          : "برای این امتیاز اختیاری است"
+                          : "اختیاری — اگر توضیحی دارید"
                       }
                     />
                   )}
                   {/* شمارنده قانونِ سرور را پیش از رد شدن نشان می‌دهد؛ قبلاً تنها
-                      جایی که دیده می‌شد، خطای ثبت بود — بعد از نوشتن بیست شاخص. */}
-                  {!readOnly && needsEvidence && (
+                      جایی که دیده می‌شد، خطای ثبت بود — بعد از نوشتن بیست شاخص.
+                      برای امتیازِ غیراجباری هم می‌آید، چون سقفِ واژه برای *هر*
+                      شواهدی اعمال می‌شود. */}
+                  {!readOnly && (
                     <WordCounter
                       count={count}
-                      required
+                      required={needsEvidence}
                       min={config.evidence_min_words}
                       max={maxWords}
                     />

@@ -43,6 +43,16 @@ describe("navItemsFor", () => {
     ]);
   });
 
+  it("لینکِ برنامه‌های بهبود در هر سه نقش به ماژول بند است", () => {
+    // نسخهٔ منابع انسانی گاردِ ماژول داشت و نسخهٔ مسئول واحد و معاونت نداشتند،
+    // پس با خاموش‌بودنِ ماژول دو نقش لینکِ زنده نگه می‌داشتند.
+    const off = (module: string) => module !== "improvement_plans";
+    for (const role of ["hr", "unit_supervisor", "deputy"]) {
+      const items = navItemsFor(role, noCaps, off, true).map((i) => i.to);
+      expect(items, role).not.toContain("/improvement-plans");
+    }
+  });
+
   it("ماژولِ خاموش لینک را نمی‌سازد", () => {
     const off = (module: string) => module !== "role_analytics";
     const items = navItemsFor("deputy", noCaps, off, true).map((i) => i.to);

@@ -1,4 +1,5 @@
 """تست‌های مدیریت شاخص‌ها: افزودن خودکار به انتهای ترتیب، تغییر ترتیب (drag) و حذف."""
+from app.models.enums import Capability
 from tests.helpers import (
     active_indicators,
     auth_header,
@@ -146,3 +147,67 @@ def test_reorder_and_delete_forbidden_for_non_hr(client, db_session):
         == 403
     )
     assert client.delete(f"/api/indicators/{ind['id']}", headers=auth_header(sup)).status_code == 403
+
+
+# ── وزنِ شاخص و جایگزینی (M-4) ─────────────────────────────────────────────
+
+
+def test_the_list_says_what_each_indicator_weighs_in_the_active_scheme(client, db_session):
+    """بی این عدد، «جایگزینی» یک ضررِ نامرئی داشت.
+
+    `ScoringScheme.indicator_weights` با *شناسه* کلید خورده و جایگزینی شناسهٔ
+    تازه می‌سازد؛ طرحِ فعال هم تغییرناپذیر است. پس شاخصی با وزن ۳، جایگزینش
+    وزن ۱ می‌گیرد — و تا امروز هیچ‌جا گفته نمی‌شد. منابع انسانی که فکر می‌کرد
+    یک اصلاح نگارشی می‌کند، وزنِ سؤال را برای همهٔ پرونده‌های بعدی عوض می‌کرد.
+    """
+    from app.models.scoring_scheme import ScoringScheme
+    from app.services.scoring_scheme import active_scheme
+
+    hr = make_user(db_session, "hr", capabilities=[Capability.manage_scoring])
+    db_session.commit()
+    target = active_indicators(db_session)[0]
+
+    rows = client.get("/api/indicators", headers=auth_header(hr)).json()
+    assert next(r for r in rows if r["id"] == target.id)["scheme_weight"] == 1.0
+
+    scheme = active_scheme(db_session)
+    assert scheme is not None
+    db_session.get(ScoringScheme, scheme.id).indicator_weights = {str(target.id): 3.0}
+    db_session.commit()
+
+    rows = client.get("/api/indicators", headers=auth_header(hr)).json()
+    assert next(r for r in rows if r["id"] == target.id)["scheme_weight"] == 3.0
+
+
+def test_replacing_an_indicator_records_the_weight_it_drops(client, db_session):
+    """بستنِ کار راه نیست (شناسهٔ تازه پیش از جایگزینی وجود ندارد، پس
+    پیش‌نویسی که وزنش را داشته باشد هم ساخته نمی‌شود). پس عدد باید *ثبت* شود."""
+    from app.models.scoring_scheme import ScoringScheme
+    from app.services.scoring_scheme import active_scheme
+
+    hr = make_user(
+        db_session, "hr", capabilities=[Capability.manage_scoring, Capability.view_audit_log]
+    )
+    db_session.commit()
+    target = active_indicators(db_session)[0]
+    scheme = active_scheme(db_session)
+    db_session.get(ScoringScheme, scheme.id).indicator_weights = {str(target.id): 2.5}
+    db_session.commit()
+
+    replaced = client.post(
+        f"/api/indicators/{target.id}/replace",
+        json={
+            "category": target.category,
+            "description": "متنِ تازه با معنای تازه",
+            "reason": "سؤال دو مفهوم را با هم می‌پرسید",
+        },
+        headers=auth_header(hr),
+    )
+    assert replaced.status_code == 201, replaced.text
+    assert replaced.json()["scheme_weight"] == 1.0
+
+    events = client.get(
+        "/api/audit-log", params={"event_type": "indicator_replaced"}, headers=auth_header(hr)
+    ).json()["items"]
+    assert events[0]["new_value"]["weight_before"] == 2.5
+    assert events[0]["new_value"]["weight_after"] == 1.0
