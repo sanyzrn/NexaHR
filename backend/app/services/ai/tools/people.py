@@ -28,7 +28,18 @@ from app.services.self_evaluation import (
 )
 from app.services.workflow import IS_OPEN_RECORD
 
-ORG_WIDE_ROLES = (UserRole.hr, UserRole.deputy, UserRole.ceo, UserRole.support)
+#: نقش‌هایی که فهرست کاملِ پرسنل را در رابط هم می‌بینند — و فقط همان‌ها.
+#:
+#: تا امروز `deputy` و `ceo` و `support` هم این‌جا بودند، با این توضیح که «در
+#: فهرست پرسنلِ رابط هم کامل می‌بینند». آن جمله غلط بود:
+#: `routers/personnel.list_personnel` معاونت و مدیرعامل را به ردیف‌های
+#: `EvaluationAccess`ِ خودشان محدود می‌کند و برای `support` صفحهٔ *تهی*
+#: برمی‌گرداند (`_ACCESS_COLUMN_BY_ROLE` ستونی برایش ندارد).
+#:
+#: همان خرابی در `ai/context.py` هم بود و رفع شد؛ این نسخهٔ دومش بود که در
+#: لایهٔ *ابزارها* جا مانده بود — یعنی همان دادهٔ رابط‌نادیده، این‌بار از راه
+#: `search_personnel` و `get_personnel`.
+ORG_WIDE_ROLES = (UserRole.hr,)
 
 _ROLE_LABELS = {
     UserRole.hr: "منابع انسانی",
@@ -40,9 +51,16 @@ _ROLE_LABELS = {
 }
 
 
-def _visible_personnel_ids(db: Session, user: CurrentUser) -> set[int] | None:
-    """None یعنی همه — دقیقاً مثل متنِ زمینه و فهرستِ پرسنلِ رابط."""
-    if user.role in ORG_WIDE_ROLES:
+def _visible_personnel_ids(
+    db: Session, user: CurrentUser, caps: frozenset[Capability] = frozenset()
+) -> set[int] | None:
+    """None یعنی همه — دقیقاً مثل متنِ زمینه و فهرستِ پرسنلِ رابط.
+
+    `manage_personnel` جداگانه سنجیده می‌شود، چون آن مجوز در رابط هم کلِ
+    فهرست را می‌دهد (`personnel/export.xlsx`، `POST /api/personnel`) — همان
+    قاعده‌ای که در `ai/context.py` نوشته شده.
+    """
+    if user.role in ORG_WIDE_ROLES or Capability.manage_personnel in caps:
         return None
     rows = db.scalars(
         select(EvaluationAccess.personnel_id).where(
@@ -65,20 +83,29 @@ def _person_or_404(db: Session, personnel_id: int) -> Personnel:
 
 
 def _ensure_can_view_personnel(
-    db: Session, person: Personnel, user: CurrentUser
+    db: Session, person: Personnel, user: CurrentUser, caps: frozenset[Capability] = frozenset()
 ) -> None:
-    """همان قاعدهٔ GET /personnel/{id}: منابع انسانی و زنجیره و خودِ فرد."""
-    if user.role in (UserRole.hr,):
+    """همان قاعدهٔ `GET /personnel/{id}` — و همان *تابع*، نه یک رونویسی.
+
+    نسخهٔ قبلی برای `deputy`/`ceo`/`support` بی‌قید `return` می‌کرد، با این
+    توضیح که «در فهرست پرسنلِ رابط هم کامل می‌بینند». آن جمله غلط بود، و
+    `_can_view_personnel` در روتر قاعدهٔ واقعی را دارد: منابع انسانی، هر کسی
+    که در زنجیرهٔ همین فرد نشسته (ردیفِ دسترسی یا صندلیِ هر پرونده‌اش)، و خودِ
+    فرد. رونویسی هم شرطِ «صندلیِ پرونده» را نداشت، پس حتی برای زنجیره‌ای‌ها
+    ناقص بود.
+
+    `manage_personnel` این‌جا هم پذیرفته می‌شود تا با `_visible_personnel_ids`
+    یکی بماند: مجوزی که فهرست را می‌دهد نباید جزئیاتِ همان ردیف را ببندد.
+    (روترها خودشان این‌جا ناهمگون‌اند — `export.xlsx` مجوز را می‌پذیرد و
+    `GET /personnel/{id}` نه — که ایرادِ جداگانه‌ای است و این‌جا بدترش
+    نمی‌کنیم.)
+    """
+    from app.api.routers.personnel import _can_view_personnel
+
+    if Capability.manage_personnel in caps or user.personnel_id == person.id:
         return
-    if user.role in (UserRole.deputy, UserRole.ceo, UserRole.support):
-        return  # نقش‌های سازمان‌گیر در فهرست پرسنلِ رابط هم کامل می‌بینند
-    access = db.scalar(
-        select(EvaluationAccess).where(EvaluationAccess.personnel_id == person.id)
-    )
-    chain = {access.unit_supervisor_user_id, access.deputy_user_id, access.ceo_user_id} if access else set()
-    if user.id in chain or user.personnel_id == person.id:
-        return
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "به این پرسنل دسترسی ندارید")
+    if not _can_view_personnel(db, person.id, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "به این پرسنل دسترسی ندارید")
 
 
 def _person_payload(db: Session, person: Personnel) -> dict:
@@ -165,7 +192,7 @@ def search_personnel(
 ) -> ToolOutcome:
     db = ctx.db
     stmt = select(Personnel)
-    visible = _visible_personnel_ids(db, ctx.user)
+    visible = _visible_personnel_ids(db, ctx.user, ctx.caps)
     if visible is not None:
         stmt = stmt.where(Personnel.id.in_(visible or [0]))
     if q:
@@ -228,7 +255,7 @@ search_personnel.describe = _describe_search
 )
 def get_personnel(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
     person = _person_or_404(ctx.db, personnel_id)
-    _ensure_can_view_personnel(ctx.db, person, ctx.user)
+    _ensure_can_view_personnel(ctx.db, person, ctx.user, ctx.caps)
     payload = _person_payload(ctx.db, person)
     return ToolOutcome(
         content=json_content(payload),
@@ -444,35 +471,45 @@ update_personnel.describe = _describe_update_personnel
 def separate_personnel(
     ctx: ToolContext, personnel_id: int, separation_reason: str, separation_date: str = ""
 ) -> ToolOutcome:
+    """بستنِ پروندهٔ خروج از راهِ همان سرویسی که رابط استفاده می‌کند.
+
+    بدنهٔ قبلی خودش هر سه کار را تکرار می‌کرد و سه چیز را جا می‌گذاشت:
+
+    * `revoke_all_for_user(account.id)` بی `db` صدا زده می‌شد. امضا
+      `(db, user_id)` است، پس این خط *همیشه* `TypeError` می‌داد و تراکنش
+      برمی‌گشت — یعنی خروجِ پرسنلِ حساب‌دار از راه دستیار هرگز کار نمی‌کرد و
+      کاربر یک ۵۰۰ِ عمومی می‌دید.
+    * کامنتِ «لغو خودکار — پرسنل از سازمان خارج شد (علت: …)» روی پرونده
+      نوشته نمی‌شد، پس در پرونده هیچ توضیحی برای لغو نمی‌ماند.
+    * و دو رویدادِ ممیزیِ `evaluation_cancelled_on_separation` و
+      `user_deactivated_on_separation` ثبت نمی‌شدند.
+
+    `_close_out_departure` هر سه را دارد، و قفلِ ردیفی‌اش را هم.
+    """
+    from app.api.routers.personnel import _close_out_departure
+    from app.models.enums import SeparationReason
+
     db = ctx.db
     person = _person_or_404(db, personnel_id)
-    reason = separation_reason.strip()
-    if reason not in {"resignation", "dismissal", "contract_end", "retirement", "other"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "علت خروج نامعتبر است")
+    try:
+        # ستونِ مدل enum است، نه رشته. بدنهٔ قبلی رشتهٔ خام می‌نشاند و هر
+        # خواننده‌ای که `reason.value` می‌خواست — از جمله خودِ
+        # `_close_out_departure` — روی `AttributeError` می‌افتاد.
+        reason = SeparationReason(separation_reason.strip())
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "علت خروج نامعتبر است") from None
     person.status = PersonnelStatus.inactive
     person.separation_reason = reason
     person.separation_date = _parse_date(separation_date) or date.today()
+    db.flush()
 
-    # پروندهٔ باز: لغو با دلیل — همان مسیرِ رسمیِ گردش‌کار.
     open_record = db.scalar(
         select(EvaluationRecord).where(
             EvaluationRecord.subject_personnel_id == person.id, IS_OPEN_RECORD
         )
     )
-    cancelled = False
-    if open_record is not None:
-        from app.services.workflow import apply_transition
-
-        apply_transition(db, open_record, "cancel", ctx.user)
-        cancelled = True
-
-    account = db.scalar(select(User).where(User.personnel_id == person.id))
-    if account is not None and account.is_active:
-        account.is_active = False
-        account.token_version += 1
-        from app.services.sessions import revoke_all_for_user
-
-        revoke_all_for_user(account.id)
+    cancelled = open_record is not None
+    _close_out_departure(db, person, ctx.user)
 
     log_event(
         db,
@@ -480,7 +517,7 @@ def separate_personnel(
         event_type="personnel_departed",
         new_value={
             "id": person.id,
-            "separation_reason": reason,
+            "separation_reason": reason.value,
             "separation_date": person.separation_date.isoformat(),
             "open_evaluation_cancelled": cancelled,
             "via": "ai_copilot",
@@ -490,7 +527,7 @@ def separate_personnel(
     label = {
         "resignation": "استعفا", "dismissal": "اخراج", "contract_end": "پایان قرارداد",
         "retirement": "بازنشستگی", "other": "سایر",
-    }[reason]
+    }[reason.value]
     return ToolOutcome(
         content=json_content({
             "separated": True,
@@ -679,65 +716,59 @@ def update_user(
     full_name: str | None = None,
     personnel_id: int | None = None,
 ) -> ToolOutcome:
-    from app.core.security import hash_password
-    from app.services.authorization import apply_default_hr_capabilities
-    from app.services.self_evaluation import ensure_user_link_is_not_self_evaluation
-    from app.services.sessions import revoke_all_for_user
+    """ویرایشِ حساب از راهِ endpointِ رسمی، نه یک نسخهٔ موازی.
+
+    بدنهٔ قبلی همان کارها را تکرار می‌کرد و چهار چیز را جا می‌گذاشت:
+
+    * `revoke_all_for_user(account.id)` بی `db`. امضا `(db, user_id)` است، پس
+      دو جا در همین تابع *همیشه* `TypeError` می‌داد: غیرفعال‌کردنِ حساب و
+      بازنشانیِ رمز از راه دستیار هرگز کار نمی‌کردند — تراکنش برمی‌گشت و
+      کاربر یک ۵۰۰ِ عمومی می‌دید.
+    * `must_change_password` روی رمزی که *دیگری* گذاشته ست نمی‌شد. روتر
+      می‌گذاردش، و استدلالش در `personnel_import` نوشته شده: رمزی که کسِ
+      دیگری انتخاب کرده و از راه تلفن یا پیام رسیده، نباید در استفاده بماند.
+    * گاردِ «نقشِ منابع انسانی را از حسابِ خودت نگیر» نبود.
+    * و گاردِ «کارمند بی پروندهٔ پرسنلی نمی‌شود».
+
+    همهٔ این‌ها در `routers/users.update_user` هستند و `UserUpdate` هم دقیقاً
+    همین پنج میدان را دارد، پس سپردنش یک‌به‌یک است.
+    """
+    from app.api.routers import users as ep
+    from app.schemas.user import UserUpdate
 
     db = ctx.db
-    account = db.get(User, int(user_id))
-    if account is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "حسابی با این شناسه پیدا نشد")
-    changes: dict[str, object] = {}
-
-    if role is not None and role != account.role.value:
-        account.role = UserRole(role)
-        changes["role"] = role
-        if account.role == UserRole.hr:
-            apply_default_hr_capabilities(db, account.id)
-    if is_active is not None and is_active != account.is_active:
-        if account.id == ctx.user.id and is_active is False:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "نمی‌توانید حساب خودتان را غیرفعال کنید")
-        account.is_active = is_active
-        changes["is_active"] = is_active
-        if not is_active:
-            account.token_version += 1
-            revoke_all_for_user(account.id)
+    fields: dict = {}
+    if role is not None:
+        fields["role"] = UserRole(role)
+    if is_active is not None:
+        fields["is_active"] = bool(is_active)
     if password:
-        if len(password) < 10:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "رمز باید دست‌کم ۱۰ نویسه باشد")
-        account.password_hash = hash_password(password)
-        account.token_version += 1
-        revoke_all_for_user(account.id)
-        changes["password"] = "changed"
+        fields["password"] = password
     if full_name is not None:
-        account.full_name = full_name.strip() or None
-        changes["full_name"] = account.full_name
-    if personnel_id is not None and personnel_id != account.personnel_id:
-        ensure_user_link_is_not_self_evaluation(db, account, int(personnel_id))
-        account.personnel_id = int(personnel_id)
-        changes["personnel_id"] = account.personnel_id
-
-    if not changes:
+        fields["full_name"] = full_name.strip() or None
+    if personnel_id is not None:
+        fields["personnel_id"] = int(personnel_id)
+    if not fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "تغییری داده نشده است")
 
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="user_updated",
-        old_value={"id": account.id},
-        new_value={"id": account.id, "via": "ai_copilot", **changes},
+    updated = ep.update_user(
+        user_id=int(user_id),
+        # `exclude_unset` در روتر یعنی فقط کلیدهای *داده‌شده* اعمال می‌شوند؛
+        # ساختنِ مدل با همان کلیدها همین را نگه می‌دارد.
+        payload=UserUpdate(**fields),
+        db=db,
+        current_user=ctx.user,
     )
-    db.commit()
+    shown = {k: ("changed" if k == "password" else str(v)) for k, v in fields.items()}
     return ToolOutcome(
         content=json_content(
             {
                 "updated": True,
-                "user": {"id": account.id, "username": account.username},
-                "changes": {k: str(v) for k, v in changes.items()},
+                "user": {"id": updated.id, "username": updated.username},
+                "changes": shown,
             }
         ),
-        summary=f"حساب «{account.username}» به‌روز شد",
+        summary=f"حساب «{updated.username}» به‌روز شد",
     )
 
 
@@ -1049,37 +1080,49 @@ def list_user_capabilities(ctx: ToolContext, user_id: int) -> ToolOutcome:
     },
 )
 def grant_capabilities(ctx: ToolContext, user_id: int, capabilities: list) -> ToolOutcome:
-    db = ctx.db
-    account = db.get(User, int(user_id))
-    if account is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "حسابی با این شناسه پیدا نشد")
-    from app.models.capability import UserCapability
-    from app.services.authorization import capabilities_of
+    """جایگزینیِ مجموعهٔ مجوزها از راهِ endpointِ رسمی.
 
-    before = sorted(c.value for c in capabilities_of(db, account.id))
-    after = []
+    بدنهٔ قبلی خودش `delete()` می‌کرد و از نو می‌نوشت، و دو گاردِ روتر را
+    نداشت:
+
+    * **آخرین دارندهٔ `manage_capabilities`** نمی‌تواند آن را از خودش بگیرد.
+      کامنتِ خودِ روتر می‌گوید چرا: «بدون این گارد، یک کلیک اشتباه سامانه را
+      در حالتی قفل می‌کند که هیچ‌کس نمی‌تواند به کسی مجوز بدهد — و تنها راه
+      خروج، SQL دستی روی پروداکشن است.» از راه دستیار همان یک کلیک ممکن بود.
+    * **کارمند عادی مجوز اداری نمی‌گیرد** — روتر با پیامِ راهنما ردش می‌کند.
+
+    همان جنسِ خرابیِ C1–C3: گاردی که فقط در یکی از دو مسیر باشد، گارد نیست.
+    """
+    from app.api.routers import administration as ep
+    from app.schemas.administration import CapabilityGrant
+
+    db = ctx.db
+    wanted: list[str] = []
     for item in capabilities:
+        value = str(item).strip()
         try:
-            after.append(Capability(str(item).strip()))
+            Capability(value)
         except ValueError:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"مجوز شناخته‌نشده: {item}") from None
-    db.query(UserCapability).filter(UserCapability.user_id == account.id).delete()
-    for cap in set(after):
-        db.add(UserCapability(user_id=account.id, capability=cap, granted_by_user_id=ctx.user.id))
-    db.flush()
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="capabilities_changed",
-        old_value={"user_id": account.id, "capabilities": before},
-        new_value={"user_id": account.id, "capabilities": sorted(c.value for c in set(after)), "via": "ai_copilot"},
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"مجوز شناخته‌نشده: {item}"
+            ) from None
+        wanted.append(value)
+
+    holder = ep.set_capabilities(
+        user_id=int(user_id),
+        payload=CapabilityGrant(capabilities=wanted),
+        db=db,
+        current_user=ctx.user,
     )
-    db.commit()
     return ToolOutcome(
         content=json_content(
-            {"user_id": account.id, "username": account.username, "capabilities": sorted(c.value for c in set(after))}
+            {
+                "updated": True,
+                "user": {"id": holder.user_id, "username": holder.username},
+                "capabilities": holder.capabilities,
+            }
         ),
-        summary=f"مجوزهای «{account.username}» به‌روز شد",
+        summary=f"مجوزهای «{holder.username}» به‌روز شد",
     )
 
 

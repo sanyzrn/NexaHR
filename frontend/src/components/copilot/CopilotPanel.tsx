@@ -123,14 +123,6 @@ export function CopilotPanel({
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, livePendingCount, failure, uploading]);
 
-  useEffect(() => {
-    function onEscape(e: KeyboardEvent) {
-      if (e.key === "Escape" && variant === "drawer") onClose?.();
-    }
-    document.addEventListener("keydown", onEscape);
-    return () => document.removeEventListener("keydown", onEscape);
-  }, [onClose, variant]);
-
   function openConversation(id: number) {
     setConversationId(id);
     // در صفحهٔ کامل ستون کنارِ گفت‌وگوست و بستنش یعنی کاربر برای گفت‌وگوی بعدی
@@ -243,16 +235,28 @@ export function CopilotPanel({
     }
   }
 
-  async function send() {
-    const text = draft.trim();
-    if (!text || sendMutation.isPending || !canChat) return;
+  /** فرستادنِ یک متنِ مشخص. `send()` همان است با متنِ پیش‌نویس.
+   *
+   *  چرا متن *آرگومان* است و نه خوانده‌شده از state: چیپ‌های پیشنهادِ صفحهٔ
+   *  خوش‌آمد `setDraft(text)` می‌کردند و بلافاصله `send()` را صدا می‌زدند.
+   *  `setDraft` در React همگام نیست، پس `send()` مقدارِ *قبلیِ* `draft` را از
+   *  closure می‌خواند — که در صفحهٔ خوش‌آمد خالی است — و در همان خطِ اول
+   *  برمی‌گشت. نتیجه: کلیک روی چیپ فقط جعبهٔ متن را پر می‌کرد و کاربر باید
+   *  دوباره «ارسال» می‌زد. پیشنهادی که با یک کلیک کار نکند، پیشنهاد نیست. */
+  function sendText(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || sendMutation.isPending || !canChat) return;
     setDraft("");
     setFailure("");
     setMessages((prev) => [
       ...prev,
-      { id: Date.now(), role: "user", content: text, actions: [] },
+      { id: Date.now(), role: "user", content: trimmed, actions: [] },
     ]);
-    sendMutation.mutate(text);
+    sendMutation.mutate(trimmed);
+  }
+
+  function send() {
+    sendText(draft);
   }
 
   async function uploadFile(file: File) {
@@ -421,7 +425,7 @@ export function CopilotPanel({
           )}
 
           {canChat && messages.length === 0 && pendingList.length === 0 && (
-            <Welcome suggestions={suggestions} tools={tools} onPick={(text) => { setDraft(text); void send(); }} />
+            <Welcome suggestions={suggestions} tools={tools} onPick={sendText} />
           )}
 
           {/* کارت‌ها با همان تورفتگیِ ستونِ همکار می‌نشینند (پهنای آواتار + فاصله)

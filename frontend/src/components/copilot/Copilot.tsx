@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import { apiClient } from "../../api/client";
 import type { AiStatus } from "../../types";
 import { CopilotPanel } from "./CopilotPanel";
+import { useFocusTrap } from "../../ui/focusTrap";
 import { Mascot } from "./Mascot";
 
 /**
@@ -17,6 +18,22 @@ import { Mascot } from "./Mascot";
 export function Copilot() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const panelRef = useRef<HTMLElement>(null);
+
+  // کشو یک لایهٔ روی‌هم است با پردهٔ کلیک‌گیر روی تمامِ صفحه، پس باید مثل
+  // `Modal` رفتار کند: `aria-modal` تا صفحه‌خوان بقیهٔ صفحه را «پشتِ پرده»
+  // اعلام کند، و قفلِ فوکوس تا کاربرِ کیبورد با Tab از کشویِ *باز* به
+  // فهرستی که نمی‌بیند نرود (WCAG 2.1، بند ۲٫۴٫۳). پیش‌تر فقط
+  // `role="dialog"` داشت — یعنی نقش را ادعا می‌کرد و رفتارش را نداشت.
+  //
+  // `lockScroll` خاموش است: کشو خودش اسکرولِ داخلی دارد و صفحهٔ زیرش هم
+  // کار می‌کند؛ همکار برای *همراهیِ* همان صفحه باز می‌شود، نه جای آن.
+  // Escape از همین‌جا می‌بندد، پس `CopilotPanel` نسخهٔ خودش را ندارد.
+  useFocusTrap(panelRef, {
+    active: open,
+    onEscape: () => setOpen(false),
+    lockScroll: false,
+  });
 
   const { data: status } = useQuery({
     queryKey: ["ai", "status"],
@@ -81,8 +98,11 @@ export function Copilot() {
               onClick={() => setOpen(false)}
             />
             <motion.section
+              ref={panelRef}
               role="dialog"
+              aria-modal="true"
               aria-label="همکار هوشمند"
+              tabIndex={-1}
               className="fixed bottom-4 left-4 z-50 flex h-[min(680px,calc(100vh-2rem))] w-[min(560px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-float"
               initial={{ opacity: 0, y: 24, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiClient, authToken, refreshAccessToken } from "../api/client";
 import type { CurrentUser } from "../types";
 import { clearAppCaches } from "../pwa";
@@ -15,6 +16,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -45,19 +47,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const { data } = await apiClient.post("/auth/login", { username, password });
     authToken.set(data.access_token);
+    // کمربندِ دوم: اگر به هر دلیلی نشستِ قبلی بی خروجِ صریح تمام شده باشد
+    // (انقضای توکن، بستنِ تب، بازگشت با دکمهٔ back)، کاربرِ تازه نباید حتی یک
+    // فریم دادهٔ نفرِ قبل را ببیند.
+    queryClient.clear();
     await fetchMe();
-  }, [fetchMe]);
+  }, [fetchMe, queryClient]);
 
   const logout = useCallback(() => {
     // ابطال نشست سمت سرور (پاک‌شدن کوکی refresh)؛ خطای شبکه مانع خروج محلی نمی‌شود
     apiClient.post("/auth/logout").catch(() => {});
     authToken.set(null);
     setUser(null);
+    // کشِ React Query هم پاک می‌شود، وگرنه خروج فقط *ظاهر* را عوض می‌کند.
+    //
+    // کلیدهای پرس‌وجو به کاربر گره نخورده‌اند — `["notifications"]`،
+    // `["me","evaluations"]`، `["auth","sessions"]` و مانندشان — و
+    // `staleTime` سی ثانیه است با `gcTime` پنج‌دقیقه‌ایِ پیش‌فرض. یعنی روی یک
+    // رایانهٔ مشترک، کاربرِ دومی که داخل همان پنجره وارد می‌شد، ردیف‌های
+    // کاربرِ اول را *بلافاصله* رندر می‌دید: نامِ دستگاه‌ها و IP در «نشست‌ها»،
+    // اعلان‌ها، و کارنامه — و بعد با رسیدنِ پاسخِ تازه پرشِ محتوا.
+    //
+    // خروج در این برنامه ناوبریِ SPA است و نه بارگذاریِ دوبارهٔ صفحه، پس
+    // هیچ‌چیزِ دیگری این کش را پاک نمی‌کند.
+    queryClient.clear();
     // کش سرویس‌ورکر فقط پوستهٔ برنامه است و دادهٔ کاربر ندارد (پاسخ‌های /api اصلاً
     // کش نمی‌شوند)، ولی روی دستگاه مشترک، «هیچ ردی نماند» چیزی است که کاربر حق
     // دارد از دکمهٔ خروج انتظار داشته باشد.
     void clearAppCaches();
-  }, []);
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, refreshUser: fetchMe }}>
