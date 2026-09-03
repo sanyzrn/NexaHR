@@ -13,6 +13,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.clock import today_local
 from app.models.enums import Capability, PersonnelStatus, UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_access import EvaluationAccess
@@ -301,7 +302,7 @@ def create_personnel(
     end = _parse_date(contract_end_date)
     if end is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "تاریخ پایان قرارداد خوانده نشد (نمونه: 2026-01-01)")
-    start = _parse_date(contract_start_date) or date.today()
+    start = _parse_date(contract_start_date) or today_local()
     if end <= start:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "«پایان قرارداد» باید بعد از «شروع قرارداد» باشد")
     person = Personnel(
@@ -500,7 +501,7 @@ def separate_personnel(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "علت خروج نامعتبر است") from None
     person.status = PersonnelStatus.inactive
     person.separation_reason = reason
-    person.separation_date = _parse_date(separation_date) or date.today()
+    person.separation_date = _parse_date(separation_date) or today_local()
     db.flush()
 
     open_record = db.scalar(

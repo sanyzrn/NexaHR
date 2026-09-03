@@ -13,6 +13,7 @@
 """
 from datetime import date, timedelta
 
+from app.core.clock import today_local
 from app.models.enums import Capability, PeriodStatus
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_period import EvaluationPeriod
@@ -139,7 +140,7 @@ def test_an_account_without_personnel_is_told_why(client, db_session):
 # ── مهلتِ ثبت ───────────────────────────────────────────────────────────
 
 def test_self_assessment_is_refused_after_the_period_ended(client, db_session):
-    case = _open_case(client, db_session, period_ends=date.today() - timedelta(days=1))
+    case = _open_case(client, db_session, period_ends=today_local() - timedelta(days=1))
 
     response = client.post(
         f"/api/me/evaluations/{case['id']}/self-assessment",
@@ -157,7 +158,7 @@ def test_self_assessment_is_refused_after_the_period_ended(client, db_session):
 
 def test_the_evaluator_cannot_submit_scores_after_the_period_ended(client, db_session):
     """مهلت برای «ارزیابی تیم» هم هست، نه فقط خودارزیابی."""
-    case = _open_case(client, db_session, period_ends=date.today() - timedelta(days=1))
+    case = _open_case(client, db_session, period_ends=today_local() - timedelta(days=1))
     client.put(
         f"/api/evaluations/{case['id']}/scores",
         json={"scores": full_valid_scores(active_indicators(db_session))},
@@ -171,7 +172,7 @@ def test_the_evaluator_cannot_submit_scores_after_the_period_ended(client, db_se
 
 
 def test_a_period_that_is_still_running_blocks_nothing(client, db_session):
-    case = _open_case(client, db_session, period_ends=date.today() + timedelta(days=7))
+    case = _open_case(client, db_session, period_ends=today_local() + timedelta(days=7))
     response = client.post(
         f"/api/me/evaluations/{case['id']}/self-assessment",
         json=_payload(db_session, 3),
@@ -224,8 +225,8 @@ def test_the_window_closes_the_moment_it_is_used(client, db_session):
 # ── تمدید ───────────────────────────────────────────────────────────────
 
 def test_hr_can_reopen_one_case_after_the_deadline(client, db_session):
-    case = _open_case(client, db_session, period_ends=date.today() - timedelta(days=2))
-    new_deadline = date.today() + timedelta(days=3)
+    case = _open_case(client, db_session, period_ends=today_local() - timedelta(days=2))
+    new_deadline = today_local() + timedelta(days=3)
 
     extended = client.post(
         f"/api/evaluations/{case['id']}/extend-submission",
@@ -247,12 +248,12 @@ def test_hr_can_reopen_one_case_after_the_deadline(client, db_session):
 
 def test_an_extension_earlier_than_the_period_end_never_shortens_it(client, db_session):
     """«باز کردنِ دوباره» هیچ‌وقت نباید چیزی را ببندد."""
-    period_end = date.today() + timedelta(days=10)
+    period_end = today_local() + timedelta(days=10)
     case = _open_case(client, db_session, period_ends=period_end)
 
     client.post(
         f"/api/evaluations/{case['id']}/extend-submission",
-        json={"until": (date.today() - timedelta(days=1)).isoformat(), "reason": "اشتباهِ تایپی"},
+        json={"until": (today_local() - timedelta(days=1)).isoformat(), "reason": "اشتباهِ تایپی"},
         headers=auth_header(case["hr"]),
     )
 
@@ -262,20 +263,20 @@ def test_an_extension_earlier_than_the_period_end_never_shortens_it(client, db_s
 
 
 def test_an_extension_needs_a_reason(client, db_session):
-    case = _open_case(client, db_session, period_ends=date.today() - timedelta(days=1))
+    case = _open_case(client, db_session, period_ends=today_local() - timedelta(days=1))
     response = client.post(
         f"/api/evaluations/{case['id']}/extend-submission",
-        json={"until": date.today().isoformat(), "reason": ""},
+        json={"until": today_local().isoformat(), "reason": ""},
         headers=auth_header(case["hr"]),
     )
     assert response.status_code == 422
 
 
 def test_only_hr_can_extend(client, db_session):
-    case = _open_case(client, db_session, period_ends=date.today() - timedelta(days=1))
+    case = _open_case(client, db_session, period_ends=today_local() - timedelta(days=1))
     response = client.post(
         f"/api/evaluations/{case['id']}/extend-submission",
-        json={"until": date.today().isoformat(), "reason": "تلاش برای تمدیدِ خودی"},
+        json={"until": today_local().isoformat(), "reason": "تلاش برای تمدیدِ خودی"},
         headers=auth_header(case["sup"]),
     )
     assert response.status_code == 403
@@ -293,7 +294,7 @@ def test_extending_a_case_that_is_past_the_scoring_stage_is_refused(client, db_s
 
     response = client.post(
         f"/api/evaluations/{case['id']}/extend-submission",
-        json={"until": (date.today() + timedelta(days=5)).isoformat(), "reason": "دیر شد"},
+        json={"until": (today_local() + timedelta(days=5)).isoformat(), "reason": "دیر شد"},
         headers=auth_header(case["hr"]),
     )
     assert response.status_code == 400
@@ -319,7 +320,7 @@ def test_extending_a_case_that_had_no_deadline_never_closes_it(client, db_sessio
     extended = client.post(
         f"/api/evaluations/{case['id']}/extend-submission",
         json={
-            "until": (date.today() + timedelta(days=1)).isoformat(),
+            "until": (today_local() + timedelta(days=1)).isoformat(),
             "reason": "درخواستِ خودِ فرد برای مهلتِ بیشتر",
         },
         headers=auth_header(case["hr"]),

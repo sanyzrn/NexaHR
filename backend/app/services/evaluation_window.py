@@ -33,6 +33,7 @@ from datetime import date
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.clock import today_local
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_period import EvaluationPeriod
 
@@ -52,12 +53,12 @@ class Window:
 
     @property
     def is_open(self) -> bool:
-        return self.unlimited or date.today() <= self.closes_on
+        return self.unlimited or today_local() <= self.closes_on
 
     @property
     def days_left(self) -> int | None:
         """چند روز مانده. منفی یعنی گذشته."""
-        return None if self.closes_on is None else (self.closes_on - date.today()).days
+        return None if self.closes_on is None else (self.closes_on - today_local()).days
 
 
 def window_for(db: Session, record: EvaluationRecord) -> Window:

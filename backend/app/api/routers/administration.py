@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_capability
 from app.core.integrations import EDITABLE, EDITABLE_BY_KEY, POLICY, SECRET_KEYS
-from app.core.modules import MODULES, MODULES_BY_KEY
+from app.core.modules import MODULES, MODULES_BY_KEY, dependents_of
 from app.db.session import get_db
 from app.models.capability import UserCapability
 from app.models.enums import Capability, DeliveryChannel, UserRole
@@ -245,6 +245,9 @@ def list_modules(
             label=module.label,
             description=module.description,
             enabled=states[module.key],
+            requires=list(module.requires),
+            blocked_by=[r for r in module.requires if not states[r]],
+            dependents=list(dependents_of(module.key)),
         )
         for module in MODULES
     ]
@@ -284,11 +287,15 @@ def toggle_module(
     )
     db.commit()
 
+    states = module_states(db)
     return ModuleState(
         key=module.key,
         label=module.label,
         description=module.description,
         enabled=payload.enabled,
+        requires=list(module.requires),
+        blocked_by=[r for r in module.requires if not states[r]],
+        dependents=list(dependents_of(module.key)),
     )
 
 

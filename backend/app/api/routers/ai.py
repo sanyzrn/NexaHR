@@ -14,13 +14,15 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_capability
 from app.core.ai_providers import PROVIDERS, PROVIDERS_BY_ID
+from app.core.config import settings
 from app.core.crypto import decrypt, encrypt, masked
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.ai import (
     DEFAULT_INSTRUCTIONS,
@@ -416,8 +418,21 @@ async def upload_attachment(
     return _to_upload_read(upload)
 
 
+def resolve_daily_limit(access: AiUserAccess) -> int | None:
+    """سقفِ روزانهٔ مؤثرِ این حساب. `None` یعنی بی‌حد.
+
+    سه حالتِ ستون در یک جا تفسیر می‌شود تا «صفر یعنی چه» دو جواب نداشته باشد
+    (`models/ai.py` معنا را می‌گوید).
+    """
+    if access.daily_message_limit < 0:
+        return None
+    return access.daily_message_limit or settings.ai_daily_message_limit
+
+
 @router.post("/chat", response_model=AiChatResponse)
+@limiter.limit(settings.ai_chat_rate_limit)
 async def chat(
+    request: Request,
     payload: AiChatRequest,
     db: Session = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
@@ -433,7 +448,8 @@ async def chat(
             f"پیام از {config.max_user_chars} نویسه بلندتر است",
         )
 
-    if access.daily_message_limit:
+    daily_limit = resolve_daily_limit(access)
+    if daily_limit is not None:
         today = datetime.now(UTC) - timedelta(days=1)
         used = db.scalar(
             select(func.count())
@@ -445,10 +461,10 @@ async def chat(
                 AiMessage.created_at >= today,
             )
         )
-        if (used or 0) >= access.daily_message_limit:
+        if (used or 0) >= daily_limit:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
-                f"سقف روزانهٔ شما ({access.daily_message_limit} پیام) پر شده است.",
+                f"سقف روزانهٔ شما ({daily_limit} پیام) پر شده است.",
             )
 
     convo = (

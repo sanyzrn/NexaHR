@@ -37,7 +37,14 @@ interface ModuleState {
   key: string;
   label: string;
   description: string;
+  /** سوییچِ ذخیره‌شده — همان چیزی که مدیر انتخاب کرده، نه «واقعاً کار می‌کند». */
   enabled: boolean;
+  /** کلیدِ بخش‌هایی که این یکی بی آن‌ها بی‌معناست. */
+  requires: string[];
+  /** از میان آن‌ها، کدام‌ها همین حالا خاموش‌اند. تهی یعنی سوییچ آزاد است. */
+  blocked_by: string[];
+  /** عکسش: بخش‌هایی که خاموش‌کردنِ این یکی از کار می‌اندازدشان. */
+  dependents: string[];
 }
 
 /** برچسب فارسی هر مجوز، و — مهم‌تر — این‌که نداشتنش یعنی چه. */
@@ -360,12 +367,22 @@ function ModulesCard() {
     queryFn: async () => (await apiClient.get<ModuleState[]>("/administration/modules")).data,
   });
 
+  const labelOf = (key: string) => modules.find((m) => m.key === key)?.label ?? key;
+
   async function toggle(module: ModuleState) {
     if (module.enabled) {
+      // خاموش‌کردنِ والد، فرزندهای *روشن* را هم از کار می‌اندازد. این را باید
+      // پیش از تأیید گفت، نه بعدش: مدیر یک سوییچ می‌زند و سه بخش خاموش می‌شود.
+      const affected = module.dependents
+        .filter((key) => modules.find((m) => m.key === key)?.enabled)
+        .map(labelOf);
       const ok = await confirm({
         title: `خاموش کردن «${module.label}»؟`,
         description:
-          "هیچ داده‌ای حذف نمی‌شود — این بخش فقط از منو برداشته می‌شود و ثبت تازه در آن ممکن نخواهد بود. با روشن‌کردن دوباره، همه‌چیز برمی‌گردد.",
+          "هیچ داده‌ای حذف نمی‌شود — این بخش فقط از منو برداشته می‌شود و ثبت تازه در آن ممکن نخواهد بود. با روشن‌کردن دوباره، همه‌چیز برمی‌گردد." +
+          (affected.length
+            ? ` این بخش پیش‌نیازِ ${affected.map((l) => `«${l}»`).join("، ")} است، پس آن‌ها هم از کار می‌افتند.`
+            : ""),
         confirmLabel: "خاموش کن",
       });
       if (!ok) return;
@@ -404,6 +421,14 @@ function ModulesCard() {
                 <p className="mt-0.5 text-xs leading-relaxed text-gray-500">
                   {module.description}
                 </p>
+                {/* وابستگیِ خاموش، سوییچ را غیرفعال می‌کند و *دلیلش* را
+                    می‌گوید. سوییچِ خاکستریِ بی‌توضیح، خودش یک معما است. */}
+                {module.blocked_by.length > 0 && (
+                  <p className="mt-1.5 text-xs font-medium leading-relaxed text-amber-700">
+                    به {module.blocked_by.map((k) => `«${labelOf(k)}»`).join("، ")} نیاز دارد
+                    {module.enabled ? " و تا روشن‌نشدنِ آن بی‌اثر است" : ""}؛ اول آن را روشن کنید.
+                  </p>
+                )}
               </div>
               {/* سوییچ به‌جای تیک: چیزی که این‌جا عوض می‌شود یک *حالت* است
                   (این بخش روشن است یا خاموش)، نه یک انتخاب از فهرست. تیک برای
@@ -413,9 +438,19 @@ function ModulesCard() {
                 type="button"
                 role="switch"
                 aria-checked={module.enabled}
-                disabled={saving === module.key}
+                /* مانع فقط جلوی *روشن‌کردن* را می‌گیرد. بخشی که روشن مانده و
+                   والدش خاموش شده باید بشود خاموشش کرد — وگرنه مدیر با یک
+                   پیکربندیِ بی‌معنا گیر می‌افتد و راهِ بیرون‌آمدن ندارد. */
+                disabled={
+                  saving === module.key || (module.blocked_by.length > 0 && !module.enabled)
+                }
                 onClick={() => toggle(module)}
                 aria-label={`فعال بودن ${module.label}`}
+                title={
+                  module.blocked_by.length > 0 && !module.enabled
+                    ? `اول ${module.blocked_by.map((k) => `«${labelOf(k)}»`).join("، ")} را روشن کنید`
+                    : undefined
+                }
                 className={`relative flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                   module.enabled ? "bg-pulse-600" : "bg-gray-300"
                 }`}

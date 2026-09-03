@@ -7,11 +7,12 @@
 endpoint دستی و هم از زمان‌بند و هم در تست قابل استفاده باشند. با notify_once از اسپم
 جلوگیری می‌شود.
 """
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import today_local
 from app.core.config import settings
 from app.models.enums import (
     EvaluationStatus,
@@ -41,7 +42,7 @@ def _active_hr_ids(db: Session) -> list[int]:
 def run_contract_expiry_sweep(db: Session) -> int:
     """به HR برای هر پرسنل فعالِ رو به انقضا که ارزیابی بازی ندارد، یک‌بار (در پنجره
     dedup) هشدار می‌دهد. خروجی: تعداد اعلان ساخته‌شده."""
-    horizon = date.today() + timedelta(days=settings.contract_expiry_alert_days)
+    horizon = today_local() + timedelta(days=settings.contract_expiry_alert_days)
 
     open_evaluation_exists = (
         select(EvaluationRecord.id)
@@ -63,7 +64,7 @@ def run_contract_expiry_sweep(db: Session) -> int:
 
     hr_ids = _active_hr_ids(db)
     created = 0
-    today = date.today()
+    today = today_local()
     for personnel_id, full_name, end_date in expiring:
         days = (end_date - today).days
         when = f"{days} روز دیگر" if days >= 0 else f"{abs(days)} روز پیش (منقضی‌شده)"
@@ -197,7 +198,7 @@ def run_improvement_review_sweep(db: Session) -> int:
     """برای برنامه‌های بهبودِ بازی که تاریخ بازنگری‌شان نزدیک (یا گذشته) است، به HR و
     مسئول پیگیری یادآوری می‌فرستد. dedup_key شامل تاریخ بازنگری است تا با جابه‌جایی
     تاریخ دوباره فعال شود."""
-    horizon = date.today() + timedelta(days=settings.improvement_review_alert_days)
+    horizon = today_local() + timedelta(days=settings.improvement_review_alert_days)
     due_plans = db.scalars(
         select(ImprovementPlan).where(
             ImprovementPlan.status == ImprovementPlanStatus.open,
@@ -207,7 +208,7 @@ def run_improvement_review_sweep(db: Session) -> int:
 
     hr_ids = _active_hr_ids(db)
     created = 0
-    today = date.today()
+    today = today_local()
     for plan in due_plans:
         days = (plan.review_date - today).days
         when = f"{days} روز دیگر" if days >= 0 else f"{abs(days)} روز پیش (گذشته)"

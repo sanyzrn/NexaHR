@@ -1,7 +1,8 @@
 """تست‌های ممیزی نهایی: فیلترهای ترکیبی فهرست ارزیابی‌ها، خروجی‌های Excel جدید،
 endpoint واحدهای سازمانی و محافظ قفل‌نشدن حساب HR."""
-from datetime import date, timedelta
+from datetime import timedelta
 
+from app.core.clock import today_local
 from tests.helpers import (
     active_indicators,
     auth_header,
@@ -52,8 +53,8 @@ def test_evaluation_list_combinable_filters(client, db_session):
     assert eid not in fetch(org_unit="واحد ناموجود")
 
     # بازه تاریخ (امروز داخل بازه است؛ بازه گذشته آن را ندارد)
-    today = date.today().isoformat()
-    old = (date.today() - timedelta(days=30)).isoformat()
+    today = today_local().isoformat()
+    old = (today_local() - timedelta(days=30)).isoformat()
     assert eid in fetch(created_from=today, created_to=today)
     assert eid not in fetch(created_to=old)
 

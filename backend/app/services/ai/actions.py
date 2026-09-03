@@ -23,6 +23,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.clock import today_local
 from app.models.enums import Capability, PersonnelStatus, UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.org_unit import OrgUnit
@@ -30,6 +31,7 @@ from app.models.personnel import Personnel
 from app.models.user import User
 from app.schemas.auth import CurrentUser
 from app.services.audit import log_event
+from app.services.evaluation import ensure_no_open_chain_seat
 
 #: بلوکِ کنش را «آزادانه» پیدا می‌کنیم. مدل‌ها مقدمه می‌نویسند، برچسب را
 #: `json` می‌زنند، حروف بزرگ می‌گذارند یا فاصلهٔ اضافه دارند. سخت‌گیری این‌جا
@@ -256,14 +258,14 @@ def _do_find(db: Session, payload: dict, user: CurrentUser) -> str:
 def _do_create_personnel(db: Session, payload: dict, user: CurrentUser) -> str:
     if db.scalar(select(Personnel).where(Personnel.personnel_code == payload["personnel_code"])):
         raise HTTPException(400, "این کد پرسنلی از قبل ثبت شده است")
-    end = _parse_date(payload.get("contract_end_date")) or date(date.today().year + 1, 1, 1)
+    end = _parse_date(payload.get("contract_end_date")) or date(today_local().year + 1, 1, 1)
     person = Personnel(
         personnel_code=payload["personnel_code"],
         full_name=payload["full_name"],
         job_title=payload["job_title"],
         org_unit=payload["org_unit"],
         is_manager=payload["is_manager"],
-        contract_start_date=date.today(),
+        contract_start_date=today_local(),
         contract_end_date=end,
         status=PersonnelStatus.active,
     )
@@ -340,6 +342,10 @@ def _do_deactivate_user(db: Session, payload: dict, user: CurrentUser) -> str:
         raise HTTPException(404, "حسابی با این شناسه پیدا نشد")
     if account.id == user.id:
         raise HTTPException(400, "نمی‌توانید حساب خودتان را غیرفعال کنید")
+    # همان گاردی که `users.update_user` دارد. این مسیر endpoint را صدا نمی‌زند،
+    # پس اگر این‌جا نبود، همکار می‌توانست کاری بکند که پنل مدیریت ردش می‌کند —
+    # همان الگویی که ریشهٔ بیشترِ یافته‌های این ممیزی بود.
+    ensure_no_open_chain_seat(db, account.id, action="غیرفعال‌کردن این حساب")
     account.is_active = False
     log_event(
         db,

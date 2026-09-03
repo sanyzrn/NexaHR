@@ -1,3 +1,4 @@
+from app.core.clock import today_local
 from app.models.enums import Capability
 from tests.helpers import auth_header, make_access, make_personnel, make_user
 
@@ -102,7 +103,7 @@ def test_audit_log_filters_by_actor_personnel_and_org_unit(client, db_session):
 def test_audit_log_filters_by_contract_end_date(client, db_session):
     """میان‌بر «قرارداد رو به اتمام»: رویدادهای پرونده‌های پرسنلی که پایان قراردادشان
     در یک بازهٔ مشخص است، جدا از بقیه قابل مرور باشد."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     hr = make_user(db_session, "hr", capabilities=[Capability.view_audit_log])
     sup = make_user(db_session, "unit_supervisor")
@@ -110,11 +111,11 @@ def test_audit_log_filters_by_contract_end_date(client, db_session):
     ceo = make_user(db_session, "ceo")
     soon = make_personnel(
         db_session,
-        contract_end_date=date.today() + timedelta(days=10),
+        contract_end_date=today_local() + timedelta(days=10),
     )
     later = make_personnel(
         db_session,
-        contract_end_date=date.today() + timedelta(days=200),
+        contract_end_date=today_local() + timedelta(days=200),
     )
     make_access(db_session, soon, sup, dep, ceo)
     make_access(db_session, later, sup, dep, ceo)
@@ -128,8 +129,8 @@ def test_audit_log_filters_by_contract_end_date(client, db_session):
     r = client.get(
         "/api/audit-log",
         params={
-            "contract_end_from": date.today().isoformat(),
-            "contract_end_to": (date.today() + timedelta(days=30)).isoformat(),
+            "contract_end_from": today_local().isoformat(),
+            "contract_end_to": (today_local() + timedelta(days=30)).isoformat(),
         },
         headers=auth_header(hr),
     )

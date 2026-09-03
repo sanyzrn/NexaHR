@@ -8,9 +8,9 @@
 * حساب کاربری‌اش باز می‌ماند؛ کسی که اخراج شده فردا هم می‌توانست وارد شود.
 * علت خروج ثبت نمی‌شد. استعفا و اخراج و پایان قرارداد در گزارش HR یک چیز نیستند.
 """
-from datetime import date
 from io import BytesIO
 
+from app.core.clock import today_local
 from app.models.enums import EvaluationStatus, PersonnelStatus, SeparationReason
 from app.models.evaluation import EvaluationRecord
 from app.models.personnel import Personnel
@@ -56,7 +56,7 @@ def test_reason_and_date_are_recorded(client, db_session):
     body = response.json()
     assert body["separation_reason"] == "dismissal"
     # تاریخ داده نشده بود؛ امروز پیش‌فرض می‌شود تا ردیفی بدون تاریخ نماند.
-    assert body["separation_date"] == date.today().isoformat()
+    assert body["separation_date"] == today_local().isoformat()
 
 
 def test_coming_back_clears_the_separation(client, db_session):

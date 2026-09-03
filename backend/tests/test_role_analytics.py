@@ -14,6 +14,7 @@
 """
 import pytest
 
+from app.core.clock import today_local
 from app.models.enums import EvaluationStatus
 from app.models.evaluation import EvaluationRecord
 from tests.helpers import (
@@ -276,13 +277,13 @@ def test_a_thin_unit_is_counted_but_its_average_is_withheld(client, db_session):
 def test_contract_exposure_separates_expiring_from_unevaluated(client, db_session):
     """عدد مهم «چند نفر قراردادشان تمام می‌شود» نیست؛ «چند نفرشان بدون ارزیابی
     نهایی‌شده‌اند» است — یعنی تصمیم تمدید بدون داده گرفته می‌شود."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     ceo = make_user(db_session, "ceo")
     make_personnel(
         db_session,
         full_name="قرارداد رو به پایان",
-        contract_end_date=date.today() + timedelta(days=20),
+        contract_end_date=today_local() + timedelta(days=20),
     )
     db_session.commit()
 

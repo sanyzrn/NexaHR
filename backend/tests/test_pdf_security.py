@@ -123,11 +123,21 @@ def test_url_fetcher_blocks_paths_outside_templates_dir():
     assert "file_obj" in result or "string" in result
 
 
-def test_jalali_filter_converts_iso_dates():
+def test_jalali_filter_converts_iso_dates(monkeypatch):
+    """تاریخ و ساعتِ روی سند، به وقتِ *محلیِ* سازمان.
+
+    این ادعا عوض شد و عمداً: نسخهٔ قبلی ساعتِ دیواریِ UTC را می‌خواست
+    («۰۹:۳۰» برای `09:30+00:00`) و همان رفتارِ اشتباه را قفل می‌کرد. تهران
+    `UTC+3:30` است، پس همان لحظه ۱۳:۰۰ است — و برای نهایی‌شدنِ نزدیکِ نیمه‌شب،
+    نسخهٔ قبلی *روزِ اشتباه* را روی سندِ هش‌شده چاپ می‌کرد (`core/clock.py`).
+    """
+    from app.core.config import settings
     from app.services.pdf import to_jalali
 
-    # ۱ تیر ۱۴۰۵ = 2026-06-22
-    assert to_jalali("2026-06-22T09:30:00+00:00") == "۱۴۰۵/۰۴/۰۱ ساعت ۰۹:۳۰"
+    monkeypatch.setattr(settings, "org_timezone", "Asia/Tehran")
+
+    # ۱ تیر ۱۴۰۵ = 2026-06-22؛ ۰۹:۳۰ به‌وقتِ UTC = ۱۳:۰۰ به‌وقتِ تهران
+    assert to_jalali("2026-06-22T09:30:00+00:00") == "۱۴۰۵/۰۴/۰۱ ساعت ۱۳:۰۰"
     assert to_jalali(None) == "—"
     assert to_jalali("") == "—"
     # مقدار نامعتبر دست‌نخورده برمی‌گردد (snapshot های قدیمی)

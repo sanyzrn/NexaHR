@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import audit_log_reader, require_capability
+from app.core.clock import local_day_end, local_day_start
 from app.db.session import get_db
 from app.models.audit_log import AuditLog
 from app.models.enums import Capability
@@ -137,10 +138,10 @@ def _build_filters(
     if evaluation_record_id is not None:
         filters.append(AuditLog.evaluation_record_id == evaluation_record_id)
     if created_from is not None:
-        filters.append(AuditLog.created_at >= created_from)
+        filters.append(AuditLog.created_at >= local_day_start(created_from))
     if created_to is not None:
         # بازه شامل خودِ روز پایان است
-        filters.append(AuditLog.created_at < created_to + timedelta(days=1))
+        filters.append(AuditLog.created_at < local_day_end(created_to))
     if actor_user_id is not None:
         filters.append(AuditLog.actor_user_id == actor_user_id)
     if personnel_id is not None:

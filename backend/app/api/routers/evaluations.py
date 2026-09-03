@@ -1,5 +1,5 @@
 import secrets
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import Response
@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_chain_stage, require_roles
+from app.core.clock import local_day_end, local_day_start
 from app.db.session import get_db
 from app.models.audit_log import AuditLog
 from app.models.enums import (
@@ -525,11 +526,11 @@ def _apply_evaluation_filters(
     if org_unit:
         query = query.where(Personnel.org_unit == org_unit)
     if created_from is not None:
-        query = query.where(EvaluationRecord.created_at >= created_from)
+        query = query.where(EvaluationRecord.created_at >= local_day_start(created_from))
     if created_to is not None:
         # بازه شامل خودِ روز پایان است (created_at از نوع timestamp است)
         query = query.where(
-            EvaluationRecord.created_at < created_to + timedelta(days=1)
+            EvaluationRecord.created_at < local_day_end(created_to)
         )
     if min_final_pct is not None:
         query = query.where(EvaluationRecord.final_weighted_pct >= min_final_pct)
@@ -1541,16 +1542,26 @@ def add_comment(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> EvaluationComment:
-    record = _get_record_or_404(db, evaluation_id)
-
     # مسیر «پاسخ threaded»: پاسخ به یک کامنت سطح‌بالای موجود (مثلاً دلیل برگشت پرونده).
     # برخلاف کامنت سطح‌بالا که به مرحلهٔ بازبینی گره خورده، پاسخ را هر مشارکت‌کنندهٔ
     # مجاز به دیدن پرونده می‌تواند ثبت کند تا گفت‌وگوی رفت‌وبرگشتی روی برگشت ممکن شود.
     if payload.parent_comment_id is not None:
-        return _add_reply(db, record, payload, current_user)
+        return _add_reply(db, _get_record_or_404(db, evaluation_id), payload, current_user)
+
+    # کامنتِ سطح‌بالا یک *اقدامِ* مرحله است، نه یک یادداشت: با مرحلهٔ بازبینی
+    # برچسب می‌خورد و در سندِ نهاییِ هش‌شده چاپ می‌شود. پس از همان دری رد می‌شود
+    # که تأیید و برگشت رد می‌شوند — با قفلِ ردیف، چون مالکیتِ HR را هم می‌تواند
+    # عوض کند (پایین‌تر).
+    record = _get_record_or_404_for_update(db, evaluation_id)
+
+    # پروندهٔ خودِ کاربر، و پروندهٔ هم‌تیمیِ منابع انسانی تا وقتی باز است. این
+    # گارد در *هر* نقطهٔ دیگری که HR به پرونده دست می‌زند بود و این‌جا نبود، پس
+    # کارشناسی که پروندهٔ خودش را با ۴۰۳ نمی‌توانست *ببیند*، می‌توانست در آن
+    # کامنتِ رسمیِ «بررسی منابع انسانی» بنویسد — کامنتی که به سند می‌رسید.
+    ensure_hr_may_handle(record, current_user)
 
     stage_by_role = {
-        UserRole.hr: (CommentStage.hr_review, EvaluationStatus.submitted, None),
+        UserRole.hr: (CommentStage.hr_review, EvaluationStatus.submitted, record.hr_user_id),
         UserRole.deputy: (CommentStage.deputy_review, EvaluationStatus.hr_approved, record.deputy_user_id),
         UserRole.ceo: (CommentStage.ceo_final, EvaluationStatus.deputy_approved, record.ceo_user_id),
     }
@@ -1559,11 +1570,37 @@ def add_comment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="نقش شما اجازه ثبت کامنت ندارد")
 
     comment_stage, required_status, required_user_id = mapping
-    if record.status != required_status or (
-        required_user_id is not None and current_user.id != required_user_id
-    ):
+    if record.status != required_status:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="در این مرحله امکان ثبت کامنت برای شما وجود ندارد"
+        )
+    # صندلیِ معاونت و مدیرعامل از پیش پر است، پس «مالِ من نیست» یعنی رد. صندلیِ
+    # منابع انسانی از یک صفِ مشترک شروع می‌شود و خالی است — همان تفاوتی که
+    # `workflow.claimable_if_unassigned` برای تأیید و برگشت حلش کرده:
+    #
+    #   * خالی  → هر کارشناسِ HR می‌تواند، و با همان اقدام مالک می‌شود؛
+    #   * پرشده → فقط مالک.
+    #
+    # نتیجه همان قاعده‌ای است که خواسته شده («کامنتِ رسمی فقط از مسئولِ پرونده»)
+    # ولی *سخت‌گیرتر از تأیید نمی‌شود*: اگر کامنت مطالبهٔ claimِ قبلی می‌کرد،
+    # کارشناس می‌توانست پرونده را تأیید کند و نتواند رویش کامنت بگذارد.
+    if current_user.role is UserRole.hr and required_user_id is None:
+        record.hr_user_id = current_user.id
+        log_event(
+            db,
+            actor_user_id=current_user.id,
+            event_type="hr_case_claimed",
+            evaluation_record_id=record.id,
+            new_value={"hr_user_id": current_user.id, "implicit": True},
+        )
+    elif current_user.id != required_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "این پرونده در اختیار کاربر دیگری از منابع انسانی است"
+                if current_user.role is UserRole.hr
+                else "در این مرحله امکان ثبت کامنت برای شما وجود ندارد"
+            ),
         )
 
     comment = EvaluationComment(
