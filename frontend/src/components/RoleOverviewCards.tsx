@@ -15,9 +15,13 @@ const ACCENT_CLASS: Record<RoleOverviewTone, string> = {
 
 /** نوار کاشی‌های خلاصهٔ داشبورد نقش — بالای صفحهٔ اصلی هر نقش قرار می‌گیرد و یک نمای
  * سریع از کارهای در انتظار و وضعیت پرونده‌ها می‌دهد. داده از یک endpoint نقش‌محور
- * می‌آید، پس هر نقش کاشی‌های متناسب خودش را می‌بیند. */
-export function RoleOverviewCards() {
-  const { data, isLoading } = useRoleOverview();
+ * می‌آید، پس هر نقش کاشی‌های متناسب خودش را می‌بیند.
+ *
+ * `scope="self"` برای صفحهٔ «کارنامه من» است: آن صفحه را هر نقشی می‌تواند باز
+ * کند و نمای نقش‌محور آن‌جا حرفِ نامربوط می‌زد — مسئولِ واحد زیر عنوانِ
+ * «خودارزیابی من»، صفِ تیمش را می‌دید. */
+export function RoleOverviewCards({ scope = "role" }: { scope?: "role" | "self" } = {}) {
+  const { data, isLoading } = useRoleOverview(scope);
 
   if (isLoading) {
     return (

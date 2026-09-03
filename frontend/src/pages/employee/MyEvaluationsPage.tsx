@@ -330,7 +330,7 @@ export function MyEvaluationsPanel() {
 
   return (
     <div className="space-y-4">
-      {showOverview && <RoleOverviewCards />}
+      {showOverview && <RoleOverviewCards scope="self" />}
 
       {/* پروندهٔ در جریان بالاتر از نتایج گذشته می‌آید: مهم‌ترین چیزی که فرد
           همین حالا باید بداند، این است که تصمیمی دربارهٔ او در راه است. */}

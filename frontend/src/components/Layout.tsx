@@ -72,7 +72,7 @@ export function Layout() {
     return <Navigate to="/change-password" replace />;
   }
 
-  const items = navItemsFor(user.role, can, moduleEnabled);
+  const items = navItemsFor(user.role, can, moduleEnabled, user.personnel_id !== null);
   const active = items.find((item) => location.pathname.startsWith(item.to));
 
   function handleLogout() {

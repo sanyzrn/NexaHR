@@ -141,13 +141,19 @@ def employee_results_are_visible(db: Session) -> bool:
 
 
 def subject_user_ids(db: Session, personnel_id: int) -> list[int]:
-    """حساب‌های فعالِ کارمندیِ متصل به این پرسنل — گیرندهٔ اعلان‌های «دربارهٔ خودت»."""
+    """حساب‌های فعالِ متصل به این پرسنل — گیرندهٔ اعلان‌های «دربارهٔ خودت».
+
+    عمداً نقش سنجیده نمی‌شود. تا امروز `User.role == employee` بود، و نتیجه‌اش
+    این بود که مسئولِ واحد و کارمندِ منابع انسانی و معاونت — که خودشان هم
+    ارزیابی می‌شوند — هیچ‌وقت خبر نمی‌شدند که پروندهٔ *خودشان* نهایی شد.
+    «چه کسی ارزیابی می‌شود» با «چه نقشی در زنجیره دارد» یکی نیست؛ همان
+    تفکیکی که `require_own_personnel` در مسیرهای `/api/me` انجام داد.
+    """
     from app.models.user import User
 
     return list(
         db.scalars(
             select(User.id).where(
-                User.role == UserRole.employee,
                 User.personnel_id == personnel_id,
                 User.is_active.is_(True),
             )

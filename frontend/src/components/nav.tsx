@@ -207,11 +207,31 @@ export const NAV_BY_CAPABILITY: NavItem[] = [
   },
 ];
 
+/** لینکِ «کارنامه من» — به نقش گره نخورده، به داشتنِ پروندهٔ پرسنلی.
+ *
+ *  در جدولِ نقش‌محور فقط زیر `employee` بود، و آن یعنی مسئولِ واحد و معاونت و
+ *  مدیرعامل و کارمندِ منابع انسانی — که همه‌شان *خودشان هم ارزیابی می‌شوند* —
+ *  هیچ راهی به نتیجهٔ خودشان نداشتند. کارمندانِ منابع انسانی سخت‌ترین حالتش
+ *  بودند: کلِ ماشینِ `hr_review_skipped` و `objection_resolver_field` برای
+ *  ارزیابیِ همین آدم‌ها نوشته شده، و همان آدم‌ها نه نتیجه را می‌دیدند، نه
+ *  می‌توانستند رؤیت بزنند، نه از مسیرِ اعتراضی که کد به‌دقت به معاونت یا
+ *  مدیرعامل می‌بَرد استفاده کنند.
+ *
+ *  `SupervisorHomePage` این کمبود را با جاسازیِ `MyEvaluationsPanel` در یک
+ *  تبِ دوم دور می‌زد؛ صفحهٔ معاونت و مدیرعامل و منابع انسانی چنین چیزی
+ *  نداشتند. یک لینک برای همه، جای چهار وصله. */
+const MY_SCORECARD: NavItem = {
+  to: "/me",
+  label: "کارنامه من",
+  icon: ICONS.scorecard,
+};
+
 /** فهرست نهاییِ لینک‌ها برای این کاربر — نقش، سپس مجوزها، بدون تکرار. */
 export function navItemsFor(
   role: string,
   can: (capability: Capability) => boolean,
-  moduleEnabled: (module: string) => boolean
+  moduleEnabled: (module: string) => boolean,
+  hasOwnPersonnel = false
 ): NavItem[] {
   const items = (NAV_BY_ROLE[role] ?? []).filter(
     (item) => item.module === undefined || moduleEnabled(item.module)
@@ -222,6 +242,9 @@ export function navItemsFor(
     if (!item.anyCapability?.some(can)) continue;
     items.push(item);
     seen.add(item.to);
+  }
+  if (hasOwnPersonnel && !seen.has(MY_SCORECARD.to)) {
+    items.push(MY_SCORECARD);
   }
   return items;
 }

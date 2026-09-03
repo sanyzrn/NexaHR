@@ -563,16 +563,61 @@ def _fa(value: int) -> str:
     return str(value).translate(_FA_DIGITS)
 
 
+def _self_cards(db: Session, personnel_id: int) -> list[RoleOverviewCard]:
+    """کاشی‌های «پروندهٔ خودم» — مستقل از نقش.
+
+    پیش از این داخلِ شاخهٔ `role == employee` بود، و پنلِ «خودارزیابی من»
+    همین endpoint را بی‌پارامتر صدا می‌زد. یعنی مسئولِ واحد در تبی به نامِ
+    «خودارزیابی من»، صفِ *تیمش* را می‌دید — و هیچ‌جای آن صفحه نتیجهٔ خودش را.
+    """
+    mine = EvaluationRecord.subject_personnel_id == personnel_id
+    avg = db.scalar(select(func.avg(EvaluationRecord.final_weighted_pct)).where(mine, _FINALIZED))
+    return [
+        RoleOverviewCard(
+            key="finalized",
+            label="ارزیابی‌های نهایی‌شده",
+            value=_count_records(db, mine, _FINALIZED),
+            tone="neutral",
+        ),
+        RoleOverviewCard(
+            key="avg",
+            label="میانگین امتیاز نهایی (٪)",
+            value=round(float(avg), 1) if avg is not None else 0,
+            tone="green",
+        ),
+        RoleOverviewCard(
+            key="pending_ack",
+            # «رؤیت» در گفتار اداری یعنی «دیدم»، ولی کارمند آن را «قبول دارم»
+            # می‌خواند. متن‌های رو به کارمند عمداً از این واژه پرهیز می‌کنند؛
+            # برچسب‌های لاگ ممیزی که HR می‌خواند دست‌نخورده‌اند.
+            label="هنوز ندیده‌اید",
+            value=_count_records(db, mine, _FINALIZED, EvaluationRecord.acknowledged_at.is_(None)),
+            tone="amber",
+        ),
+    ]
+
+
 @router.get("/role-overview", response_model=RoleOverview)
 def role_overview(
+    scope: str = Query(default="role", pattern="^(role|self)$"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> RoleOverview:
     """کاشی‌های خلاصهٔ داشبورد، متناسب با نقشِ کاربرِ واردشده — تا هر نقش در صفحهٔ
-    اصلی خود یک نمای سریع از کارهای در انتظار و وضعیت پرونده‌هایش داشته باشد."""
+    اصلی خود یک نمای سریع از کارهای در انتظار و وضعیت پرونده‌هایش داشته باشد.
+
+    `scope=self` نقش را نادیده می‌گیرد و کاشی‌های «پروندهٔ خودم» را می‌دهد —
+    برای صفحهٔ «کارنامه من» که هر نقشی می‌تواند بازش کند. بی این پارامتر، آن
+    صفحه برای مسئولِ واحد صفِ تیمش را نشان می‌داد.
+    """
     uid = current_user.id
     role = current_user.role
     cards: list[RoleOverviewCard] = []
+
+    if scope == "self":
+        if current_user.personnel_id is None:
+            return RoleOverview(role=role.value, cards=[])
+        return RoleOverview(role=role.value, cards=_self_cards(db, current_user.personnel_id))
 
     if role == UserRole.unit_supervisor:
         subordinates = (
@@ -725,35 +770,6 @@ def role_overview(
             ),
         ]
     elif role == UserRole.employee and current_user.personnel_id is not None:
-        pid = current_user.personnel_id
-        mine = EvaluationRecord.subject_personnel_id == pid
-        avg = db.scalar(
-            select(func.avg(EvaluationRecord.final_weighted_pct)).where(mine, _FINALIZED)
-        )
-        cards = [
-            RoleOverviewCard(
-                key="finalized",
-                label="ارزیابی‌های نهایی‌شده",
-                value=_count_records(db, mine, _FINALIZED),
-                tone="neutral",
-            ),
-            RoleOverviewCard(
-                key="avg",
-                label="میانگین امتیاز نهایی (٪)",
-                value=round(float(avg), 1) if avg is not None else 0,
-                tone="green",
-            ),
-            RoleOverviewCard(
-                key="pending_ack",
-                # «رؤیت» در گفتار اداری یعنی «دیدم»، ولی کارمند آن را «قبول
-                # دارم» می‌خواند. متن‌های رو به کارمند عمداً از این واژه پرهیز
-                # می‌کنند؛ برچسب‌های لاگ ممیزی که HR می‌خواند دست‌نخورده‌اند.
-                label="هنوز ندیده‌اید",
-                value=_count_records(
-                    db, mine, _FINALIZED, EvaluationRecord.acknowledged_at.is_(None)
-                ),
-                tone="amber",
-            ),
-        ]
+        cards = _self_cards(db, current_user.personnel_id)
 
     return RoleOverview(role=role.value, cards=cards)

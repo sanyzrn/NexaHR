@@ -1437,9 +1437,15 @@ def evaluation_summary_pdf(
     # کسی که می‌توانست کارنامهٔ هش‌شده و قابل‌تأیید یک نفر را دانلود کند HR بود —
     # یعنی فرد سندی را که دربارهٔ اوست در اختیار نداشت و برای هر استفادهٔ بعدی
     # (اعتراض، پروندهٔ حقوقی، کارفرمای بعدی) باید از سازمان درخواست می‌کرد.
+    # «سوژه بودن» به نقش کاری ندارد — همان تفکیکی که `require_own_personnel`
+    # برای مسیرهای `/api/me` انجام داد و این‌جا جا افتاده بود. با شرطِ نقش،
+    # مسئولِ واحد یا کارمندِ منابع انسانی که *خودش* موضوعِ پرونده است، سندِ
+    # مربوط به خودش را ۴۰۳ می‌گرفت — و بدتر، پیامی می‌دید دربارهٔ «رسیدگی به
+    # پروندهٔ خود» که به درخواستش ربطی نداشت (`ensure_not_deciding_about_oneself`
+    # در ادامهٔ مسیر). و کارمندانِ منابع انسانی دقیقاً همان کسانی‌اند که کلِ
+    # ماشینِ `hr_review_skipped`/`objection_resolver_field` برایشان نوشته شده.
     is_subject = (
-        current_user.role == UserRole.employee
-        and current_user.personnel_id is not None
+        current_user.personnel_id is not None
         and current_user.personnel_id == record.subject_personnel_id
     )
     if not is_subject:

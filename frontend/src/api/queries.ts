@@ -278,10 +278,14 @@ export function usePersonTrend(personnelId: number | null) {
   });
 }
 
-export function useRoleOverview() {
+/** کاشی‌های خلاصه. `scope="self"` نقش را نادیده می‌گیرد و «پروندهٔ خودم» را
+ *  می‌دهد — لازم است چون صفحهٔ «کارنامه من» را هر نقشی می‌تواند باز کند و
+ *  نمای نقش‌محور آن‌جا صفِ *تیم* را نشان می‌داد، نه نتیجهٔ خودِ فرد. */
+export function useRoleOverview(scope: "role" | "self" = "role") {
   return useQuery({
-    queryKey: ["dashboard", "role-overview"],
-    queryFn: async () => (await apiClient.get<RoleOverview>("/dashboard/role-overview")).data,
+    queryKey: ["dashboard", "role-overview", scope],
+    queryFn: async () =>
+      (await apiClient.get<RoleOverview>("/dashboard/role-overview", { params: { scope } })).data,
     staleTime: 30_000,
   });
 }
