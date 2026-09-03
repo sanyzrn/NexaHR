@@ -32,7 +32,7 @@ from app.services.self_assessment import OPEN_STATUSES as SELF_ASSESSMENT_OPEN_S
 from app.services.self_assessment import invite as invite_to_self_assessment_service
 from app.services.self_assessment import state_of as self_assessment_state
 from app.services.sessions import revoke_all_for_user
-from app.services.workflow import IS_OPEN_RECORD, apply_transition
+from app.services.workflow import IS_OPEN_RECORD, apply_transition, scorer_field
 
 router = APIRouter(prefix="/api/personnel", tags=["personnel"])
 
@@ -168,18 +168,11 @@ def _with_accounts(db: Session, rows: list[Personnel]) -> list[PersonnelRead]:
 
 
 def _scored_by(access) -> str | None:
-    """کدام صندلیِ زنجیره به این فرد نمره می‌دهد.
-
-    قرینهٔ `workflow._scorer_seat` روی *دسترسی* به‌جای پرونده: زنجیره از پایین
-    خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است.
-    """
+    """کدام صندلیِ زنجیره به این فرد نمره می‌دهد — همان قاعدهٔ `scorer_field`."""
     if access is None:
         return None
-    if access.unit_supervisor_user_id is not None:
-        return "unit_supervisor"
-    if access.deputy_user_id is not None:
-        return "deputy"
-    return "ceo"
+    field = scorer_field(access.unit_supervisor_user_id, access.deputy_user_id)
+    return field.removesuffix("_user_id")
 
 
 @router.get("", response_model=PersonnelPage)

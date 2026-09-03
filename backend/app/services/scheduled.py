@@ -29,7 +29,7 @@ from app.services.documents import archive_final_pdf
 from app.services.login_guard import purge_stale
 from app.services.notifications import notify_once
 from app.services.pdf import weasyprint_available
-from app.services.workflow import IS_OPEN_RECORD
+from app.services.workflow import IS_OPEN_RECORD, owner_after_hr_review, scorer_seat
 
 
 def _active_hr_ids(db: Session) -> list[int]:
@@ -85,14 +85,29 @@ def run_contract_expiry_sweep(db: Session) -> int:
 
 
 def _current_owner_ids(db: Session, record: EvaluationRecord) -> list[int]:
-    is_manager_path = record.unit_supervisor_user_id is None
+    """چه کسی *الان* روی این پرونده باید اقدام کند.
+
+    صاحبِ هر مرحله از شکلِ زنجیره می‌آید و نه فقط از وضعیت — و همین تفاوت،
+    سه خرابیِ جدا می‌ساخت (`tests/test_scheduled.py`):
+
+    * `hr_approved` بی‌قید «معاونت» فرض می‌شد. زنجیرهٔ بی‌معاونت از همین
+      وضعیت مستقیم به مدیرعامل می‌رود، پس تابع `[None]` می‌داد و
+      `notifications.user_id` — ستونی NOT NULL — کلِ جاروی شبانه را با
+      NotNullViolation می‌بُرد.
+    * جاروی پرونده‌های بی‌صاحب همان `[None]` را می‌گرفت، هیچ کاربر فعالی
+      برایش پیدا نمی‌کرد، و پروندهٔ سالم را به منابع انسانی «گیرکرده» گزارش
+      می‌داد — هر بار که اجرا می‌شد.
+    * `draft` با «مسئول واحد، وگرنه معاونت» حساب می‌شد؛ در زنجیرهٔ مستقیمِ
+      مدیرعامل هر دو خالی‌اند، پس فهرستِ تهی برمی‌گشت و آن پرونده هیچ‌وقت
+      یادآوری نمی‌گرفت.
+    """
     if record.status == EvaluationStatus.draft:
-        owner = record.deputy_user_id if is_manager_path else record.unit_supervisor_user_id
-        return [owner] if owner is not None else []
+        _, scorer_id = scorer_seat(record)
+        return [scorer_id] if scorer_id is not None else []
     if record.status == EvaluationStatus.submitted:
         return _active_hr_ids(db)
     if record.status == EvaluationStatus.hr_approved:
-        return [record.deputy_user_id]
+        return [owner_after_hr_review(record)]
     if record.status == EvaluationStatus.deputy_approved:
         return [record.ceo_user_id]
     return []

@@ -173,7 +173,7 @@ def submit_self_assessment(
     یک‌بار ثبت می‌شود و قفل می‌ماند: اگر بعد از دیدن نمرهٔ ارزیاب قابل ویرایش بود،
     دیگر دیدگاه مستقلی نبود.
     """
-    record = _my_record_or_404(db, evaluation_id, current_user)
+    record = _my_record_or_404(db, evaluation_id, current_user, for_update=True)
 
     # قاعدهٔ «چه کسی خودارزیابی دارد» یک جا زندگی می‌کند
     # (`services/self_assessment.may_self_assess`): همه، به‌جز مدیرعامل و
@@ -266,13 +266,29 @@ def _self_assessment_of(db: Session, record: EvaluationRecord) -> SelfAssessment
 
 
 def _my_record_or_404(
-    db: Session, evaluation_id: int, current_user: CurrentUser
+    db: Session, evaluation_id: int, current_user: CurrentUser, *, for_update: bool = False
 ) -> EvaluationRecord:
     """پروندهٔ خود کارمند، یا ۴۰۴.
 
     پرونده دیگران عمداً 404 برمی‌گردد (نه 403) تا وجودش هم لو نرود.
+
+    `for_update` برای مسیرهای *نوشتن* است و همان قفلِ ردیفی را می‌گیرد که مسیر
+    گردش‌کار از ابتدا داشت (`evaluations._get_record_or_404_for_update`). بی آن،
+    «بخوان، بسنج، بنویس» اتمی نبود و دو درخواستِ هم‌زمان — یک تلاشِ دوباره پس از
+    تایم‌اوت، یا دو تب — هر دو از شرطِ «قبلاً ثبت شده؟» رد می‌شدند. برای
+    خودارزیابی نتیجه‌اش ۵۰۰ بود: قیدِ یکتای
+    `uq_self_assessment_record_indicator` ردیفِ دوم را می‌گرفت و
+    `IntegrityError` بی‌هیچ گیرنده‌ای بالا می‌رفت — به‌جای همان «قبلاً ثبت شده»ی
+    تمیزی که یک خط بالاتر نوشته شده بود.
     """
-    record = db.get(EvaluationRecord, evaluation_id)
+    if for_update:
+        record = db.scalar(
+            select(EvaluationRecord)
+            .where(EvaluationRecord.id == evaluation_id)
+            .with_for_update(of=EvaluationRecord)
+        )
+    else:
+        record = db.get(EvaluationRecord, evaluation_id)
     if (
         record is None
         or current_user.personnel_id is None
@@ -298,7 +314,7 @@ def file_objection(
     نتیجه را تغییر نمی‌دهد: سند نهایی و هشِ آن دست‌نخورده می‌مانند. اعتراض یک رکورد
     موازی است که HR باید به آن رسیدگی و پاسخش را ثبت کند.
     """
-    record = _my_record_or_404(db, evaluation_id, current_user)
+    record = _my_record_or_404(db, evaluation_id, current_user, for_update=True)
 
     if record.status != EvaluationStatus.finalized:
         raise HTTPException(
@@ -373,7 +389,7 @@ def acknowledge_evaluation(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_own_personnel),
 ) -> EvaluationRecord:
-    record = _my_record_or_404(db, evaluation_id, current_user)
+    record = _my_record_or_404(db, evaluation_id, current_user, for_update=True)
     if record.status != EvaluationStatus.finalized:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

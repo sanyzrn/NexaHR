@@ -163,3 +163,56 @@ def test_the_endpoint_is_closed_to_everyone_but_hr(client, db_session, chain):
         client.get("/api/dashboard/stage-stats", headers=auth_header(chain["hr"])).status_code
         == 200
     )
+
+
+def test_the_owner_breakdown_counts_manager_and_ceo_paths(client, db_session):
+    """تفکیکِ «دستِ کی» نباید دو شکلِ سالمِ زنجیره را از قلم بیندازد.
+
+    نگاشتِ ثابتِ قبلی صاحبِ `draft` را همیشه «مسئول واحد» می‌گرفت. در مسیر
+    «مدیر» و مسیرِ مستقیمِ مدیرعامل آن ستون خالی است، پس ردیفِ صاحب `None`
+    می‌شد و پرونده از تفکیک حذف می‌شد — در حالی که در جمعِ کلِ همان مرحله
+    شمرده شده بود. جدولی که کارش پیدا کردنِ گلوگاه است، پروندهٔ مدیران را
+    نشان نمی‌داد.
+    """
+    from app.models.evaluation_access import EvaluationAccess
+
+    dep = make_user(db_session, "deputy", capabilities=[])
+    ceo = make_user(db_session, "ceo", capabilities=[])
+    manager = make_personnel(db_session, full_name="مدیرِ زیرِ معاونت", is_manager=True)
+    direct = make_personnel(db_session, full_name="مستقیمِ مدیرعامل")
+    db_session.add_all(
+        [
+            EvaluationAccess(
+                personnel_id=manager.id,
+                unit_supervisor_user_id=None,
+                deputy_user_id=dep.id,
+                ceo_user_id=ceo.id,
+            ),
+            EvaluationAccess(
+                personnel_id=direct.id,
+                unit_supervisor_user_id=None,
+                deputy_user_id=None,
+                ceo_user_id=ceo.id,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    for actor, person in ((dep, manager), (ceo, direct)):
+        created = client.post(
+            "/api/evaluations",
+            json={"subject_personnel_id": person.id},
+            headers=auth_header(actor),
+        )
+        assert created.status_code == 201, created.text
+    db_session.commit()
+
+    rows = stage_stats(db_session)
+    draft = next(r for r in rows if r["status"] == "draft")
+    assert draft["active"] == 2
+    # و هر دو در تفکیکِ صاحب هم دیده می‌شوند، هر کدام پای صندلیِ درستش.
+    # «—» یعنی صاحبی پیدا نشد؛ پیش از این *هر دو* ردیف همین بودند.
+    named = {row["name"]: row for row in draft["by_owner"]}
+    assert "—" not in named, f"صاحبِ نامعلوم در تفکیک: {draft['by_owner']}"
+    assert (dep.full_name or dep.username) in named, "پروندهٔ مسیر «مدیر» از تفکیک افتاده بود"
+    assert (ceo.full_name or ceo.username) in named, "پروندهٔ مستقیمِ مدیرعامل از تفکیک افتاده بود"

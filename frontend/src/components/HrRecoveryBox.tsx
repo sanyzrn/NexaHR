@@ -20,6 +20,15 @@ const STAGE_OPTIONS: { field: StageField; label: string; role: UserRole }[] = [
   { field: "ceo_user_id", label: "مدیرعامل", role: "ceo" },
 ];
 
+/** مرحله‌هایی که در *این* پرونده واقعاً وجود دارند و می‌شود مسئولشان را عوض کرد. */
+export function reassignableStages(evaluation: {
+  unit_supervisor_user_id: number | null;
+  deputy_user_id: number | null;
+  ceo_user_id: number;
+}) {
+  return STAGE_OPTIONS.filter((o) => evaluation[o.field] !== null);
+}
+
 const inputClass =
   "w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition-all focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10";
 
@@ -179,10 +188,15 @@ function ReassignPanel({
   onCancel: () => void;
 }) {
   const { showSuccess, showError } = useToast();
-  // مسیر «مدیر» مسئول واحد ندارد، پس آن گزینه اصلاً نباید نمایش داده شود
-  const options = STAGE_OPTIONS.filter(
-    (o) => !(o.field === "unit_supervisor_user_id" && evaluation.unit_supervisor_user_id === null),
-  );
+  // مرحله‌ای که کسی در آن ننشسته، اصلاً *وجود ندارد* و قابل بازتخصیص نیست —
+  // سرور هم همین را با ۴۰۰ می‌گوید.
+  //
+  // شرطِ قبلی فقط «مسئول واحد» را می‌سنجید، پس زنجیرهٔ بی‌معاونت — شکلی که
+  // فرمِ دسترسی صریحاً پیشنهادش می‌دهد — «معاونت» را در فهرست نگه می‌داشت:
+  // منابع انسانی انتخاب می‌کرد، دلیل می‌نوشت، و خطایی می‌گرفت که مسیرِ
+  // اشتباهی را هم مقصر می‌دانست. صندلیِ مدیرعامل هیچ‌وقت خالی نیست، پس
+  // فهرست هرگز تهی نمی‌شود.
+  const options = reassignableStages(evaluation);
   const [stageField, setStageField] = useState<StageField>(options[0]!.field);
   const [newUserId, setNewUserId] = useState<number | "">("");
   const [reason, setReason] = useState("");

@@ -14,6 +14,7 @@ from app.core.text_limits import (
     SELF_ASSESSMENT_SUMMARY_MAX,
 )
 from app.models.enums import CommentStage, EvaluationStage, EvaluationStatus
+from app.schemas.common import AppConfig
 
 # مرحله نمایشی از وضعیت مشتق می‌شود؛ ستون جداگانه‌ای در دیتابیس ندارد (G1 در PROJECT_AUDIT).
 _STAGE_BY_STATUS: dict[EvaluationStatus, EvaluationStage] = {
@@ -192,6 +193,15 @@ class EvaluationRead(BaseModel):
 
 
 class EvaluationDetail(EvaluationRead):
+    #: قواعدِ نمره‌دهیِ *این* پرونده — از `scoring_scheme_id` خودش، نه از طرح فعال.
+    #:
+    #: سرور از ابتدا با همین‌ها می‌سنجید (`rules_for_record`)، ولی فرم قواعدش را
+    #: از `/api/config` می‌گرفت که همیشه طرح *فعال* را می‌دهد. تا وقتی طرحی عوض
+    #: نشده بود این دو یکی بودند؛ لحظه‌ای که منابع انسانی وسط چرخه طرح تازه‌ای
+    #: فعال می‌کرد، پرونده‌های باز دو قاعده پیدا می‌کردند: فرم با قاعدهٔ امروز
+    #: تیک سبز می‌داد و سرور با قاعدهٔ خودِ پرونده ثبت را رد می‌کرد — یا برعکس،
+    #: فرم چیزی را می‌بست که سرور می‌پذیرفت.
+    scoring_rules: AppConfig | None = None
     scores: list[ScoreRead] = []
     comments: list[CommentRead] = []
     # خودارزیابی کنار امتیاز ارزیاب دیده می‌شود تا فاصله‌ها موضوع گفت‌وگو شوند.

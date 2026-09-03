@@ -501,6 +501,59 @@ def skips_deputy(record: EvaluationRecord) -> bool:
     return record.deputy_user_id is None
 
 
+#: نقشِ هر صندلیِ زنجیره، و نامش در متنِ فارسی. کلید، نامِ ستون است.
+SEAT_ROLE: dict[str, UserRole] = {
+    "unit_supervisor_user_id": UserRole.unit_supervisor,
+    "deputy_user_id": UserRole.deputy,
+    "ceo_user_id": UserRole.ceo,
+}
+SEAT_LABEL: dict[str, str] = {
+    "unit_supervisor_user_id": "مسئول واحد",
+    "deputy_user_id": "معاونت",
+    "ceo_user_id": "مدیرعامل",
+}
+
+
+def scorer_field(unit_supervisor_user_id: int | None, deputy_user_id: int | None) -> str:
+    """کدام ستون، نمره‌دهندهٔ اول را نگه می‌دارد.
+
+    زنجیره از *پایین* خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده
+    است: مسئول واحد، وگرنه معاونت (مسیر «مدیر»)، وگرنه خودِ مدیرعامل (کسی که
+    بالای سرش دیگر کسی نیست).
+
+    دو نکته که این تابع را لازم می‌کنند:
+
+    * هم روی *پرونده* کار می‌کند و هم روی *دسترسی* — چون هر دو همین دو ستون
+      را دارند. پیش از این هر مصرف‌کننده نسخهٔ خودش را داشت و دو تای‌شان با
+      `personnel.is_manager` تصمیم می‌گرفتند، پرچمی که قرار نیست شکلِ زنجیره
+      را بگوید.
+    * پاسخ هیچ‌وقت `None` نیست. مصرف‌کننده‌هایی که «مسئول واحد، وگرنه معاونت»
+      می‌نوشتند برای زنجیرهٔ مستقیمِ مدیرعامل `None` می‌گرفتند و بی‌صدا
+      می‌شکستند — یکی‌شان با NotNullViolation، وسط جاروی شبانه.
+    """
+    if unit_supervisor_user_id is not None:
+        return "unit_supervisor_user_id"
+    if deputy_user_id is not None:
+        return "deputy_user_id"
+    return "ceo_user_id"
+
+
+def scorer_seat(record: EvaluationRecord) -> tuple[UserRole, int | None]:
+    """(نقشِ مرحله، شناسهٔ نمره‌دهنده) برای این پرونده."""
+    field = scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
+    return SEAT_ROLE[field], getattr(record, field)
+
+
+def owner_after_hr_review(record: EvaluationRecord) -> int:
+    """نفرِ بعد از مرحلهٔ منابع انسانی: معاونت، و اگر نباشد خودِ مدیرعامل.
+
+    زنجیره می‌تواند معاونت نداشته باشد و آن‌وقت `ceo_finalize` مستقیماً از
+    `hr_approved` اجرا می‌شود. هر جا که بی این تابع «معاونت» فرض شده بود،
+    برای آن زنجیره‌ها به `None` می‌رسید.
+    """
+    return record.deputy_user_id or record.ceo_user_id
+
+
 def objection_resolver_field(record: EvaluationRecord) -> str | None:
     """چه کسی به اعتراضِ این پرونده پاسخ می‌دهد. `None` یعنی منابع انسانی.
 

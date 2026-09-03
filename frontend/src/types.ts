@@ -110,7 +110,8 @@ export interface EvaluationAccess {
   id: number;
   personnel_id: number;
   unit_supervisor_user_id: number | null;
-  deputy_user_id: number;
+  /** `null` یعنی این فرد معاونتی بالای سرش ندارد — بک‌اند از ابتدا nullable بود. */
+  deputy_user_id: number | null;
   ceo_user_id: number;
   updated_by_user_id: number | null;
   updated_at: string;
@@ -293,6 +294,15 @@ export interface EvaluationCommentRow {
 }
 
 export interface EvaluationDetail extends EvaluationRecord {
+  /** قواعدِ نمره‌دهیِ *این* پرونده — از طرحِ خودش، نه از طرحِ فعالِ امروز.
+   *
+   *  همان دلیلِ `indicator_ids` یک پله جلوتر: فرم تا امروز قواعدش را از
+   *  `/api/config` می‌گرفت که همیشه طرحِ فعال را می‌دهد. لحظه‌ای که منابع
+   *  انسانی وسط چرخه طرح تازه‌ای فعال می‌کرد، فرم و سرور دو قاعده پیدا
+   *  می‌کردند — تیک سبزِ فرم و ردِ سرور، یا برعکس.
+   *
+   *  `null` فقط برای پاسخ‌های قدیمیِ کش‌شده؛ آن‌وقت به `/api/config` برمی‌گردیم. */
+  scoring_rules?: AppConfig | null;
   scores: EvaluationScoreRow[];
   comments: EvaluationCommentRow[];
   // دیدگاه خودِ فرد، کنار امتیاز ارزیاب. null یعنی چیزی ثبت نکرده (کاملاً مجاز).

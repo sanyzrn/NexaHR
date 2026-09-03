@@ -152,11 +152,36 @@ def compute_result(
 
     general_pct = round((general_sum / general_max) * 100, 1) if general_max else 0.0
     specialized_pct = round((specialized_sum / specialized_max) * 100, 1) if specialized_max else 0.0
-    base_pct = round(
-        general_pct * rules.general_section_weight
-        + specialized_pct * rules.specialized_section_weight,
-        1,
-    )
+
+    # وزنِ بخشی که *در این پرونده هیچ شاخصی ندارد* بین بخش‌های موجود پخش می‌شود.
+    #
+    # بدون این، بخشِ غایب با درصدِ صفر وارد جمع می‌شد و سقفِ نمره را به سهمِ
+    # خودش پایین می‌آورد: چارچوبی که فقط شاخصِ «عمومی» دارد، به کسی که به هر
+    # سؤال ۵ داده ۶۰ می‌داد — و ۶۰ در جدولِ آستانه‌ها «تمدید مشروط به برنامهٔ
+    # بهبود» است. با فقط شاخصِ «تخصصی» عدد ۴۰ می‌شد، یعنی «عدم تمدید». نمرهٔ
+    # کامل، پیشنهادِ اخراج.
+    #
+    # و رسیدن به آن حالت کارِ سختی نبود: هیچ گاردی جلوی خالی‌شدنِ یک بخش را
+    # نمی‌گیرد (`indicators.delete_indicator` فقط شاخصِ نمره‌خورده را نگه
+    # می‌دارد)، و پرونده‌ای که زیر چارچوبِ تک‌بخشی باز شود همین را می‌گیرد.
+    #
+    # پخش‌کردن، تفسیرِ درستِ «۶۰/۴۰ بین دو بخش» وقتی یکی از دو بخش وجود ندارد:
+    # نسبت‌ها بین آن‌چه هست حفظ می‌شود و سقف ۱۰۰ می‌ماند.
+    sections = [
+        (general_pct, rules.general_section_weight, general_max),
+        (specialized_pct, rules.specialized_section_weight, specialized_max),
+    ]
+    present = [(pct, weight) for pct, weight, maximum in sections if maximum]
+    weight_sum = sum(weight for _, weight in present)
+    if not present:
+        base_pct = 0.0
+    elif weight_sum > 0:
+        base_pct = round(sum(pct * weight for pct, weight in present) / weight_sum, 1)
+    else:
+        # طرح به *همهٔ* بخش‌های موجود وزنِ صفر داده. عددی که این‌جا درست باشد
+        # وجود ندارد؛ میانگینِ ساده از صفرِ خشک بهتر است، چون صفر یعنی
+        # «عدم تمدید» برای همه.
+        base_pct = round(sum(pct for pct, _ in present) / len(present), 1)
 
     # امتیاز ویژه: کارِ خارج از شرح وظایف که در هیچ شاخصی جا نمی‌شود. دو مهار
     # دارد و هر دو لازم‌اند —

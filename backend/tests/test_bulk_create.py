@@ -9,6 +9,7 @@
 و که بقیهٔ کار را متوقف نمی‌کنند.
 """
 import pytest
+from sqlalchemy import select
 
 from app.models.enums import Capability, EvaluationStatus, PersonnelStatus
 from app.models.evaluation import EvaluationRecord
@@ -85,7 +86,9 @@ def test_the_preview_writes_nothing(client, db_session, cohort):
     body = _preview(client, cohort["hr"], org_unit="واحد دسته‌ای")
 
     assert body["dry_run"] is True
-    assert body["counts"].get("created") == 1
+    # دو نفر: «آمادهٔ ارزیابی» (مسئول واحد دارد) و «بدون مسئول واحد» (معاونت
+    # نمره‌دهنده‌اش است).
+    assert body["counts"].get("created") == 2
     assert db_session.query(EvaluationRecord).count() == before
 
 
@@ -96,7 +99,10 @@ def test_every_refusal_states_its_own_reason(client, cohort):
     assert rows["آمادهٔ ارزیابی"]["outcome"] == "created"
     assert rows["غیرفعال"]["outcome"] == "blocked_inactive"
     assert rows["بدون زنجیره"]["outcome"] == "blocked_no_access_row"
-    assert rows["بدون مسئول واحد"]["outcome"] == "blocked_no_supervisor"
+    # «بدون مسئول واحد» رد نمی‌شود: نمره‌دهنده‌اش معاونت است. این شکل در فرمِ
+    # دسترسی یک گزینهٔ صریح است و ساختِ تک‌رکوردی هم قبولش دارد؛ رد کردنش
+    # این‌جا یعنی یک چارتِ یکسان دو رفتار داشته باشد.
+    assert rows["بدون مسئول واحد"]["outcome"] == "created"
     # و هر کدام یک جملهٔ فارسی برای نمایش مستقیم دارند
     assert all(row["reason"] for row in rows.values())
 
@@ -145,8 +151,8 @@ def test_one_blocked_person_does_not_undo_the_others(client, db_session, cohort)
     ساخته‌شدهٔ قبلی را برمی‌گرداند و HR باید از صفر شروع کند."""
     body = _run(client, cohort["hr"], org_unit="واحد دسته‌ای")
 
-    assert body["counts"]["created"] == 1
-    assert sum(v for k, v in body["counts"].items() if k.startswith("blocked")) == 3
+    assert body["counts"]["created"] == 2
+    assert sum(v for k, v in body["counts"].items() if k.startswith("blocked")) == 2
     # و آن یک پرونده واقعاً در دیتابیس هست
     created_id = _by_name(body)["آمادهٔ ارزیابی"]["evaluation_id"]
     assert db_session.get(EvaluationRecord, created_id) is not None
@@ -159,9 +165,9 @@ def test_running_twice_does_not_create_a_second_file(client, db_session, cohort)
     first = _run(client, cohort["hr"], org_unit="واحد دسته‌ای")
     second = _run(client, cohort["hr"], org_unit="واحد دسته‌ای")
 
-    assert first["counts"]["created"] == 1
+    assert first["counts"]["created"] == 2
     assert second["counts"].get("created", 0) == 0
-    assert second["counts"]["skipped_already_open"] == 1
+    assert second["counts"]["skipped_already_open"] == 2
     # همان پرونده، نه یکی تازه
     assert (
         _by_name(second)["آمادهٔ ارزیابی"]["evaluation_id"]
@@ -271,7 +277,7 @@ def test_the_bulk_run_is_written_to_the_audit_log(client, cohort):
     entry = next(e for e in events if e["event_type"] == "evaluations_bulk_created")
 
     assert entry["new_value"]["cohort"]["org_unit"] == "واحد دسته‌ای"
-    assert entry["new_value"]["counts"]["created"] == 1
+    assert entry["new_value"]["counts"]["created"] == 2
 
 
 def test_the_assignee_is_told_once_not_once_per_file(client, db_session, cohort):
@@ -289,3 +295,50 @@ def test_the_assignee_is_told_once_not_once_per_file(client, db_session, cohort)
     bulk = [n for n in page["items"] if n["type"] == "bulk_evaluations_assigned"]
     assert len(bulk) == 1
     assert "3" in bulk[0]["message"], "پیام باید بگوید چند تا، وگرنه باید همه را باز کند تا بفهمد"
+
+
+def test_the_ceo_is_told_about_their_own_direct_reports(client, db_session, cohort):
+    """اعلانِ «n ارزیابی منتظر نمره‌دهی شماست» باید به نمره‌دهندهٔ واقعی برسد.
+
+    نمره‌دهنده از پرچمِ `is_manager` حساب می‌شد: «معاونت اگر مدیر است، وگرنه
+    مسئول واحد». برای کسی که مستقیم زیر نظر مدیرعامل کار می‌کند هر دو خالی‌اند،
+    پس `assignee_user_id` تهی می‌ماند و اعلان — که فقط به شناسهٔ پرشده می‌رود —
+    هیچ‌وقت فرستاده نمی‌شد.
+
+    ترکیبش با ایرادِ جاروی SLA (که پروندهٔ `draft`ِ همین مسیر را هم نمی‌دید)
+    یعنی پرونده ساخته می‌شد و *هیچ‌کس* هیچ‌وقت خبردار نمی‌شد.
+    """
+    from app.models.evaluation_access import EvaluationAccess
+    from app.models.notification import Notification
+
+    direct = make_personnel(
+        db_session, full_name="دستیارِ مدیرعامل", org_unit="واحد مدیرعامل"
+    )
+    db_session.add(
+        EvaluationAccess(
+            personnel_id=direct.id,
+            unit_supervisor_user_id=None,
+            deputy_user_id=None,
+            ceo_user_id=cohort["ceo"].id,
+        )
+    )
+    db_session.commit()
+
+    created = _by_name(_run(client, cohort["hr"], org_unit="واحد مدیرعامل"))["دستیارِ مدیرعامل"]
+    assert created["outcome"] == "created", created
+
+    record = db_session.get(EvaluationRecord, created["evaluation_id"])
+    db_session.refresh(record)
+    assert record.unit_supervisor_user_id is None
+    assert record.deputy_user_id is None
+    assert record.status == EvaluationStatus.draft
+
+    notes = list(
+        db_session.scalars(
+            select(Notification).where(
+                Notification.user_id == cohort["ceo"].id,
+                Notification.type == "bulk_evaluations_assigned",
+            )
+        )
+    )
+    assert len(notes) == 1, "مدیرعامل از پروندهٔ خودش خبردار نشد"

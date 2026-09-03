@@ -65,14 +65,25 @@ def window_for(db: Session, record: EvaluationRecord) -> Window:
 
     تمدید فقط وقتی معنا دارد که *دیرتر* از پایانِ دوره باشد. تمدیدی که عقب‌تر
     باشد مهلت را کوتاه نمی‌کند — «باز کردنِ دوباره» هیچ‌وقت نباید چیزی را ببندد.
+
+    و همان قاعده، در حالتِ حدی‌اش: پروندهٔ بی‌دوره اصلاً مهلت ندارد، و «بی‌مهلت»
+    از هر تاریخی دیرتر است. پس هیچ تمدیدی از آن جلو نمی‌زند.
+
+    شرطِ قبلی (`period_end is None or ...`) درست عکسِ این عمل می‌کرد: روی
+    پروندهٔ بی‌دوره تمدید را بی‌قید می‌پذیرفت و مهلتی می‌ساخت که وجود نداشت.
+    یعنی یک تمدیدِ خیرخواهانه — کاری که فقط برای *باز کردن* هست — همان پرونده
+    را از تاریخِ تمدید به بعد می‌بست.
     """
     period_end: date | None = None
     if record.period_id is not None:
         period = db.get(EvaluationPeriod, record.period_id)
         period_end = period.ends_on if period else None
 
+    if period_end is None:
+        return Window(closes_on=None)
+
     extension = record.submission_extended_until
-    if extension is not None and (period_end is None or extension > period_end):
+    if extension is not None and extension > period_end:
         return Window(closes_on=extension, extended=True)
     return Window(closes_on=period_end)
 

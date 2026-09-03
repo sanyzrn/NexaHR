@@ -56,7 +56,7 @@ export function EvaluationDetailPage() {
   const { showSuccess, showError } = useToast();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
-  const config = useAppConfig();
+  const activeConfig = useAppConfig();
 
   const evaluationId = id ? Number(id) : null;
   const {
@@ -66,6 +66,16 @@ export function EvaluationDetailPage() {
   } = useEvaluationDetail(evaluationId);
   const { data: personnel } = usePersonnelDetail(evaluation?.subject_personnel_id ?? null);
   const { data: indicators = [] } = useIndicators({ includeInactive: true });
+
+  // قواعدِ *این پرونده* (P1-04) — نه طرحِ فعالِ امروز.
+  //
+  // قرینهٔ `caseIndicators` برای قواعد: سرور با `rules_for_record` می‌سنجد و
+  // فرم تا امروز با `/api/config`. تا وقتی طرحی عوض نشده بود این دو یکی بودند؛
+  // لحظه‌ای که منابع انسانی وسط چرخه طرح تازه فعال می‌کرد، ارزیاب یا تیک سبز
+  // می‌گرفت و بعد ردِ سرور، یا فرم چیزی را می‌بست که سرور می‌پذیرفت.
+  //
+  // `??` برای پاسخِ کش‌شدهٔ قدیمی است؛ آن‌وقت همان طرحِ فعال، مثل قبل.
+  const config = evaluation?.scoring_rules ?? activeConfig;
 
   // شاخص‌های *این پرونده* (P1-05) — نه هرچه امروز فعال است.
   //

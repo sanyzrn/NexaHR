@@ -84,6 +84,11 @@ def committed_draft():
         "supervisor": CurrentUser(
             id=sup_id, username="lock_sup", role="unit_supervisor", personnel_id=None
         ),
+        # خودِ موضوعِ پرونده — برای مسیرهای «پروندهٔ من» که به `personnel_id`
+        # بند‌اند و نه به نقش.
+        "subject_user": CurrentUser(
+            id=sup_id, username="lock_sup", role="employee", personnel_id=personnel_id
+        ),
     }
 
     with make_session() as teardown:
@@ -202,6 +207,38 @@ def test_comment_write_uses_the_row_lock(committed_draft):
         with committed_draft["make_session"]() as writer:
             record = _get_record_or_404_for_update(writer, committed_draft["record_id"])
             # خواندن قفل‌دار تا commitِ گذار معطل ماند و حالا وضعیت تازه را می‌بیند.
+            assert record.status == EvaluationStatus.submitted
+    finally:
+        holder.join(timeout=5)
+
+
+def test_the_self_assessment_path_reads_under_the_same_lock(committed_draft):
+    """مسیرهای «پروندهٔ من» هم باید قفلِ ردیفی بگیرند، نه فقط مسیرِ ارزیاب.
+
+    ثبتِ خودارزیابی «بخوان، بسنج، بنویس» است و بی قفل اتمی نبود: دو درخواستِ
+    هم‌زمان هر دو از شرطِ «قبلاً ثبت شده؟» رد می‌شدند و هر دو ردیفِ امتیاز
+    می‌نوشتند. قیدِ یکتای `uq_self_assessment_record_indicator` دومی را
+    می‌گرفت، ولی `IntegrityError` گیرنده‌ای نداشت و به ۵۰۰ می‌رسید — به‌جای
+    همان «خودارزیابی شما قبلاً ثبت شده» که یک خط بالاتر نوشته شده بود.
+
+    مثل بقیهٔ این فایل، مسابقهٔ واقعی روی دو اتصال جدا: نخِ اول قفل را نگه
+    می‌دارد و خواندنِ دوم باید *منتظر* بماند، نه اینکه نسخهٔ کهنه را ببیند.
+    """
+    from app.api.routers.me import _my_record_or_404
+
+    lock_held = threading.Event()
+    holder = threading.Thread(target=_hold_lock_then_submit, args=(committed_draft, lock_held))
+    holder.start()
+    try:
+        assert lock_held.wait(timeout=5), "قفل‌گیرنده به‌موقع قفل را نگرفت"
+
+        with committed_draft["make_session"]() as reader:
+            record = _my_record_or_404(
+                reader,
+                committed_draft["record_id"],
+                committed_draft["subject_user"],
+                for_update=True,
+            )
             assert record.status == EvaluationStatus.submitted
     finally:
         holder.join(timeout=5)

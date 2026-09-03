@@ -38,7 +38,7 @@ from app.services.evaluation import inactive_seat_labels, next_evaluation_code
 from app.services.indicator_framework import ensure_framework
 from app.services.scoring_scheme import active_scheme
 from app.services.self_evaluation import hr_unit_personnel_ids
-from app.services.workflow import IS_OPEN_RECORD
+from app.services.workflow import IS_OPEN_RECORD, scorer_field
 
 
 class BulkOutcome(str, Enum):
@@ -56,7 +56,6 @@ class BulkOutcome(str, Enum):
     skipped_already_open = "skipped_already_open"
     blocked_inactive = "blocked_inactive"
     blocked_no_access_row = "blocked_no_access_row"
-    blocked_no_supervisor = "blocked_no_supervisor"
     blocked_inactive_seat = "blocked_inactive_seat"
     blocked_conflict = "blocked_conflict"
 
@@ -67,7 +66,6 @@ OUTCOME_LABELS: dict[BulkOutcome, str] = {
     BulkOutcome.skipped_already_open: "از قبل یک پروندهٔ باز دارد",
     BulkOutcome.blocked_inactive: "پرسنل غیرفعال است",
     BulkOutcome.blocked_no_access_row: "دسترسی زنجیرهٔ ارزیابی برایش تعریف نشده است",
-    BulkOutcome.blocked_no_supervisor: "مسئول واحد برایش تعیین نشده است",
     BulkOutcome.blocked_inactive_seat: "یکی از صندلی‌های زنجیره‌اش (مسئول واحد/معاونت/مدیرعامل) غیرفعال است",
     BulkOutcome.blocked_conflict: "هم‌زمان پروندهٔ دیگری برایش ساخته شد",
 }
@@ -75,7 +73,6 @@ OUTCOME_LABELS: dict[BulkOutcome, str] = {
 BLOCKED = {
     BulkOutcome.blocked_inactive,
     BulkOutcome.blocked_no_access_row,
-    BulkOutcome.blocked_no_supervisor,
     BulkOutcome.blocked_inactive_seat,
     BulkOutcome.blocked_conflict,
 }
@@ -194,8 +191,17 @@ def _plan_one(
         return PersonPlan(**base, outcome=BulkOutcome.blocked_inactive)
     if access is None:
         return PersonPlan(**base, outcome=BulkOutcome.blocked_no_access_row)
-    if not person.is_manager and access.unit_supervisor_user_id is None:
-        return PersonPlan(**base, outcome=BulkOutcome.blocked_no_supervisor)
+    # «مسئول واحد ندارد» دیگر مانع نیست.
+    #
+    # این گارد از زمانی مانده که تنها شکلِ سالمِ بی‌مسئول‌واحد، پرسنلِ «مدیر»
+    # بود. حالا فرمِ دسترسی صریحاً «بدون مسئول واحد» را پیشنهاد می‌دهد،
+    # `upsert_access` ذخیره‌اش می‌کند و ساختِ *تک‌رکوردی* هم قبولش دارد —
+    # نمره‌دهنده معاونت است، یا اگر معاونتی هم نباشد خودِ مدیرعامل
+    # (`workflow.scorer_field`).
+    #
+    # ماندنش یعنی یک چارتِ سازمانیِ یکسان دو رفتار داشته باشد: ارزیاب بتواند
+    # پرونده را دستی باز کند ولی اجرای کوهورت همان نفر را «رد شد» گزارش کند.
+    # حالتِ «منابع انسانی یادش رفته» را `blocked_no_access_row` می‌گیرد.
     # صندلی‌های زنجیره باید زنده باشند: پرونده‌ای که برای حسابِ غیرفعال باز شود
     # هرگز جلو نمی‌رود و یادآوری‌ها هم به جایی نمی‌رسد (M-1).
     if inactive_seat_labels(db, access):
@@ -205,12 +211,24 @@ def _plan_one(
     # دقیقاً مثل create_evaluation. پیش از این دسته‌ای مستقیماً در `hr_approved`
     # ساخته می‌شد: بررسیِ منابع انسانی رد می‌شد و پرونده می‌توانست بدون هیچ نمره‌ای
     # تا نهایی‌شدن برود (C-1 در گزارش ممیزی).
-    assignee = access.deputy_user_id if person.is_manager else access.unit_supervisor_user_id
+    # نمره‌دهنده از *شکلِ زنجیره* می‌آید و نه از پرچمِ `is_manager`.
+    #
+    # پیش از این «معاونت اگر مدیر است، وگرنه مسئول واحد» بود، و برای کسی که
+    # مستقیم زیر نظر مدیرعامل کار می‌کند `None` می‌داد. نتیجه‌اش سکوت بود:
+    # پرونده ساخته می‌شد، ولی اعلانِ «n ارزیابی منتظر نمره‌دهی شماست» — که
+    # فقط به `assignee_user_id`ِ پرشده می‌رود — هیچ‌وقت به مدیرعامل نمی‌رسید.
+    assignee = getattr(
+        access, scorer_field(access.unit_supervisor_user_id, access.deputy_user_id)
+    )
     return PersonPlan(
         **base,
         outcome=BulkOutcome.created,
         assignee_user_id=assignee,
-        manager_path=person.is_manager,
+        # از شکلِ زنجیره و نه از پرچمِ پرسنل: صندلیِ خالیِ «مسئول واحد» همان
+        # چیزی است که مسیر را تعیین می‌کند، و پرچمِ `is_manager` ممکن است با
+        # آن هم‌راستا نباشد (`upsert_access` فقط ترکیبِ مدیر+مسئول‌واحد را رد
+        # می‌کند، نه عکسش).
+        manager_path=access.unit_supervisor_user_id is None,
     )
 
 

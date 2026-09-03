@@ -12,6 +12,7 @@ from app.models.indicator import Indicator
 from app.models.personnel import Personnel
 from app.models.self_assessment import SelfAssessmentScore
 from app.models.user import User
+from app.services.workflow import SEAT_LABEL, scorer_field
 
 # ۴: افزودن `self_assessment` — برگهٔ مقایسهٔ «خود فرد / مسئول مستقیم» داخل سند.
 # ۳: افزودن `single_decider` — نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند.
@@ -23,11 +24,8 @@ SNAPSHOT_VERSION = 4
 
 def _evaluator_seat(record: EvaluationRecord) -> tuple[int | None, str]:
     """کدام صندلی به این پرونده نمره داد، و در سند چه نامیده می‌شود."""
-    if record.unit_supervisor_user_id is not None:
-        return record.unit_supervisor_user_id, "مسئول واحد"
-    if record.deputy_user_id is not None:
-        return record.deputy_user_id, "معاونت"
-    return record.ceo_user_id, "مدیرعامل"
+    field = scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
+    return getattr(record, field), SEAT_LABEL[field]
 
 
 def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
