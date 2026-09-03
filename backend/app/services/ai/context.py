@@ -17,6 +17,7 @@
 شناسه اولِ هر خط می‌آید، چون کنش‌ها به همان ارجاع می‌دهند. بدون شناسه در متن،
 هر شناسه‌ای که مدل تولید کند ساختگی است.
 """
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -37,8 +38,18 @@ ROLE_LABELS = {
     UserRole.support: "مدیر سامانه",
 }
 
-#: نقش‌هایی که فهرست کاملِ پرسنل را در رابط هم می‌بینند.
-_ORG_WIDE_ROLES = {UserRole.hr, UserRole.deputy, UserRole.ceo, UserRole.support}
+#: نقش‌هایی که فهرست کاملِ پرسنل را در رابط هم می‌بینند — و فقط همان‌ها.
+#:
+#: تا امروز `deputy` و `ceo` و `support` هم این‌جا بودند، و هیچ‌کدام در رابط
+#: فهرستِ کامل را نمی‌بینند: `routers/personnel.list_personnel` معاونت و
+#: مدیرعامل را به ردیف‌های `EvaluationAccess`ِ خودشان محدود می‌کند و برای
+#: `support` فهرستِ *تهی* برمی‌گرداند (`_ACCESS_COLUMN_BY_ROLE` ستونی برایش
+#: ندارد). یعنی متنِ پرامپت پنجره‌ای باز کرده بود که رابط ندارد — دقیقاً همان
+#: چیزی که قاعدهٔ ۱ بالای این فایل ممنوعش می‌کند. نامِ ثابت هم دروغ می‌گفت.
+#:
+#: `manage_personnel` جداگانه سنجیده می‌شود و همان‌جا می‌ماند: آن مجوز در رابط
+#: هم کلِ فهرست را می‌دهد (`personnel/export.xlsx`, `POST /api/personnel`).
+_ORG_WIDE_ROLES = {UserRole.hr}
 
 
 def _visible_personnel_ids(db: Session, user: CurrentUser, caps: set[Capability]) -> set[int] | None:
@@ -82,10 +93,16 @@ def build(db: Session, user: CurrentUser, caps: set[Capability], limit: int) -> 
     visible = _visible_personnel_ids(db, user, caps)
 
     # ── واحدها ────────────────────────────────────────────────────────────
-    units = list(db.scalars(select(OrgUnit).where(OrgUnit.is_active.is_(True)).limit(60)))
-    if units:
-        lines.append("\n## واحدهای سازمانی")
-        lines.append("، ".join(u.full_name for u in units))
+    #
+    # فهرستِ کاملِ واحدها در رابط هم گاردِ خودش را دارد
+    # (`personnel/org-units` → `hr` یا `manage_personnel`)، پس همان شرط.
+    # کسی که دامنه‌اش محدود است نامِ واحدِ افرادِ خودش را روی ردیفِ پرسنل
+    # می‌بیند و به نقشهٔ کلِ سازمان نیازی ندارد.
+    if visible is None:
+        units = list(db.scalars(select(OrgUnit).where(OrgUnit.is_active.is_(True)).limit(60)))
+        if units:
+            lines.append("\n## واحدهای سازمانی")
+            lines.append("، ".join(u.full_name for u in units))
 
     # ── شاخص‌ها ───────────────────────────────────────────────────────────
     indicators = list(
@@ -115,15 +132,29 @@ def build(db: Session, user: CurrentUser, caps: set[Capability], limit: int) -> 
             )
 
     # ── پرونده‌های در جریان ───────────────────────────────────────────────
+    #
+    # دامنه از `scope_evaluations_for_role` می‌آید و نه از `visible`ِ پرسنل.
+    # این دو یکی نیستند و فرقشان دیده می‌شد: `visible` فهرستِ *پرسنلِ* قابل
+    # مشاهده است، ولی این بلوک ستونِ «نتیجه» دارد. با دامنهٔ پرسنل، منابع
+    # انسانی نتیجهٔ نهاییِ پروندهٔ *خودش* و پروندهٔ هم‌تیمی‌هایش را در متنِ مدل
+    # می‌دید — همان دو چیزی که `scope_evaluations_for_role` عمداً از پنلش
+    # حذف می‌کند. حالا همان تابعِ رابط اینجا هم تصمیم می‌گیرد، پس هر قاعده‌ای
+    # که به آن اضافه شود خودبه‌خود این‌جا هم اعمال می‌شود.
+    from app.api.routers.evaluations import scope_evaluations_for_role
+
     ev_stmt = (
         select(EvaluationRecord)
         .where(EvaluationRecord.status != EvaluationStatus.cancelled)
         .order_by(EvaluationRecord.id.desc())
         .limit(limit)
     )
-    if visible is not None:
-        ev_stmt = ev_stmt.where(EvaluationRecord.subject_personnel_id.in_(visible or [0]))
-    records = list(db.scalars(ev_stmt))
+    try:
+        ev_stmt = scope_evaluations_for_role(ev_stmt, user)
+    except HTTPException:
+        # نقشی که در رابط هم به پرونده‌ها دسترسی ندارد (مثل `support`): بلوک
+        # حذف می‌شود، نه اینکه بی‌دامنه بماند.
+        ev_stmt = None
+    records = list(db.scalars(ev_stmt)) if ev_stmt is not None else []
     if records:
         names = dict(db.execute(select(Personnel.id, Personnel.full_name)).all())
         lines.append("\n## پرونده‌های ارزیابی")
@@ -144,6 +175,15 @@ def build(db: Session, user: CurrentUser, caps: set[Capability], limit: int) -> 
                 f" — {'فعال' if a.is_active else 'غیرفعال'}"
             )
 
-    total = db.scalar(select(func.count()).select_from(Personnel)) or 0
-    lines.append(f"\n(کل پرسنل ثبت‌شده: {total}. فهرست بالا حداکثر {limit} ردیف اخیر است.)")
+    # شمارشِ پایان هم به همان دامنه بند است: «کل پرسنلِ سازمان» عددی است که
+    # کارمند در هیچ صفحه‌ای نمی‌بیند، و به مدل هم نباید برود.
+    count_stmt = select(func.count()).select_from(Personnel)
+    if visible is not None:
+        count_stmt = count_stmt.where(
+            Personnel.id.in_(visible) if visible else Personnel.id.is_(None)
+        )
+    total = db.scalar(count_stmt) or 0
+    lines.append(
+        f"\n(پرسنلِ در دامنهٔ دید شما: {total}. فهرست بالا حداکثر {limit} ردیف اخیر است.)"
+    )
     return "\n".join(lines)

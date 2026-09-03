@@ -12,6 +12,9 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,7 +23,6 @@ from app.models.enums import Capability, EvaluationStatus, UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.personnel import Personnel
 from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
-from app.services.workflow import apply_transition
 
 _STATUS_LABELS = {
     "draft": "نمره‌دهی",
@@ -179,6 +181,122 @@ def create_evaluation(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
     )
 
 
+#: اقدام‌های `advance_evaluation` — هر کدام با گاردِ نقشِ endpointِ خودش و
+#: خودِ فراخوانی.
+#:
+#: چرا گاردِ نقش این‌جا تکرار می‌شود: مسیرِ دستیار *تابعِ* endpoint را صدا
+#: می‌زند و نه خودِ HTTP را، پس `Depends(...)`ها اجرا نمی‌شوند. برای اقدام‌هایی
+#: که گذار دارند این بی‌خطر است — `ensure_transition_allowed` همان سنجشِ
+#: `may_act_at` را دارد — ولی `hr_claim` هیچ گذاری در `TRANSITIONS` ندارد و
+#: تنها گاردِ نقشش همان `Depends(require_roles(hr))` بود. پس بی این جدول،
+#: هر نقشی می‌توانست از راهِ دستیار پروندهٔ صفِ منابع انسانی را «تحویل بگیرد».
+#:
+#: کلیدها با `enum`ِ شِمای ابزار یکی‌اند و `test_ai_workflow_parity` همین
+#: برابری را می‌سنجد — فهرستی که با واقعیت جدا بیفتد، همان چیزی است که
+#: `return` را از مسیر دستیار شکسته نگه داشته بود (`KeyError` → ۵۰۰).
+
+
+def _stage(stage_role: UserRole):
+    """قرینهٔ `require_chain_stage`: مافوق می‌تواند کارِ مرحلهٔ پایین‌تر را بکند."""
+    from app.services.workflow import may_act_at
+
+    return lambda role: may_act_at(role, stage_role)
+
+
+def _exact(*roles: UserRole):
+    """قرینهٔ `require_roles`: نقشِ دقیق، بی سلسله‌مراتب."""
+    return lambda role: role in roles
+
+
+@dataclass(frozen=True)
+class _Advance:
+    """یک اقدام: گاردِ نقش، فراخوانیِ endpoint، و اجباری‌بودنِ دلیل."""
+
+    may: Callable[[UserRole], bool]
+    run: Callable[..., None]
+    needs_reason: bool = False
+
+
+def _run_submit(db, user, evaluation_id: int, reason: str) -> None:
+    from app.api.routers import evaluations as ep
+
+    ep.submit_evaluation(evaluation_id=evaluation_id, db=db, current_user=user)
+
+
+def _run_hr_approve(db, user, evaluation_id: int, reason: str) -> None:
+    from app.api.routers import evaluations as ep
+
+    ep.hr_approve(evaluation_id=evaluation_id, db=db, current_user=user)
+
+
+def _run_deputy_approve(db, user, evaluation_id: int, reason: str) -> None:
+    from app.api.routers import evaluations as ep
+
+    ep.deputy_approve(evaluation_id=evaluation_id, db=db, current_user=user)
+
+
+def _run_ceo_finalize(db, user, evaluation_id: int, reason: str) -> None:
+    from fastapi import BackgroundTasks
+
+    from app.api.routers import evaluations as ep
+
+    # سندِ نهایی در پس‌زمینه آرشیو می‌شود. این‌جا درخواستی در کار نیست که صف را
+    # خالی کند، پس کارها بی‌درنگ همین‌جا اجرا می‌شوند — وگرنه PDF تا اولین
+    # جاروی زمان‌بند ساخته نمی‌شد.
+    tasks = BackgroundTasks()
+    ep.ceo_finalize(
+        evaluation_id=evaluation_id, background_tasks=tasks, db=db, current_user=user
+    )
+    for task in tasks.tasks:
+        task.func(*task.args, **task.kwargs)
+
+
+def _run_return(db, user, evaluation_id: int, reason: str) -> None:
+    from app.api.routers import evaluations as ep
+    from app.schemas.evaluation import ReturnRequest
+
+    ep.return_evaluation(
+        evaluation_id=evaluation_id,
+        payload=ReturnRequest(reason=reason),
+        db=db,
+        current_user=user,
+    )
+
+
+def _run_cancel(db, user, evaluation_id: int, reason: str) -> None:
+    from app.api.routers import evaluations as ep
+    from app.schemas.evaluation import CancelRequest
+
+    ep.cancel_evaluation(
+        evaluation_id=evaluation_id,
+        payload=CancelRequest(reason=reason),
+        db=db,
+        current_user=user,
+    )
+
+
+def _run_hr_claim(db, user, evaluation_id: int, reason: str) -> None:
+    from app.api.routers import evaluations as ep
+
+    ep.hr_claim(evaluation_id=evaluation_id, db=db, current_user=user)
+
+
+_ADVANCE: dict[str, _Advance] = {
+    "submit": _Advance(_stage(UserRole.unit_supervisor), _run_submit),
+    "hr_approve": _Advance(_exact(UserRole.hr), _run_hr_approve),
+    "deputy_approve": _Advance(_stage(UserRole.deputy), _run_deputy_approve),
+    "ceo_finalize": _Advance(_stage(UserRole.ceo), _run_ceo_finalize),
+    "return": _Advance(
+        _exact(UserRole.hr, UserRole.deputy, UserRole.ceo), _run_return, needs_reason=True
+    ),
+    "cancel": _Advance(_exact(UserRole.hr), _run_cancel, needs_reason=True),
+    "hr_claim": _Advance(_exact(UserRole.hr), _run_hr_claim),
+}
+
+#: همان فهرست، برای `enum`ِ شِما — تا یک‌جا نوشته شود و نه دو‌جا.
+_ADVANCE_ACTIONS = tuple(_ADVANCE)
+
+
 @tool(
     name="advance_evaluation",
     description=(
@@ -192,30 +310,60 @@ def create_evaluation(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
         "type": "object",
         "properties": {
             "evaluation_id": {"type": "integer"},
-            "action": {
-                "type": "string",
-                "enum": ["submit", "hr_approve", "deputy_approve", "ceo_finalize", "return", "cancel", "hr_claim"],
-            },
+            "action": {"type": "string", "enum": list(_ADVANCE_ACTIONS)},
             "reason": {"type": "string", "description": "برای return و cancel الزامی"},
         },
         "required": ["evaluation_id", "action"],
     },
 )
 def advance_evaluation(ctx: ToolContext, evaluation_id: int, action: str, reason: str = "") -> ToolOutcome:
+    """همان مسیرِ رسمیِ رابط، نه یک نسخهٔ موازی.
+
+    پیش از این بدنه مستقیم `apply_transition` را صدا می‌زد. ماشین حالت فقط
+    *گذار* را می‌سنجد؛ هر چیزِ دیگری که یک تأیید لازم دارد در خودِ endpoint
+    است، و هیچ‌کدامش این‌جا اجرا نمی‌شد:
+
+    * `submit` بی `finalize_scoring` می‌گذشت — یعنی بی اعتبارسنجیِ شواهد، بی
+      وارسیِ کاملِ شاخص‌ها، و بی محاسبهٔ نتیجه. پرونده با
+      `final_weighted_pct = None` وارد صفِ منابع انسانی می‌شد و بعد سرِ گاردِ
+      `ceo_finalize` گیر می‌کرد.
+    * `ceo_finalize` بی `final_snapshot` و بی `verify_token` نهایی می‌کرد.
+      `finalized` وضعیتِ پایانی است و جاروی بازسازیِ سند هم عمداً پرونده‌های
+      بی‌اسنپ‌شات را رد می‌کند، پس آن پرونده *برای همیشه* بی‌کارنامه می‌ماند —
+      بی‌آنکه در هیچ گزارشی دیده شود.
+    * `ensure_hr_may_handle` در روترهاست، نه در گذار. یعنی کارمندِ منابع
+      انسانی می‌توانست پروندهٔ خودش را تأیید یا لغو کند — دقیقاً همان چیزی که
+      همهٔ گاردهای HTTP برایش نوشته شده‌اند.
+    * `reason` گرفته می‌شد و هیچ‌جا نمی‌نشست: نه کامنت، نه رویدادِ ممیزی.
+    * و دو اکشنِ فهرست‌شده (`return`، `hr_claim`) اصلاً در `TRANSITIONS`
+      نیستند؛ `TRANSITIONS[action]` روی آن‌ها `KeyError` می‌داد که به ۵۰۰
+      ترجمه می‌شد. `return` هم — رایج‌ترین اقدامِ اصلاحیِ کلِ گردش‌کار — از
+      مسیر دستیار اصلاً کار نمی‌کرد.
+
+    حالا هر اکشن به endpointِ خودش می‌رود؛ همان انتخابِ خودکارِ گذار بر پایهٔ
+    شکلِ زنجیره، همان گاردها، همان لاگ. مثل `create_evaluation` و
+    `add_evaluation_comment` در همین فایل.
+    """
     db = ctx.db
-    record = _record_or_404(db, evaluation_id)
-    action = action.strip()
-    if action in ("return", "cancel") and not (reason or "").strip():
+    action = (action or "").strip()
+    reason = (reason or "").strip()
+    spec = _ADVANCE.get(action)
+    if spec is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "اقدام نامعتبر است؛ یکی از این‌ها: " + "، ".join(_ADVANCE_ACTIONS),
+        )
+    if not spec.may(ctx.user.role):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "شما اجازه دسترسی به این بخش را ندارید")
+    if spec.needs_reason and not reason:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "برای برگشت یا لغو، ذکر دلیل الزامی است")
 
-    from app.api.routers.evaluations import _get_record_or_404_for_update
-
-    # همان قفل ردیفی که گذارهای رابط دارند؛ دوبار کلیک یا دو درخواستِ هم‌زمان
-    # از مسیر دستیار هم باید تمیز رد شود.
-    record = _get_record_or_404_for_update(db, evaluation_id)
+    record = _record_or_404(db, evaluation_id)
     before_status = record.status.value
-    apply_transition(db, record, action, ctx.user)
-    db.commit()
+
+    spec.run(db, ctx.user, int(evaluation_id), reason)
+
+    record = _record_or_404(db, evaluation_id)
     db.refresh(record)
     subject = _subject_name(db, record)
     return ToolOutcome(
