@@ -1,8 +1,9 @@
 """تست‌های sweep های اعلان فعالانه: انقضای قرارداد، تأخیر مراحل (SLA)، و یکتاسازی."""
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
+from app.core.clock import today_local
 from app.models.enums import Capability
 from app.models.evaluation import EvaluationRecord
 from app.services.scheduled import run_contract_expiry_sweep, run_sla_sweep
@@ -33,12 +34,12 @@ def test_contract_expiry_sweep_notifies_hr_once(client, db_session):
     make_personnel(
         db_session,
         full_name="قرارداد نزدیک",
-        contract_end_date=date.today() + timedelta(days=10),
+        contract_end_date=today_local() + timedelta(days=10),
     )
     make_personnel(
         db_session,
         full_name="قرارداد دور",
-        contract_end_date=date.today() + timedelta(days=200),
+        contract_end_date=today_local() + timedelta(days=200),
     )
     db_session.commit()
 
@@ -65,7 +66,7 @@ def test_contract_expiry_skips_personnel_with_open_evaluation(client, db_session
     personnel = make_personnel(
         db_session,
         full_name="در حال ارزیابی",
-        contract_end_date=date.today() + timedelta(days=5),
+        contract_end_date=today_local() + timedelta(days=5),
     )
     make_access(db_session, personnel, sup, dep, ceo)
     db_session.commit()

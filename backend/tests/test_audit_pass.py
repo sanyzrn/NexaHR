@@ -2,10 +2,11 @@
 اهداف، پرسنل غیرفعال، ۴۰۴ دسترسی، اعتبارسنجی بازهٔ فیلتر) و قابلیت‌های جدید
 گزارش‌گیری/فیلتر HR (فیلترها و مرتب‌سازی پرسنل، فیلتر و خروجی کاربران، بازهٔ تاریخ و
 خروجی گزارش رویدادها)."""
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import jwt
 
+from app.core.clock import today_local
 from app.core.config import settings
 from app.core.constants import CONDITIONAL_RENEWAL_RECOMMENDATION
 from app.models.enums import Capability
@@ -243,8 +244,8 @@ def test_audit_log_date_filter_and_export(client, db_session):
         headers=auth_header(hr),
     )
 
-    today = date.today().isoformat()
-    old = (date.today() - timedelta(days=10)).isoformat()
+    today = today_local().isoformat()
+    old = (today_local() - timedelta(days=10)).isoformat()
     r_today = client.get("/api/audit-log", params={"created_from": today}, headers=auth_header(hr))
     assert r_today.status_code == 200
     assert r_today.json()["total"] >= 1

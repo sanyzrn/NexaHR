@@ -30,7 +30,7 @@ from app.schemas.dashboard import (
 )
 from app.services.audit import log_event
 from app.services.excel import build_report_workbook
-from app.services.privacy import suppressed_avg
+from app.services.privacy import cohort_size, suppressed_avg
 
 router = APIRouter(prefix="/api/dashboard/report", tags=["reports"])
 
@@ -115,7 +115,11 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
     conditions = filters.conditions()
 
     base = (
-        select(EvaluationRecord.id, EvaluationRecord.final_weighted_pct)
+        select(
+            EvaluationRecord.id,
+            EvaluationRecord.final_weighted_pct,
+            EvaluationRecord.subject_personnel_id,
+        )
         .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
         .where(*conditions)
     ).subquery()
@@ -125,10 +129,16 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
     # سرجمع فقط وقتی سرکوب می‌شود که کاربر یک فرد مشخص را نام نبرده باشد؛ اگر خودش
     # personnel_id داده، می‌داند دارد به دادهٔ چه کسی نگاه می‌کند.
     if filters.personnel_id is None:
-        avg_final = suppressed_avg(avg_final, total)
+        people = db.scalar(select(cohort_size(base.c.subject_personnel_id))) or 0
+        avg_final = suppressed_avg(avg_final, people)
 
     unit_rows = db.execute(
-        select(Personnel.org_unit, func.avg(EvaluationRecord.final_weighted_pct), func.count())
+        select(
+            Personnel.org_unit,
+            func.avg(EvaluationRecord.final_weighted_pct),
+            func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
+        )
         .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
         .where(*conditions, EvaluationRecord.final_weighted_pct.is_not(None))
         .group_by(Personnel.org_unit)
@@ -137,10 +147,10 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
     by_org_unit = [
         UnitStat(
             org_unit=unit,
-            avg_final_pct=suppressed_avg(round(float(avg), 1), count),
+            avg_final_pct=suppressed_avg(round(float(avg), 1), people),
             count=count,
         )
-        for unit, avg, count in unit_rows
+        for unit, avg, count, people in unit_rows
     ]
 
     indicator_rows = db.execute(
@@ -151,6 +161,7 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
             Indicator.section,
             func.avg(EvaluationScore.score),
             func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
         )
         .join(EvaluationScore, EvaluationScore.indicator_id == Indicator.id)
         .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
@@ -165,10 +176,10 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
             category=category,
             description=description,
             section=section.value,
-            avg_score=suppressed_avg(round(float(avg), 2), count),
+            avg_score=suppressed_avg(round(float(avg), 2), people),
             count=count,
         )
-        for iid, category, description, section, avg, count in indicator_rows
+        for iid, category, description, section, avg, count, people in indicator_rows
     ]
 
     return ReportSummary(
@@ -202,7 +213,11 @@ def indicator_breakdown(
 
     conditions = filters.conditions()
     score_join = (
-        select(EvaluationScore.score, Personnel.org_unit)
+        select(
+            EvaluationScore.score,
+            Personnel.org_unit,
+            EvaluationRecord.subject_personnel_id,
+        )
         .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
         .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
         .where(*conditions, EvaluationScore.indicator_id == indicator_id)
@@ -212,18 +227,24 @@ def indicator_breakdown(
     overall_avg = round(float(overall_raw), 2) if overall_raw is not None else None
     total = db.scalar(select(func.count()).select_from(score_join)) or 0
     if filters.personnel_id is None:
-        overall_avg = suppressed_avg(overall_avg, total)
+        people = db.scalar(select(cohort_size(score_join.c.subject_personnel_id))) or 0
+        overall_avg = suppressed_avg(overall_avg, people)
 
     unit_rows = db.execute(
-        select(score_join.c.org_unit, func.avg(score_join.c.score), func.count())
+        select(
+            score_join.c.org_unit,
+            func.avg(score_join.c.score),
+            func.count(),
+            cohort_size(score_join.c.subject_personnel_id),
+        )
         .group_by(score_join.c.org_unit)
         .order_by(func.avg(score_join.c.score).desc())
     ).all()
     by_org_unit = [
         UnitIndicatorStat(
-            org_unit=unit, avg_score=suppressed_avg(round(float(avg), 2), count), count=count
+            org_unit=unit, avg_score=suppressed_avg(round(float(avg), 2), people), count=count
         )
-        for unit, avg, count in unit_rows
+        for unit, avg, count, people in unit_rows
     ]
 
     return IndicatorBreakdown(
@@ -292,16 +313,21 @@ def employee_vs_unit(
         ]
     )
     unit_stats = db.execute(
-        select(func.avg(EvaluationRecord.final_weighted_pct), func.count())
+        select(
+            func.avg(EvaluationRecord.final_weighted_pct),
+            func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
+        )
         .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
         .where(*unit_conditions)
     ).one()
     unit_count = unit_stats[1] or 0
+    unit_people = unit_stats[2] or 0
     # میانگین واحد یک آمار گروهی است — اگر واحد یکی-دو نفر باشد، «میانگین واحد» عملاً
     # امتیاز همان یکی-دو نفر است. سری امتیازهای خودِ فرد (per_evaluation) سرکوب
     # نمی‌شود؛ کاربر خودش نام او را داده و چیز تازه‌ای افشا نمی‌شود.
     unit_avg = suppressed_avg(
-        round(float(unit_stats[0]), 1) if unit_stats[0] is not None else None, unit_count
+        round(float(unit_stats[0]), 1) if unit_stats[0] is not None else None, unit_people
     )
 
     return EmployeeVsUnit(

@@ -78,7 +78,17 @@ function renderPage() {
   );
 }
 
-function mockGets() {
+type ModuleRow = {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  requires: string[];
+  blocked_by: string[];
+  dependents: string[];
+};
+
+function mockGets(modules: ModuleRow[] = []) {
   vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
     if (url === "/administration/policy") return { data: { fields: POLICY_FIELDS } } as never;
     if (url === "/ai/settings")
@@ -100,7 +110,7 @@ function mockGets() {
     if (url === "/ai/access") return { data: [] } as never;
     if (url === "/administration/integrations")
       return { data: { fields: [], secrets: [], active_channels: [] } } as never;
-    if (url === "/administration/modules") return { data: [] } as never;
+    if (url === "/administration/modules") return { data: modules } as never;
     if (url === "/administration/separation")
       return { data: { separated: true, overlapping_users: [] } } as never;
     if (url === "/org-units") return { data: [] } as never;
@@ -199,5 +209,80 @@ describe("کارت دستیار هوشمند", () => {
         model: "gpt-4o-mini",
       }),
     ));
+  });
+
+  /* ── وابستگیِ بخش‌ها (B-H1) ────────────────────────────────────────────
+     سه بخشِ نمایشِ کارمند بی «نتیجه و وضعیت پروندهٔ کارمند» بی‌معنا هستند، و
+     تا امروز این وابستگی فقط در *متنِ* توضیح نوشته شده بود. نتیجه‌اش
+     پیکربندیِ بی‌معنایی بود که ظاهرِ سالم داشت: کارمند دکمهٔ اعتراض دارد به
+     عددی که سرور از نشان‌دادنش امتناع می‌کند. */
+  const PARENT: ModuleRow = {
+    key: "employee_evaluation_visibility",
+    label: "نتیجه و وضعیت پروندهٔ کارمند",
+    description: "نمایش نتایج نهایی",
+    enabled: false,
+    requires: [],
+    blocked_by: [],
+    dependents: ["objections"],
+  };
+  const CHILD: ModuleRow = {
+    key: "objections",
+    label: "اعتراض به نتیجه",
+    description: "مسیر رسمی اعتراض",
+    enabled: false,
+    requires: ["employee_evaluation_visibility"],
+    blocked_by: ["employee_evaluation_visibility"],
+    dependents: [],
+  };
+
+  const switchOf = (label: string) =>
+    screen.getByRole("switch", { name: `فعال بودن ${label}` });
+
+  it("سوییچِ بخشی که پیش‌نیازش خاموش است، غیرفعال می‌شود و دلیلش را می‌گوید", async () => {
+    mockGets([PARENT, CHILD]);
+    renderPage();
+    await openTab("بخش‌های سامانه");
+
+    expect(await screen.findByText(/به «نتیجه و وضعیت پروندهٔ کارمند» نیاز دارد/)).toBeInTheDocument();
+    expect(switchOf(CHILD.label)).toBeDisabled();
+    // سوییچِ خودِ پیش‌نیاز آزاد است
+    expect(switchOf(PARENT.label)).toBeEnabled();
+  });
+
+  it("با روشن‌بودنِ پیش‌نیاز، سوییچ آزاد است و توضیحِ مانع نمی‌آید", async () => {
+    mockGets([
+      { ...PARENT, enabled: true },
+      { ...CHILD, blocked_by: [] },
+    ]);
+    renderPage();
+    await openTab("بخش‌های سامانه");
+
+    await waitFor(() => expect(switchOf(CHILD.label)).toBeEnabled());
+    expect(screen.queryByText(/نیاز دارد/)).toBeNull();
+  });
+
+  it("بخشی که روشن مانده و پیش‌نیازش خاموش شده، همچنان قابلِ خاموش‌کردن است", async () => {
+    // وگرنه مدیر با یک پیکربندیِ بی‌معنا گیر می‌افتد و راهِ بیرون‌آمدن ندارد.
+    mockGets([PARENT, { ...CHILD, enabled: true }]);
+    renderPage();
+    await openTab("بخش‌های سامانه");
+
+    await waitFor(() => expect(switchOf(CHILD.label)).toBeEnabled());
+    expect(screen.getByText(/و تا روشن‌نشدنِ آن بی‌اثر است/)).toBeInTheDocument();
+  });
+
+  it("خاموش‌کردنِ پیش‌نیاز، پیش از تأیید می‌گوید چه چیزهایی با آن می‌روند", async () => {
+    mockGets([
+      { ...PARENT, enabled: true },
+      { ...CHILD, enabled: true, blocked_by: [] },
+    ]);
+    vi.mocked(apiClient.put).mockResolvedValue({ data: {} } as never);
+    renderPage();
+    await openTab("بخش‌های سامانه");
+
+    await userEvent.click(switchOf(PARENT.label));
+    expect(
+      await screen.findByText(/پیش‌نیازِ «اعتراض به نتیجه» است، پس آن‌ها هم از کار می‌افتند/),
+    ).toBeInTheDocument();
   });
 });

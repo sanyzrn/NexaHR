@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_roles
 from app.api.routers.personnel import _can_view_personnel
+from app.core.clock import today_local
 from app.db.session import get_db
 from app.models.audit_log import AuditLog
 from app.models.enums import EvaluationStatus, IndicatorSection, PersonnelStatus, UserRole
@@ -36,7 +37,7 @@ from app.schemas.dashboard import (
 from app.schemas.notification import ExpiringContract
 from app.services.authorization import is_module_enabled
 from app.services.org_unit import site_of, units_in_site
-from app.services.privacy import suppressed_avg
+from app.services.privacy import cohort_size, suppressed_avg
 from app.services.scoring_scheme import active_scheme, current_rules
 from app.services.stage_stats import stage_stats
 from app.services.workflow import IS_OPEN_RECORD
@@ -195,6 +196,7 @@ def overview(
             func.avg(EvaluationRecord.general_score_pct),
             func.avg(EvaluationRecord.specialized_score_pct),
             func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
         )
         .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
         .where(_FINALIZED, in_site, EvaluationRecord.final_weighted_pct.is_not(None))
@@ -203,21 +205,21 @@ def overview(
     by_org_unit = [
         UnitStat(
             org_unit=unit,
-            avg_final_pct=suppressed_avg(round(float(avg), 1), count),
+            avg_final_pct=suppressed_avg(round(float(avg), 1), people),
             # همان سرکوبِ کوهورت روی هر سه عدد: اگر فقط کل سرکوب می‌شد، دو عددِ
             # جزء همان چیزی را لو می‌دادند که سرکوب برای پنهان‌کردنش هست.
             avg_general_pct=(
-                suppressed_avg(round(float(general), 1), count) if general is not None else None
+                suppressed_avg(round(float(general), 1), people) if general is not None else None
             ),
             avg_specialized_pct=(
-                suppressed_avg(round(float(specialized), 1), count)
+                suppressed_avg(round(float(specialized), 1), people)
                 if specialized is not None
                 else None
             ),
             site=site_of(unit),
             count=count,
         )
-        for unit, avg, general, specialized, count in unit_rows
+        for unit, avg, general, specialized, count, people in unit_rows
     ]
 
     subordinate_counts = dict(
@@ -235,6 +237,7 @@ def overview(
             User.full_name,
             func.avg(EvaluationRecord.final_weighted_pct),
             func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
         )
         .join(EvaluationRecord, EvaluationRecord.unit_supervisor_user_id == User.id)
         .where(_FINALIZED, in_site, EvaluationRecord.final_weighted_pct.is_not(None))
@@ -246,12 +249,13 @@ def overview(
             username=username,
             full_name=full_name,
             # میانگین یک ارزیاب که فقط دو پرونده داده، پروفایل او نیست — امتیاز همان
-            # دو نفر است. تحلیل رفتار ارزیاب به دادهٔ کافی نیاز دارد.
-            avg_final_pct=suppressed_avg(round(float(avg), 1), count),
+            # دو نفر است. تحلیل رفتار ارزیاب به دادهٔ کافی نیاز دارد. و «دو نفر»
+            # همان نکته است: بیست پروندهٔ همان دو نفر هم پروفایلِ ارزیاب نیست.
+            avg_final_pct=suppressed_avg(round(float(avg), 1), people),
             subordinate_count=subordinate_counts.get(uid, 0),
             evaluation_count=count,
         )
-        for uid, username, full_name, avg, count in evaluator_rows
+        for uid, username, full_name, avg, count, people in evaluator_rows
     ]
 
     def _indicator_stats(section: IndicatorSection | None, *, weakest: bool) -> list[IndicatorStat]:
@@ -267,7 +271,7 @@ def overview(
                 Indicator.category,
                 Indicator.description,
                 func.avg(EvaluationScore.score),
-                func.count(),
+                cohort_size(EvaluationRecord.subject_personnel_id),
             )
             .join(EvaluationScore, EvaluationScore.indicator_id == Indicator.id)
             .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
@@ -283,9 +287,9 @@ def overview(
                 indicator_id=iid,
                 category=category,
                 description=description,
-                avg_score=suppressed_avg(round(float(avg), 2), count),
+                avg_score=suppressed_avg(round(float(avg), 2), people),
             )
-            for iid, category, description, avg, count in db.execute(query).all()
+            for iid, category, description, avg, people in db.execute(query).all()
         ]
 
     lowest_by_indicator = _indicator_stats(IndicatorSection.general, weakest=True)
@@ -399,6 +403,7 @@ def period_trend(
             EvaluationPeriod.starts_on,
             func.avg(EvaluationRecord.final_weighted_pct),
             func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
         )
         .select_from(EvaluationRecord)
         .outerjoin(EvaluationPeriod, EvaluationPeriod.id == EvaluationRecord.period_id)
@@ -412,10 +417,10 @@ def period_trend(
             period_id=period_id,
             name=name or "بدون دوره",
             starts_on=starts_on,
-            avg_final_pct=suppressed_avg(round(float(avg), 1), count),
+            avg_final_pct=suppressed_avg(round(float(avg), 1), people),
             count=count,
         )
-        for period_id, name, starts_on, avg, count in rows
+        for period_id, name, starts_on, avg, count, people in rows
     ]
 
 
@@ -441,7 +446,7 @@ def expiring_contracts(
 ) -> list[ExpiringContract]:
     """پرسنل فعالی که قراردادشان تا N روز آینده تمام می‌شود (یا منقضی شده)، به‌همراه
     این‌که آیا ارزیابی بازی برایشان در جریان است — هدف اصلی محصول: تصمیم به‌موقع تمدید."""
-    today = date.today()
+    today = today_local()
     horizon = today + timedelta(days=days)
 
     open_evaluation_exists = (

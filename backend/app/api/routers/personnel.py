@@ -1,4 +1,3 @@
-from datetime import date
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response as FastAPIResponse
@@ -6,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_role_or_capability
+from app.core.clock import today_local
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.enums import Capability, CommentStage, PersonnelStatus, UserRole
@@ -621,7 +621,7 @@ def update_personnel(
             detail="برای غیرفعال‌کردن پرسنل باید علت خروج مشخص شود",
         )
     if leaving and updates.get("separation_date") is None:
-        updates["separation_date"] = date.today()
+        updates["separation_date"] = today_local()
     # برگشتن به «فعال» یعنی آن خروج اتفاق نیفتاده یا برگشت خورده؛ ماندنِ علتِ
     # قدیمی روی پروندهٔ یک نفرِ شاغل، بدترین نوع دادهٔ کهنه است.
     if "status" in updates and updates["status"] is PersonnelStatus.active:

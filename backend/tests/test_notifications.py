@@ -1,6 +1,7 @@
 """تست‌های اعلان درون‌برنامه‌ای و فهرست قراردادهای رو به انقضا."""
-from datetime import date, timedelta
+from datetime import timedelta
 
+from app.core.clock import today_local
 from tests.helpers import (
     active_indicators,
     auth_header,
@@ -119,12 +120,12 @@ def test_expiring_contracts_watchlist(client, db_session):
     soon = make_personnel(
         db_session,
         full_name="قرارداد رو به پایان",
-        contract_end_date=date.today() + timedelta(days=20),
+        contract_end_date=today_local() + timedelta(days=20),
     )
     make_personnel(
         db_session,
         full_name="قرارداد بلندمدت",
-        contract_end_date=date.today() + timedelta(days=300),
+        contract_end_date=today_local() + timedelta(days=300),
     )
     make_access(db_session, soon, sup, dep, ceo)
     db_session.commit()

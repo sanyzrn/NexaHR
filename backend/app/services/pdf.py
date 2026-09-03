@@ -8,6 +8,8 @@ import jdatetime
 import qrcode
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app.core.clock import to_local
+
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -27,7 +29,10 @@ def to_jalali(value: str | datetime | None) -> str:
             dt = datetime.fromisoformat(value)
         except (ValueError, TypeError):
             return str(value)
-    jalali = jdatetime.datetime.fromgregorian(datetime=dt)
+    # به وقتِ محلیِ سازمان، نه UTC. `fromgregorian` هیچ انتقالی نمی‌دهد، پس
+    # پیش از این ساعتِ دیواریِ UTC به شمسی ترجمه می‌شد و سندِ رسمی برای
+    # نهایی‌شدنِ ۱:۰۰ بامداد، *روزِ قبل* را چاپ می‌کرد (`core/clock.py`).
+    jalali = jdatetime.datetime.fromgregorian(datetime=to_local(dt))
     return jalali.strftime("%Y/%m/%d ساعت %H:%M").translate(_PERSIAN_DIGITS)
 
 

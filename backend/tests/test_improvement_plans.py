@@ -1,8 +1,9 @@
 """تست‌های برنامه بهبود (R13.2): ساخت مشروط به نتیجه، اهداف، تکمیل، یادآوری بازنگری."""
-from datetime import date, timedelta
+from datetime import timedelta
 
 from sqlalchemy import select
 
+from app.core.clock import today_local
 from app.core.constants import FINAL_RESULT_THRESHOLDS
 from app.models.improvement_plan import ImprovementPlan
 from app.models.notification import Notification
@@ -60,7 +61,7 @@ def test_eligible_lists_only_conditional_without_plan(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "برنامه بهبود سه‌ماهه",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
             "goals": ["بهبود مهارت گزارش‌نویسی", "شرکت در دوره آموزشی"],
         },
         headers=auth_header(hr),
@@ -104,7 +105,7 @@ def test_plan_rejected_for_non_conditional_result(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "بی‌مورد",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
         },
         headers=auth_header(hr),
     )
@@ -117,7 +118,7 @@ def test_one_plan_per_evaluation(client, db_session):
     payload = {
         "evaluation_record_id": evaluation_id,
         "title": "اول",
-        "review_date": (date.today() + timedelta(days=30)).isoformat(),
+        "review_date": (today_local() + timedelta(days=30)).isoformat(),
     }
     assert client.post("/api/improvement-plans", json=payload, headers=auth_header(hr)).status_code == 201
     dup = client.post("/api/improvement-plans", json=payload, headers=auth_header(hr))
@@ -132,7 +133,7 @@ def test_goal_lifecycle_and_completion(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "برنامه",
-            "review_date": (date.today() + timedelta(days=10)).isoformat(),
+            "review_date": (today_local() + timedelta(days=10)).isoformat(),
             "goals": ["هدف اول"],
         },
         headers=auth_header(hr),
@@ -185,7 +186,7 @@ def test_owner_assignment_notifies_and_validates(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "با مسئول نامعتبر",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
             "owner_user_id": 999999,
         },
         headers=auth_header(hr),
@@ -197,7 +198,7 @@ def test_owner_assignment_notifies_and_validates(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "با مسئول معتبر",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
             "owner_user_id": sup.id,
         },
         headers=auth_header(hr),
@@ -222,7 +223,7 @@ def test_owner_assigned_via_patch_notifies(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "بدون مسئول اولیه",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
         },
         headers=auth_header(hr),
     ).json()
@@ -252,7 +253,7 @@ def test_review_sweep_reminds_when_due(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "برنامه رو به بازنگری",
-            "review_date": (date.today() + timedelta(days=2)).isoformat(),
+            "review_date": (today_local() + timedelta(days=2)).isoformat(),
             "owner_user_id": sup.id,
         },
         headers=auth_header(hr),
@@ -286,7 +287,7 @@ def test_employee_sees_own_open_plan(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "برنامه من",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
             "goals": ["هدف قابل مشاهده"],
         },
         headers=auth_header(hr),
@@ -317,7 +318,7 @@ def test_plan_persisted_with_evaluation_link(client, db_session):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "پیوند",
-            "review_date": (date.today() + timedelta(days=30)).isoformat(),
+            "review_date": (today_local() + timedelta(days=30)).isoformat(),
         },
         headers=auth_header(hr),
     )
@@ -342,7 +343,7 @@ def _plan_with_owner(client, db_session, owner):
         json={
             "evaluation_record_id": evaluation_id,
             "title": "برنامهٔ بهبود کیفیت",
-            "review_date": str(date.today() + timedelta(days=30)),
+            "review_date": str(today_local() + timedelta(days=30)),
             "owner_user_id": owner.id,
         },
         headers=auth_header(hr),

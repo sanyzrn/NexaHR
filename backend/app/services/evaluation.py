@@ -1,4 +1,6 @@
-from sqlalchemy import text
+from fastapi import HTTPException
+from fastapi import status as http_status
+from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.text_limits import BONUS_REASON_MIN
@@ -35,6 +37,73 @@ def inactive_seat_labels(db: Session, access) -> list[str]:
         if user is None or not user.is_active:
             labels.append(label)
     return labels
+
+
+#: همان سه صندلی، به‌علاوهٔ صندلیِ منابع انسانی — که برخلاف آن سه از یک صفِ
+#: مشترک شروع می‌شود ولی وقتی *برداشته* شد، فقط همان کارشناس می‌تواند اقدام کند
+#: (`workflow.claimable_if_unassigned`). پس مالکِ HR هم یک صندلیِ قفل‌شونده است.
+_SEATS_ON_RECORD: tuple[tuple[str, str], ...] = (
+    ("مسئول واحد", "unit_supervisor_user_id"),
+    ("معاونت", "deputy_user_id"),
+    ("مدیرعامل", "ceo_user_id"),
+    ("منابع انسانی", "hr_user_id"),
+)
+
+
+def occupied_seats_in_open_records(db: Session, user_id: int) -> list[tuple[str, str]]:
+    """صندلی‌هایی از پرونده‌های *باز* که این کاربر رویشان نشسته.
+
+    خروجی: فهرستِ (کدِ پرونده، برچسبِ صندلی) — چیزی که پیام خطا باید نشان بدهد
+    تا منابع انسانی بداند کدام پرونده‌ها را باید اول جایگزین کند.
+
+    فقط پروندهٔ *باز*، عمداً: پروندهٔ نهایی‌شده یا لغوشده گذاری ندارد و صندلیِ
+    رویش دیگر کاری نمی‌کند. و فقط پرونده و نه ردیفِ `evaluation_access`:
+    ردیفِ دسترسی برای هر مسئولِ واحدی همیشه وجود دارد، پس سنجیدنِ آن یعنی
+    تغییرِ نقش عملاً هیچ‌وقت ممکن نباشد.
+    """
+    from app.models.evaluation import EvaluationRecord
+    from app.services.workflow import IS_OPEN_RECORD
+
+    seat_columns = [getattr(EvaluationRecord, field) for _, field in _SEATS_ON_RECORD]
+    records = db.scalars(
+        select(EvaluationRecord)
+        .where(IS_OPEN_RECORD, or_(*[column == user_id for column in seat_columns]))
+        .order_by(EvaluationRecord.id)
+    ).all()
+    return [
+        (record.evaluation_code, label)
+        for record in records
+        for label, field in _SEATS_ON_RECORD
+        if getattr(record, field) == user_id
+    ]
+
+
+def ensure_no_open_chain_seat(db: Session, user_id: int, *, action: str) -> None:
+    """اگر کاربر در پروندهٔ بازی صندلی دارد، تغییر را رد می‌کند.
+
+    چرا رد و نه هشدار: تغییرِ نقشِ کسی که صندلی دارد، پرونده را *بی‌صدا* قفل
+    می‌کند. صندلی روی ردیف می‌ماند، ولی صاحبش دیگر از `require_chain_stage`
+    رد نمی‌شود و هیچ‌کسِ دیگری هم روی آن ردیف نیست. پرونده می‌ماند و فقط
+    جاروی شبانه — آن هم فردا — «گیر کرده» گزارشش می‌کند.
+
+    راهِ درست این است که منابع انسانی *اول* با «تغییر مسئول مرحله» جایگزین
+    بگذارد و بعد نقش را عوض کند؛ همان ابزاری که برای نجاتِ پروندهٔ گیرکرده
+    ساخته شده، این‌جا پیش از گیرکردن به کار می‌رود. پیام خطا صریح می‌گوید کدام
+    پرونده‌ها، تا این کار حدس‌زدنی نباشد.
+    """
+    seats = occupied_seats_in_open_records(db, user_id)
+    if not seats:
+        return
+    listed = "، ".join(f"{code} ({label})" for code, label in seats[:5])
+    more = f" و {len(seats) - 5} مورد دیگر" if len(seats) > 5 else ""
+    raise HTTPException(
+        status_code=http_status.HTTP_409_CONFLICT,
+        detail=(
+            f"{action} ممکن نیست: این کاربر در {len(seats)} پروندهٔ باز مسئولِ "
+            f"مرحله است — {listed}{more}. اول با «تغییر مسئول مرحله» جایگزینش "
+            "کنید."
+        ),
+    )
 
 
 def word_count(text_value: str | None) -> int:

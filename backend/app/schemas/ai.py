@@ -100,7 +100,8 @@ class AiUserAccessUpdate(BaseModel):
     api_key: str | None = None
     model: str | None = None
     allow_write_actions: bool | None = None
-    daily_message_limit: int | None = Field(default=None, ge=0, le=1000)
+    #: ۱- بی‌حد، ۰ پیش‌فرضِ سامانه، بزرگ‌تر از صفر همان عدد (`models/ai.py`)
+    daily_message_limit: int | None = Field(default=None, ge=-1, le=1000)
 
 
 class AiStatus(BaseModel):

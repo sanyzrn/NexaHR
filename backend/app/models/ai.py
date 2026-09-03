@@ -168,7 +168,15 @@ class AiUserAccess(Base):
     #: فقط باید بپرسد، خاموش می‌ماند.
     allow_write_actions: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    #: سقف پیام در روز. صفر یعنی بی‌حد.
+    #: سقفِ پیام در روز:
+    #:   * ``0``  → از پیش‌فرضِ سامانه استفاده کن (`settings.ai_daily_message_limit`)
+    #:   * ``>0`` → همین عدد
+    #:   * ``-1`` → بی‌حد، به‌صورتِ صریح
+    #:
+    #: صفر پیش از این «بی‌حد» بود و پیش‌فرضِ ستون هم صفر، پس *همهٔ* حساب‌ها
+    #: بی‌حد بودند — در سامانه‌ای که هر پیامش هزینهٔ واقعی دارد. با این معنا،
+    #: ردیف‌های موجود بی هیچ مایگریشنی زیرِ سقف می‌آیند، و «بی‌حد» چیزی می‌شود
+    #: که کسی باید *انتخابش* کند.
     daily_message_limit: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

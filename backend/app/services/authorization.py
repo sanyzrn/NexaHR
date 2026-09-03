@@ -60,6 +60,27 @@ def module_states(db: Session) -> dict[str, bool]:
     }
 
 
+def stored_module_state(db: Session, key: str) -> bool:
+    """سوییچِ *ذخیره‌شدهٔ* این ماژول، بی توجه به وابستگی‌هایش.
+
+    پنلِ مدیریت این را می‌خواهد (کاربر باید ببیند خودش چه انتخاب کرده)، و
+    `is_module_enabled` آن یکی را — «آیا واقعاً کار می‌کند».
+    """
+    module = MODULES_BY_KEY.get(key)
+    if module is None:
+        raise KeyError(f"ماژولی با کلید «{key}» تعریف نشده است (core/modules.py)")
+    row = db.get(ModuleSetting, key)
+    return row.enabled if row is not None else module.default_enabled
+
+
+def unmet_requirements(db: Session, key: str) -> tuple[str, ...]:
+    """وابستگی‌های خاموشِ این ماژول — تهی یعنی چیزی سرِ راهش نیست."""
+    module = MODULES_BY_KEY[key]
+    return tuple(
+        required for required in module.requires if not stored_module_state(db, required)
+    )
+
+
 def is_module_enabled(db: Session, key: str) -> bool:
     """این ماژول روشن است؟ کلیدِ ناشناخته خطاست، نه «روشن».
 
@@ -68,13 +89,16 @@ def is_module_enabled(db: Session, key: str) -> bool:
     گاردی بود که همیشه می‌گذارد — یعنی درست همان حالتی که به‌نظر گارد است و
     نیست. حالا بلند می‌شکند و تست همان لحظه می‌گیردش.
     """
-    module = MODULES_BY_KEY.get(key)
-    if module is None:
-        raise KeyError(f"ماژولی با کلید «{key}» تعریف نشده است (core/modules.py)")
-    row = db.get(ModuleSetting, key)
-    if row is not None:
-        return row.enabled
-    return module.default_enabled
+    if not stored_module_state(db, key):
+        return False
+    # و وابستگی‌هایش. ماژولی که والدش خاموش است، *واقعاً* کار نمی‌کند حتی اگر
+    # سوییچ خودش روشن باشد: «اعتراض به نتیجه» بی «نمایش نتیجه» یعنی کارمند به
+    # عددی اعتراض کند که سرور از نشان‌دادنش امتناع می‌کند.
+    #
+    # این‌جا و نه فقط در پنل، چون پیکربندیِ ناسازگار همین حالا ممکن است در
+    # دیتابیس نشسته باشد — سوییچ‌ها از روزِ اول مستقل بودند. غیرفعال‌کردنِ
+    # سوییچ در رابط، وضعیتِ ذخیره‌شده را عوض نمی‌کند؛ این می‌کند.
+    return not unmet_requirements(db, key)
 
 
 def ensure_module_enabled(db: Session, key: str) -> None:
@@ -91,9 +115,23 @@ def ensure_module_enabled(db: Session, key: str) -> None:
     گاردی که فقط در یکی از دو مسیر باشد گارد نیست. این‌جا در بدنهٔ خودِ
     endpoint صدا زده می‌شود، پس هر دو مسیر از آن رد می‌شوند.
     """
-    if not is_module_enabled(db, key):
-        module = MODULES_BY_KEY[key]
+    if is_module_enabled(db, key):
+        return
+    module = MODULES_BY_KEY[key]
+    # اگر خودِ سوییچ روشن است و مانع یک وابستگیِ خاموش است، پیام باید *همان* را
+    # بگوید. وگرنه مدیری که سوییچ را روشن می‌بیند، دنبال خطایی می‌گردد که وجود
+    # ندارد.
+    blockers = unmet_requirements(db, key) if stored_module_state(db, key) else ()
+    if blockers:
+        names = "، ".join(f"«{MODULES_BY_KEY[b].label}»" for b in blockers)
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
-            detail=f"بخش «{module.label}» توسط مدیر سامانه غیرفعال شده است",
+            detail=(
+                f"بخش «{module.label}» به {names} نیاز دارد و آن خاموش است؛ "
+                "اول آن را روشن کنید."
+            ),
         )
+    raise HTTPException(
+        status_code=http_status.HTTP_403_FORBIDDEN,
+        detail=f"بخش «{module.label}» توسط مدیر سامانه غیرفعال شده است",
+    )

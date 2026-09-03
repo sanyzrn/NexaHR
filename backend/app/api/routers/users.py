@@ -18,6 +18,7 @@ from app.schemas.auth import CurrentUser
 from app.schemas.user import UserCreate, UserPage, UserRead, UserUpdate
 from app.services.audit import log_event
 from app.services.authorization import apply_default_hr_capabilities
+from app.services.evaluation import ensure_no_open_chain_seat
 from app.services.excel import build_users_workbook
 from app.services.login_guard import unlock as unlock_login
 from app.services.self_evaluation import ensure_user_link_is_not_self_evaluation
@@ -187,6 +188,21 @@ def update_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="نمی‌توانید نقش «منابع انسانی» را از حساب خودتان بگیرید",
             )
+    # صندلیِ زنجیره پیش از هر نوشتنی سنجیده می‌شود: نقشی که عوض شود یا حسابی که
+    # خاموش شود، پروندهٔ بازِ زیرِ دستش را بی‌صدا قفل می‌کند
+    # (`evaluation.ensure_no_open_chain_seat` می‌گوید چرا رد و نه هشدار).
+    #
+    # فقط وقتی که واقعاً *از* زنجیره بیرون می‌رود: تغییرِ نامِ کامل یا رمز، و
+    # نقشی که همان نقشِ فعلی است، صندلی را دست‌نخورده می‌گذارند و نباید رد شوند.
+    leaves_role = "role" in updates and updates["role"] != user.role
+    gets_disabled = updates.get("is_active") is False and user.is_active
+    if leaves_role or gets_disabled:
+        ensure_no_open_chain_seat(
+            db,
+            user.id,
+            action="تغییر نقش" if leaves_role else "غیرفعال‌کردن این حساب",
+        )
+
     if "personnel_id" in updates and updates["personnel_id"] is not None:
         if db.get(Personnel, updates["personnel_id"]) is None:
             raise HTTPException(

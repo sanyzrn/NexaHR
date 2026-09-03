@@ -18,13 +18,14 @@
 ۲. **هر میانگینِ گروهی از سرکوب کوهورت رد می‌شود** (P1-08). استثنا فقط آمارِ
    *خودِ* ارزیاب است: او همان نمره‌ها را خودش داده و چیزی کشف نمی‌کند.
 """
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import Float, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
+from app.core.clock import today_local
 from app.db.session import get_db
 from app.models.enums import EvaluationStatus, PersonnelStatus, UserRole
 from app.models.evaluation import EvaluationRecord, EvaluationScore
@@ -45,7 +46,7 @@ from app.schemas.analytics import (
 from app.schemas.auth import CurrentUser
 from app.services.authorization import ensure_module_enabled
 from app.services.org_unit import site_of
-from app.services.privacy import is_below_cohort, suppressed_avg
+from app.services.privacy import cohort_size, is_below_cohort, suppressed_avg
 from app.services.scoring_scheme import current_rules
 from app.services.workflow import IS_OPEN_RECORD
 
@@ -268,13 +269,24 @@ def executive_overview(
     """
     ensure_module_enabled(db, "role_analytics")
     total = db.scalar(select(func.count()).select_from(EvaluationRecord).where(_FINALIZED)) or 0
+    people_total = (
+        db.scalar(
+            select(cohort_size(EvaluationRecord.subject_personnel_id)).where(_FINALIZED)
+        )
+        or 0
+    )
     avg_final = suppressed_avg(
         _round(db.scalar(select(func.avg(EvaluationRecord.final_weighted_pct)).where(_FINALIZED)), 1),
-        total,
+        people_total,
     )
 
     unit_rows = db.execute(
-        select(Personnel.org_unit, func.avg(EvaluationRecord.final_weighted_pct), func.count())
+        select(
+            Personnel.org_unit,
+            func.avg(EvaluationRecord.final_weighted_pct),
+            func.count(),
+            cohort_size(EvaluationRecord.subject_personnel_id),
+        )
         .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
         .where(_FINALIZED, EvaluationRecord.final_weighted_pct.is_not(None))
         .group_by(Personnel.org_unit)
@@ -282,31 +294,36 @@ def executive_overview(
     ).all()
     by_org_unit = [
         UnitPerformance(
-            org_unit=unit, avg_final_pct=suppressed_avg(_round(avg, 1), count), count=count
+            org_unit=unit, avg_final_pct=suppressed_avg(_round(avg, 1), people), count=count
         )
-        for unit, avg, count in unit_rows
+        for unit, avg, count, people in unit_rows
     ]
 
     # تجمیعِ محل در پایتون و نه در SQL: قرارداد جداکننده یک تصمیم *محصولی* است
     # (توضیحش در services/org_unit.py) و بردنش داخل کوئری یعنی همان قانون در دو
     # زبان نوشته شود. تعداد واحدها ده‌ها است، نه میلیون‌ها.
     site_totals: dict[str, list[float]] = {}
-    for unit, avg, count in unit_rows:
+    for unit, avg, count, people in unit_rows:
         site = site_of(unit)
         if site is None or avg is None:
             continue
-        bucket = site_totals.setdefault(site, [0.0, 0.0])
+        bucket = site_totals.setdefault(site, [0.0, 0.0, 0.0])
         bucket[0] += float(avg) * count
         bucket[1] += count
+        # جمعِ نفرها بین واحدهای یک محل بی‌خطر است: `personnel.org_unit` یک
+        # رشتهٔ واحد است، پس هیچ‌کس در دو واحد شمرده نمی‌شود.
+        bucket[2] += people
     by_site = [
         SitePerformance(
             site=site,
-            # میانگینِ وزنی بر حسب تعداد، نه میانگینِ میانگین‌ها — وگرنه واحدی با
-            # دو نفر همان‌قدر وزن داشت که واحدی با پنجاه نفر.
-            avg_final_pct=suppressed_avg(_round(total / count, 1), int(count)),
+            # وزن *پرونده* است و نه نفر، و این عمدی است: `avg`ِ هر واحد میانگینِ
+            # پرونده‌هاست، پس فقط وزنِ پرونده‌ای همان میانگینِ واقعیِ محل را
+            # بازمی‌سازد. ولی آستانهٔ سرکوب روی *نفر* می‌نشیند — محلی با یک نفر و
+            # ده پرونده، آمار گروهی ندارد هرچند وزنش ده باشد.
+            avg_final_pct=suppressed_avg(_round(total / count, 1), int(people)),
             count=int(count),
         )
-        for site, (total, count) in sorted(
+        for site, (total, count, people) in sorted(
             site_totals.items(), key=lambda item: item[1][0] / item[1][1], reverse=True
         )
     ]
@@ -385,7 +402,7 @@ def executive_overview(
     # --- ریسک تمدید --------------------------------------------------------
     contract_exposure = []
     for horizon in _EXPOSURE_HORIZONS:
-        cutoff = date.today() + timedelta(days=horizon)
+        cutoff = today_local() + timedelta(days=horizon)
         expiring_where = (
             Personnel.status == PersonnelStatus.active,
             Personnel.contract_end_date.is_not(None),
