@@ -146,9 +146,36 @@ def main() -> None:
     assert people["items"][0]["account_username"] == f"nariman{RUN}", people["items"]
     print("10) account created:", people["items"][0]["account_username"])
 
-    audit = call("GET", "/api/audit-log?event_type=ai_tool_invoked", token)
-    assert audit["total"] >= 3
-    print("11) audit trail:", audit["total"], "ai_tool_invoked events")
+    # ردِ ممیزی: *هر* فراخوانِ ابزار باید ردی بگذارد، ولی نه همه‌شان زیر یک نام.
+    #
+    # طراحی دو نام دارد و این عمدی است: فراخوانِ خواندنی همان‌جا در حلقهٔ
+    # گفت‌وگو اجرا می‌شود و `execute_tool` رویدادِ `ai_tool_invoked` می‌نویسد؛
+    # نوشتن اما اجرا نمی‌شود تا کاربر کارتِ تأیید را بپذیرد، و مسیرِ تأیید
+    # (`ai/confirmations.confirm`) رویدادِ `ai_action_confirmed` می‌نویسد.
+    # هر دو نامِ ابزار و آرگومانِ پاک‌شده را در خود دارند.
+    #
+    # پس شمردنِ *یک* نام، شمارشِ ناقصی است — این ادعا قبلاً یک عددِ ثابت
+    # (`>= 3`) بود که روی دیتابیسِ تازه هیچ‌وقت درست نبود: سناریو دقیقاً دو
+    # فراخوانِ خواندنی دارد. تنها دلیلِ سبز شدنش، ردیف‌های به‌جا‌ماندهٔ
+    # اجراهای قبلی روی همان دیتابیس بود.
+    #
+    # حالا به‌جای عدد، *نامِ ابزارها* سنجیده می‌شود: مستقل از تعداد نوبت‌ها،
+    # مستقل از ترتیب، و شکستنش یعنی واقعاً چیزی از ردِ ممیزی افتاده.
+    def audited_tools(event_type: str) -> set[str]:
+        page = call("GET", f"/api/audit-log?event_type={event_type}&limit=100", token)
+        return {
+            (row.get("new_value") or {}).get("tool")
+            for row in page["items"]
+        }
+
+    read_only_calls = audited_tools("ai_tool_invoked")
+    confirmed_writes = audited_tools("ai_action_confirmed")
+    assert "inspect_upload" in read_only_calls, read_only_calls
+    assert {"patch_upload_rows", "import_personnel"} <= confirmed_writes, confirmed_writes
+    print(
+        f"11) audit trail: خواندنی {sorted(t for t in read_only_calls if t)} | "
+        f"نوشتنِ تأییدشده {sorted(t for t in confirmed_writes if t)}"
+    )
 
     # تأییدِ دوباره ممکن نیست
     try:
