@@ -8,6 +8,10 @@ import type { ComponentPropsWithRef } from "react";
 
 export function SearchInput({
   widthClass = "sm:w-64",
+  // نامِ دسترس‌پذیرِ پیش‌فرض. فراخوان‌ها فقط `placeholder` می‌دادند و آن
+  // نامِ معتبری نیست: صفحه‌خوان یک «ورودیِ جست‌وجو»ی بی‌نام اعلام می‌کرد.
+  // قابلِ بازنویسی است، چون بعضی صفحه‌ها دو جست‌وجو دارند.
+  "aria-label": ariaLabel = "جست‌وجو",
   ...props
 }: Omit<ComponentPropsWithRef<"input">, "type" | "className"> & {
   /** عرض روی نمایشگر پهن. عمداً یک prop جداست و نه بخشی از `className`:
@@ -32,6 +36,7 @@ export function SearchInput({
       </svg>
       <input
         type="search"
+        aria-label={ariaLabel}
         className={`w-full ${widthClass} rounded-xl border border-gray-200 bg-gray-100 py-1.5 pr-9 pl-3 text-sm text-gray-700 outline-none transition-colors duration-150 focus:border-gray-900 focus:bg-white`}
         {...props}
       />

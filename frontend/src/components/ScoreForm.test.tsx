@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { ScoreFormTable, computePreview, scoredRows, useScoreForm } from "./ScoreForm";
+import { ScoreFormTable, SegmentedScore, computePreview, scoredRows, useScoreForm } from "./ScoreForm";
 import { DEFAULT_APP_CONFIG, type Indicator } from "../types";
 
 function indicator(id: number, section: "general" | "specialized" = "general"): Indicator {
@@ -224,6 +224,27 @@ describe("ScoreFormTable slider", () => {
     expect(screen.getByRole("textbox")).toBeEnabled();
     // …و برای امتیازِ اجباری، شمارنده کمبود را می‌گوید.
     expect(screen.getByText(/واژهٔ دیگر لازم است/)).toBeInTheDocument();
+  });
+});
+
+describe("SegmentedScore در حالتِ بی‌امتیاز", () => {
+  it("نشانگر تا اولین انتخاب روی طیف نمی‌نشیند", () => {
+    /* پیش از این `value ?? 3` بود، یعنی نشانگرِ خالی دقیقاً وسطِ طیف
+       می‌ایستاد. اسلایدرِ پیوسته با نقطهٔ استراحتِ دیدنی، لنگرِ
+       گرایش-به-میانه است: عددی که هنوز انتخاب نشده به‌شکلِ «۳» دیده می‌شود و
+       انتخابِ ارزیاب را به سمتِ همان می‌کشد. برای سامانه‌ای که خروجی‌اش
+       تصمیمِ تمدیدِ قرارداد است، این یک سوگیریِ اندازه‌گیری است. */
+    const { container, rerender } = render(
+      <SegmentedScore value={null} onChange={() => {}} label="شاخص" />
+    );
+    const slider = screen.getByRole("slider");
+    expect(slider).toHaveAttribute("aria-valuetext", "امتیازی انتخاب نشده");
+    expect(slider).not.toHaveAttribute("aria-valuenow");
+    // نشانگر همان `div`ِ گردِ ۲۲ پیکسلی است.
+    expect(container.querySelector(".h-\\[22px\\]")).toBeNull();
+
+    rerender(<SegmentedScore value={3} onChange={() => {}} label="شاخص" />);
+    expect(container.querySelector(".h-\\[22px\\]")).not.toBeNull();
   });
 });
 

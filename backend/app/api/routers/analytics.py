@@ -30,6 +30,7 @@ from app.models.enums import EvaluationStatus, PersonnelStatus, UserRole
 from app.models.evaluation import EvaluationRecord, EvaluationScore
 from app.models.indicator import Indicator
 from app.models.personnel import Personnel
+from app.models.scoring_scheme import ScoringScheme
 from app.schemas.analytics import (
     ContractExposure,
     CycleTime,
@@ -318,10 +319,24 @@ def executive_overview(
     recommendation_total = sum(count for _, count in recommendation_rows)
     # ترتیب از بدترین بند به بهترین، نه از پرتکرار به کم‌تکرار: این نمودار یک
     # نردبان است و خواننده‌اش دنبال «چند نفر ته نردبان‌اند» می‌گردد.
-    band_of = {
-        label: index
-        for index, (_, label) in enumerate(current_rules(db).thresholds)
-    }
+    #
+    # نردبان از *همهٔ* نسخه‌های طرح ساخته می‌شود و نه فقط نسخهٔ فعال. برچسبِ
+    # `recommendation` در خودِ پرونده ذخیره شده (پس بازطبقه‌بندی نمی‌شود)،
+    # ولی جایش روی نردبان از فهرستِ امروز می‌آمد — یعنی هر برچسبی از نسخهٔ
+    # قدیمی‌تر «ناشناخته» می‌شد و ته فهرست می‌رفت، در حالی که همان نسخه
+    # جایش را می‌دانست. نسخهٔ جدیدتر اولویت دارد، تا برچسبی که در دو نسخه
+    # جای متفاوتی داشته با تعریفِ تازه‌تر خوانده شود.
+    band_of: dict[str, int] = {}
+    for scheme in db.scalars(
+        select(ScoringScheme).order_by(ScoringScheme.version.desc())
+    ):
+        # ستونِ دیتابیس فهرستی از دیکشنری است
+        # (`[{"upper_exclusive": …, "label": …}]`) و نه دوتایی؛ `Rules` آن را
+        # به دوتایی تبدیل می‌کند، ولی این‌جا ردیفِ خام خوانده می‌شود.
+        for index, row in enumerate(scheme.thresholds or []):
+            band_of.setdefault(row["label"], index)
+    for index, (_, label) in enumerate(current_rules(db).thresholds):
+        band_of[label] = index
     recommendation_mix = [
         RecommendationSlice(
             recommendation=label,

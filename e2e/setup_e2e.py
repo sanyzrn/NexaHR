@@ -19,7 +19,7 @@ from openpyxl import Workbook
 from app.core.crypto import encrypt
 from app.core.security import hash_password
 from app.db.session import SessionLocal
-from app.models.ai import AiSettings, AiUserAccess
+from app.models.ai import AiProviderCredential, AiSettings, AiUserAccess
 from app.models.enums import Capability, UserRole
 from app.models.user import User
 from app.services.authorization import DEFAULT_HR_CAPABILITIES
@@ -90,13 +90,26 @@ def main() -> None:
             config = AiSettings(id=1)
             db.add(config)
         config.enabled = True
-        config.base_url = "http://127.0.0.1:8100/v1"
-        config.model = "mock-1"
-        config.api_key_encrypted = encrypt("mock-key")
+        # آدرس و مدل و کلید در `ai_provider_credentials` نشسته‌اند و نه در همین
+        # ردیف. تا امروز این‌جا روی `config` ست می‌شدند — و چون SQLAlchemy برای
+        # نامِ ناموجود فقط یک صفتِ پایتونی می‌سازد، *بی‌صدا* هیچ‌کاری نمی‌کردند:
+        # `/api/ai/status` می‌گفت «کلید سرویس تنظیم نشده است» و سناریو در گامِ
+        # دوم می‌ایستاد. تنها دلیلِ ندیدنش این بود که این سوئیت هیچ‌جای CI نبود.
+        config.provider = "custom"
         config.allow_write_actions = True
         config.allow_uploads = True
         config.max_upload_mb = 5
         config.max_tool_iterations = 8
+
+        credential = db.scalar(
+            select(AiProviderCredential).where(AiProviderCredential.provider == "custom")
+        )
+        if credential is None:
+            credential = AiProviderCredential(provider="custom")
+            db.add(credential)
+        credential.base_url = "http://127.0.0.1:8100/v1"
+        credential.model = "mock-1"
+        credential.api_key_encrypted = encrypt("mock-key")
 
         access = db.query(AiUserAccess).filter(AiUserAccess.user_id == user.id).one_or_none()
         if access is None:

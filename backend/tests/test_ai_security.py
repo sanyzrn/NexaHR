@@ -356,3 +356,60 @@ def test_the_context_block_is_fenced_as_untrusted_data():
     fence = "─" * 40
     inside = prompt.split(fence)[1]
     assert payload in inside
+
+
+# ── پیش‌فرضِ باز (پرسشِ بازِ گزارش) ────────────────────────────────────────
+
+
+def test_every_tool_states_something_about_its_own_scope():
+    """سکوت دیگر «برای همه» معنا نمی‌شود.
+
+    `is_allowed` برای ابزارِ بی‌اعلان `True` برمی‌گرداند — یعنی پیش‌فرضِ باز،
+    در سامانه‌ای که همه‌جای دیگرش fail-closed است. هر ۱۹ ابزارِ بی‌اعلان
+    واقعاً گاردِ درون‌بدنه داشتند، پس سوراخِ زنده‌ای نبود؛ ولی ابزارِ *بعدی*
+    که یادش برود گاردش را بنویسد، بی هیچ خطایی به همه تبلیغ می‌شد.
+
+    حالا آن حالت باید صریح گفته شود (`guarded_inline=True`) و ثبتِ ابزارِ
+    ساکت سرِ import می‌شکند. این تست همان تضمین را قفل می‌کند.
+    """
+    undeclared = sorted(
+        name
+        for name, spec in tools_base.REGISTRY.items()
+        if not spec.capabilities and not spec.roles and not spec.guarded_inline
+    )
+    assert not undeclared, undeclared
+
+
+def test_registering_a_tool_without_a_declared_scope_fails_loudly():
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError, match="دامنه‌اش را اعلام نکرده"):
+
+        @tools_base.tool(
+            name="_probe_tool_without_scope",
+            description="آزمایشی",
+            category="آزمایش",
+            read_only=True,
+            parameters={"type": "object", "properties": {}},
+        )
+        def _probe(ctx):  # pragma: no cover - ثبت پیش از فراخوانی می‌شکند
+            raise AssertionError
+    assert "_probe_tool_without_scope" not in tools_base.REGISTRY
+
+
+def test_a_tool_with_no_scope_would_not_be_advertised_either():
+    """کمربندِ دوم: حتی اگر ردیفی به هر شکلی بی‌اعلان وارد رجیستری شود،
+    `is_allowed` دیگر بازش نمی‌کند."""
+    silent = tools_base.ToolSpec(
+        name="_silent",
+        description="",
+        parameters={"type": "object", "properties": {}},
+        category="آزمایش",
+        handler=lambda ctx: None,
+        read_only=True,
+    )
+    employee = CurrentUser(
+        id=1, username="x", role=UserRole.employee, personnel_id=None,
+        must_change_password=False, display_name="x",
+    )
+    assert tools_base.is_allowed(silent, employee, set()) is False

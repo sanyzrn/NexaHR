@@ -101,8 +101,33 @@ def main() -> None:
     print("6) assistant:", turn2["reply"][:180])
     assert "patch_upload_rows" in [s["tool"] for s in turn2["steps"]]
 
-    turn3 = call("POST", "/api/ai/chat", token, data={"conversation_id": cid, "message": "خب واردش کن"})
-    assert turn3["pending"], turn3
+    # اصلاحِ ردیف هم *نوشتن* است، پس کارتِ تأیید دارد
+    # (`patch_upload_rows` با `risky=True`؛ توضیحش هم همین را می‌گوید:
+    # «پس از تأیید کاربر اعمال … می‌شود»). این سناریو از زمانی مانده که آن
+    # ابزار بی‌درنگ اجرا می‌شد، پس بی این گام در گامِ بعد گیر می‌کرد — و چون
+    # هیچ‌جای CI اجرا نمی‌شد، کسی خبردار نشد.
+    assert turn2["pending"], turn2
+    patch_pending = turn2["pending"][0]
+    print(f"6b) pending patch #{patch_pending['id']}: {patch_pending['summary']}")
+    patched = call("POST", f"/api/ai/pending/{patch_pending['id']}/confirm", token, data={})
+    assert any(s["status"] == "confirmed" for s in patched["steps"]), patched
+    print("6c) patch confirmed:", patched["reply"][:120])
+
+    # «وارد کن» ممکن است بیش از یک نوبت بخواهد: پس از اصلاح، دستیار اول
+    # وضعیتِ تازهٔ فایل را می‌گیرد و می‌گوید همه سالم‌اند، و نوبتِ بعد پیشنهادِ
+    # ورود را ثبت می‌کند. قراردادی که این‌جا سنجیده می‌شود «سرِ آخر کارتِ
+    # تأییدِ ورود می‌آید» است و نه «در نوبتِ سوم»؛ شمردنِ نوبت‌ها تست را به
+    # جزئیاتِ نوشتهٔ مدل بند می‌کند.
+    turn3 = None
+    for attempt in range(3):
+        turn3 = call(
+            "POST", "/api/ai/chat", token,
+            data={"conversation_id": cid, "message": "خب واردش کن"},
+        )
+        print(f"7.{attempt}) assistant:", turn3["reply"][:120])
+        if turn3["pending"]:
+            break
+    assert turn3 and turn3["pending"], turn3
     pending = turn3["pending"][0]
     print(f"7) pending action #{pending['id']}: {pending['tool']} — {pending['summary']}")
 

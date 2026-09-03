@@ -313,6 +313,7 @@ function SiteFilterBar({ value, onChange }: { value: string; onChange: (site: st
 function OrgSummaryCard({ overview }: { overview: DashboardOverviewData }) {
   const mix = overview.outcome_mix;
   return (
+    <div className="space-y-2">
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <div className="flex items-center justify-between gap-4 rounded-2xl border border-gray-200 bg-white p-4">
         <div>
@@ -340,6 +341,20 @@ function OrgSummaryCard({ overview }: { overview: DashboardOverviewData }) {
         bar="bg-amber-500"
         text="text-amber-700"
       />
+    </div>
+    {/* عددِ هر پرونده با قواعدِ نسخهٔ خودش حساب شده و دست‌نخورده می‌ماند، ولی
+        این دو درصد با آستانه‌های *امروز* دسته‌بندی می‌شوند. یعنی عوض‌کردنِ یک
+        آستانه همین نما را بازنویسی می‌کند، بی آن‌که هیچ عددِ ذخیره‌شده‌ای عوض
+        شود. تا وقتی همهٔ پرونده‌ها زیر نسخهٔ فعال‌اند این نکته حرفی ندارد، پس
+        فقط وقتی گفته می‌شود که واقعاً موضوعیت دارد. */}
+    {mix.other_scheme_versions > 0 && (
+      <p className="text-[11px] leading-relaxed text-gray-400">
+        این دو درصد با آستانه‌های <b>طرح نمره‌دهیِ فعال</b> دسته‌بندی شده‌اند.{" "}
+        {mix.other_scheme_versions.toLocaleString("fa-IR")} نفر از{" "}
+        {mix.people_counted.toLocaleString("fa-IR")} نفر، نتیجه‌شان زیر نسخهٔ
+        دیگری از طرح حساب شده است؛ خودِ آن عددها دست‌نخورده‌اند.
+      </p>
+    )}
     </div>
   );
 }

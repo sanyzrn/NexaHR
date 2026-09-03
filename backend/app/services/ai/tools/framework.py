@@ -22,6 +22,7 @@ from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, t
     description="فهرست شاخص‌های ارزیابی با بخش، دسته و فعال/غیرفعال بودن.",
     category="چارچوب",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {

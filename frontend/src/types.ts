@@ -386,6 +386,9 @@ export interface OutcomeMix {
   strong_threshold_pct: number;
   improvement_threshold_pct: number;
   people_counted: number;
+  /** از میان `people_counted`، چند نفر نتیجه‌شان زیر نسخهٔ *دیگری* از طرح
+   *  حساب شده. صفر یعنی نما کاملاً با نسخهٔ فعال می‌خواند. */
+  other_scheme_versions: number;
 }
 
 export interface DashboardOverview {

@@ -1,4 +1,4 @@
-import { useRef, type ReactNode, type RefObject } from "react";
+import { useId, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { useFocusTrap } from "./focusTrap";
@@ -41,6 +41,7 @@ export function Modal({
   initialFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   // قفلِ فوکوس، Escape و قفلِ اسکرول همه از هوکِ مشترک می‌آیند
   // (`ui/focusTrap`). کشوی ناوبریِ موبایل همین رفتار را لازم داشت و نداشتش،
@@ -64,7 +65,12 @@ export function Modal({
           ref={dialogRef}
           role="dialog"
           aria-modal="true"
-          aria-label={typeof title === "string" ? title : undefined}
+          // `aria-labelledby` و نه `aria-label`: عنوان می‌تواند `ReactNode`
+          // باشد (نشان + متن، یا یک `<span>`ِ رنگی)، و در آن حالت شرطِ
+          // `typeof title === "string"` می‌افتاد و دیالوگ *بی‌نام* اعلام
+          // می‌شد — صفحه‌خوان فقط «دیالوگ» می‌گفت. ارجاع به خودِ تیتر، هر دو
+          // حالت را می‌گیرد.
+          aria-labelledby={titleId}
           tabIndex={-1}
           className={`max-h-[90vh] w-full ${SIZES[size]} overflow-y-auto rounded-2xl bg-white shadow-float outline-none`}
           initial={{ opacity: 0, scale: 0.97, y: 8 }}
@@ -74,7 +80,9 @@ export function Modal({
         >
           {/* بالای مودال: عنوان + دکمه بستن */}
           <div className="mb-2.5 flex items-start justify-between gap-3 border-b border-gray-100 px-5 pt-4 pb-3">
-            <h3 className="text-sm font-bold text-gray-900 sm:text-base">{title}</h3>
+            <h3 id={titleId} className="text-sm font-bold text-gray-900 sm:text-base">
+              {title}
+            </h3>
             <button
               onClick={onClose}
               aria-label="بستن"

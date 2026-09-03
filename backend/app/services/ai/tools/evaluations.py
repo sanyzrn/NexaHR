@@ -66,6 +66,7 @@ def _describe_record(db: Session, record: EvaluationRecord) -> dict:
     ),
     category="ارزیابی",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -131,6 +132,7 @@ search_evaluations.describe = _describe_search_evaluations
     ),
     category="ارزیابی",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {"evaluation_id": {"type": "integer"}}, "required": ["evaluation_id"]},
 )
 def get_evaluation(ctx: ToolContext, evaluation_id: int) -> ToolOutcome:
@@ -159,6 +161,7 @@ def get_evaluation(ctx: ToolContext, evaluation_id: int) -> ToolOutcome:
     ),
     category="ارزیابی",
     risky=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {"personnel_id": {"type": "integer"}}, "required": ["personnel_id"]},
 )
 def create_evaluation(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
@@ -306,6 +309,7 @@ _ADVANCE_ACTIONS = tuple(_ADVANCE)
     ),
     category="ارزیابی",
     risky=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -398,6 +402,7 @@ advance_evaluation.describe = _describe_advance
     category="ارزیابی",
     risky=True,
     read_only=False,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -471,6 +476,7 @@ def invite_self_assessment(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
     ),
     category="ارزیابی",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {"limit": {"type": "integer"}}},
 )
 def my_open_cases(ctx: ToolContext, limit: int = 15) -> ToolOutcome:
@@ -539,6 +545,7 @@ def my_open_cases(ctx: ToolContext, limit: int = 15) -> ToolOutcome:
     ),
     category="ارزیابی",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {

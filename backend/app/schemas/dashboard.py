@@ -64,6 +64,14 @@ class OutcomeMix(BaseModel):
     strong_threshold_pct: float
     improvement_threshold_pct: float
     people_counted: int
+    #: از میان `people_counted`، چند نفر نتیجه‌شان زیر نسخهٔ *دیگری* از طرح
+    #: حساب شده.
+    #:
+    #: خودِ عددِ هر پرونده با قواعدِ نسخهٔ خودش حساب شده و دست‌نخورده می‌ماند،
+    #: ولی این دو درصد با آستانه‌های *امروز* دسته‌بندی می‌شوند — یعنی
+    #: عوض‌کردنِ یک آستانه نمای تجمیعی را بازنویسی می‌کند، بی آن‌که هیچ عددِ
+    #: ذخیره‌شده‌ای عوض شده باشد. صفر یعنی نمایش کاملاً با نسخهٔ فعال می‌خواند.
+    other_scheme_versions: int = 0
 
 
 class DashboardOverview(BaseModel):

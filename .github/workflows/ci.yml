@@ -77,6 +77,48 @@ jobs:
       - run: ruff check tools
       - run: python -m pytest tools/tests -q
 
+  # سناریوی سرتسری، فقط نیمهٔ APIاش.
+  #
+  # این سوئیت `mock_llm.py` دارد و از ابتدا قابلِ اجرای بی‌سر بود، ولی هیچ‌جای
+  # CI وصل نبود — یعنی تنها تستی که *کلِ* مسیرِ همکار را از ورود تا اجرای ابزار
+  # می‌رود، فقط دستی اجرا می‌شد. مسیرِ مرورگر عمداً بیرون می‌ماند (Chromium و
+  # زمانِ اجرا)، ولی نیمهٔ API نه سرویسِ بیرونی می‌خواهد و نه vite.
+  e2e-api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nexahr
+          POSTGRES_PASSWORD: nexahr_dev_password
+          POSTGRES_DB: nexahr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexahr -d nexahr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://nexahr:nexahr_dev_password@localhost:5432/nexahr
+      ENVIRONMENT: development
+      JWT_SECRET_KEY: ci-test-secret-key-not-for-production
+      ENABLE_SCHEDULER: "false"
+      BOOTSTRAP_ADMIN: "false"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+        working-directory: backend
+      - run: alembic upgrade head
+        working-directory: backend
+      - run: python3 e2e/setup_e2e.py
+      - run: bash e2e/run_e2e.sh --api-only
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

@@ -1,4 +1,8 @@
-FROM node:20-alpine AS build
+# نسخه پین شده و نه برچسبِ شناور: Vite 8 حداقل Node 20.19 می‌خواهد و
+# `node:20-alpine` هر شبانه‌روز می‌تواند به هر ۲۰.xای اشاره کند — از جمله
+# نسخه‌ای پایین‌تر از آن حداقل. بیلدی که دیروز کار می‌کرد و امروز نه، بدترین
+# شکلِ شکستن است.
+FROM node:20.19-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

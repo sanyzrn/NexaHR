@@ -225,7 +225,15 @@ export function SegmentedScore({
   const [dragging, setDragging] = useState(false);
 
   // درصد موقعیت thumb از لبهٔ چپ: امتیاز ۵ → ۰٪، امتیاز ۱ → ۱۰۰٪.
-  const pct = ((5 - (value ?? 3)) / 4) * 100;
+  //
+  // در حالتِ «امتیازی انتخاب نشده» thumb *روی track نمی‌نشیند* (M-14).
+  //
+  // پیش از این `value ?? 3` بود، یعنی نشانگرِ خالی دقیقاً وسط طیف می‌ایستاد.
+  // اسلایدرِ پیوسته با نقطهٔ استراحتِ دیدنی، لنگرِ گرایش-به-میانه است: عددی
+  // که هنوز انتخاب نشده، به‌شکلِ «۳» دیده می‌شود و انتخابِ ارزیاب را به سمتِ
+  // همان می‌کشد. برای سامانه‌ای که خروجی‌اش تصمیمِ تمدیدِ قرارداد است، این
+  // یک سوگیریِ اندازه‌گیری است و نه یک جزئیاتِ ظاهری.
+  const pct = value === null ? null : ((5 - value) / 4) * 100;
 
   function valueFromClientX(clientX: number): number {
     const rect = trackRef.current!.getBoundingClientRect();
@@ -305,21 +313,24 @@ export function SegmentedScore({
               style={{ left: `${((5 - n) / 4) * 100}%`, transform: "translate(-50%, -50%)" }}
             />
           ))}
-          {/* thumb — موقعیت درصدی، همیشه روی track */}
-          <div
-            aria-hidden
-            className={`absolute top-1/2 flex h-[22px] w-[22px] items-center justify-center rounded-full border-[3px] bg-white shadow-md ${
-              dragging ? "cursor-grabbing" : "cursor-grab"
-            } ${isSet ? "" : "opacity-70"}`}
-            style={{
-              left: `${pct}%`,
-              transform: "translate(-50%, -50%)",
-              borderColor: color,
-              transition: dragging ? "none" : "left 0.18s ease-out",
-            }}
-          >
-            <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-          </div>
+          {/* thumb — موقعیت درصدی، همیشه روی track. تا اولین انتخاب اصلاً
+              رندر نمی‌شود: نقطهٔ استراحتِ وسط، خودش یک پیشنهاد است. */}
+          {pct !== null && (
+            <div
+              aria-hidden
+              className={`absolute top-1/2 flex h-[22px] w-[22px] items-center justify-center rounded-full border-[3px] bg-white shadow-md ${
+                dragging ? "cursor-grabbing" : "cursor-grab"
+              }`}
+              style={{
+                left: `${pct}%`,
+                transform: "translate(-50%, -50%)",
+                borderColor: color,
+                transition: dragging ? "none" : "left 0.18s ease-out",
+              }}
+            >
+              <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+            </div>
+          )}
         </div>
       </div>
       <div className="mt-1 flex items-center justify-between text-[10px] text-gray-400">

@@ -37,7 +37,7 @@ from app.schemas.notification import ExpiringContract
 from app.services.authorization import is_module_enabled
 from app.services.org_unit import site_of, units_in_site
 from app.services.privacy import suppressed_avg
-from app.services.scoring_scheme import current_rules
+from app.services.scoring_scheme import active_scheme, current_rules
 from app.services.stage_stats import stage_stats
 from app.services.workflow import IS_OPEN_RECORD
 
@@ -81,10 +81,14 @@ def _outcome_mix(db: Session, in_site) -> OutcomeMix:
         float(rules.thresholds[-2][0]) if len(rules.thresholds) >= 2 else improvement_threshold
     )
 
+    active = active_scheme(db)
+    active_scheme_id = active.id if active else None
+
     latest = (
         select(
             EvaluationRecord.subject_personnel_id.label("pid"),
             EvaluationRecord.final_weighted_pct.label("pct"),
+            EvaluationRecord.scoring_scheme_id.label("scheme_id"),
             func.row_number()
             .over(
                 partition_by=EvaluationRecord.subject_personnel_id,
@@ -95,7 +99,7 @@ def _outcome_mix(db: Session, in_site) -> OutcomeMix:
         .where(_FINALIZED, in_site, EvaluationRecord.final_weighted_pct.is_not(None))
         .subquery()
     )
-    rows = db.execute(select(latest.c.pct).where(latest.c.rank == 1)).all()
+    rows = db.execute(select(latest.c.pct, latest.c.scheme_id).where(latest.c.rank == 1)).all()
     people = len(rows)
     if people == 0:
         return OutcomeMix(
@@ -104,16 +108,32 @@ def _outcome_mix(db: Session, in_site) -> OutcomeMix:
             strong_threshold_pct=strong_threshold,
             improvement_threshold_pct=improvement_threshold,
             people_counted=0,
+            other_scheme_versions=0,
         )
 
-    strong = sum(1 for (pct,) in rows if float(pct) >= strong_threshold)
-    weak = sum(1 for (pct,) in rows if float(pct) <= improvement_threshold)
+    strong = sum(1 for pct, _ in rows if float(pct) >= strong_threshold)
+    weak = sum(1 for pct, _ in rows if float(pct) <= improvement_threshold)
+    # چند نفر از این‌ها نتیجه‌شان زیر نسخهٔ *دیگری* از طرح حساب شده است.
+    #
+    # `final_weighted_pct`ِ هر پرونده با قواعدِ خودش حساب شده و دست‌نخورده
+    # می‌ماند (همان چیزی که مستندات وعده می‌دهد)، ولی این دو درصد با
+    # آستانه‌های *امروز* دسته‌بندی می‌شوند. یعنی عوض‌کردنِ یک آستانه، نمای
+    # تجمیعی‌ای را که یک مدیر می‌خواند بازنویسی می‌کند — بی آن‌که هیچ عددِ
+    # ذخیره‌شده‌ای عوض شده باشد.
+    #
+    # سرکوبِ خودِ دسته‌بندی راه نیست: «چند درصد نیازمند بهبودند» تنها با یک
+    # آستانهٔ مشترک معنا دارد. پس این عدد کنارش می‌آید تا خواننده بداند نمایش
+    # چقدر به آستانهٔ امروز بند است — صفر یعنی هیچ.
+    other_versions = sum(
+        1 for _, scheme_id in rows if scheme_id is not None and scheme_id != active_scheme_id
+    )
     return OutcomeMix(
         strong_pct=round(strong * 100 / people, 1),
         needs_improvement_pct=round(weak * 100 / people, 1),
         strong_threshold_pct=strong_threshold,
         improvement_threshold_pct=improvement_threshold,
         people_counted=people,
+        other_scheme_versions=other_versions,
     )
 
 

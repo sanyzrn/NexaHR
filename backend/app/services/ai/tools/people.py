@@ -138,6 +138,7 @@ def _person_payload(db: Session, person: Personnel) -> dict:
     ),
     category="پرسنل",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -218,6 +219,7 @@ search_personnel.describe = _describe_search
     description="نمای کامل یک پرسنل: قرارداد، حساب کاربری، زنجیرهٔ ارزیابی و پروندهٔ بازش.",
     category="پرسنل",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {"personnel_id": {"type": "integer"}},
@@ -763,6 +765,7 @@ update_user.describe = _describe_update_user
     description="فهرست واحدهای سازمانی با شمارِ پرسنل هر واحد.",
     category="سازمان",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {"include_inactive": {"type": "boolean"}}},
 )
 def list_org_units(ctx: ToolContext, include_inactive: bool = False) -> ToolOutcome:
@@ -856,6 +859,7 @@ create_org_unit.describe = _describe_create_org_unit
     description="دیدن زنجیرهٔ ارزیابی یک پرسنل: مسئول مستقیم، معاونت، مدیرعامل.",
     category="سازمان",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {"personnel_id": {"type": "integer"}}, "required": ["personnel_id"]},
 )
 def get_evaluation_access(ctx: ToolContext, personnel_id: int) -> ToolOutcome:

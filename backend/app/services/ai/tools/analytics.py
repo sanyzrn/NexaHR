@@ -34,6 +34,7 @@ def _parse_date(value: str | None) -> date | None:
     ),
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -75,6 +76,7 @@ def report_summary(
     description="مقایسهٔ امتیاز یک فرد با میانگین واحد خودش (ارزیابی نهایی‌شده؛ با رعایت سرکوب کوهورت).",
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {"personnel_id": {"type": "integer"}, "period_id": {"type": "integer"}},
@@ -107,6 +109,7 @@ def employee_vs_unit(ctx: ToolContext, personnel_id: int, period_id: int | None 
     ),
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {}},
 )
 def dashboard_overview(ctx: ToolContext) -> ToolOutcome:
@@ -123,6 +126,7 @@ def dashboard_overview(ctx: ToolContext) -> ToolOutcome:
     description="پرسنلِ فعالِ قراردادش رو به اتمام است یا منقضی شده — ورودیِ طبیعی تصمیم تمدید.",
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -187,6 +191,7 @@ def my_scoring_analysis(ctx: ToolContext) -> ToolOutcome:
     ),
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -283,6 +288,7 @@ def search_audit_log(
     description="مجوزهای اداری و نقشِ خود شما — برای پاسخ به «چه کاری از دستم برمی‌آید».",
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {}},
 )
 def my_permissions(ctx: ToolContext) -> ToolOutcome:
