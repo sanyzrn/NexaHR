@@ -120,3 +120,24 @@ def notify_hr_of_lockout(db: Session, username: str, until: datetime) -> None:
             within_days=1,
             link="/hr/audit-log",
         )
+
+
+def unlock(db: Session, username: str) -> bool:
+    """قفلِ این نام کاربری را برمی‌دارد. خروجی: قفل بود یا نه.
+
+    قفلِ خودکار در برابر حدسِ رمز درست است، ولی بی راهِ باز کردن، خودش یک
+    اهرم می‌شود: پیام‌های متمایزِ «چنین کاربری نیست» و «رمز اشتباه است» —
+    که تصمیمِ آگاهانه و مستندی است — به مهاجم اجازه می‌دهند حساب‌های معتبر
+    را بشمارد، و بعد هرکدام را با پنج درخواست قفل کند. تنها درمانِ موجود
+    «پانزده دقیقه صبر کن» بود، که مهاجم می‌تواند تا ابد تکرارش کند.
+
+    این تابع شکلِ سنجش را عوض نمی‌کند (نه آستانه، نه زمانِ برابرِ پاسخ)؛ فقط
+    یک راهِ خروج اضافه می‌کند که ردِ ممیزی دارد.
+    """
+    row = db.get(LoginAttempt, username)
+    if row is None:
+        return False
+    was_locked = locked_until(db, username) is not None
+    db.execute(delete(LoginAttempt).where(LoginAttempt.username == username))
+    db.flush()
+    return was_locked

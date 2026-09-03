@@ -1,4 +1,6 @@
 """خواندن مجوزها و وضعیت ماژول‌ها (نیمهٔ دوم P0-03)."""
+from fastapi import HTTPException
+from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -59,8 +61,39 @@ def module_states(db: Session) -> dict[str, bool]:
 
 
 def is_module_enabled(db: Session, key: str) -> bool:
+    """این ماژول روشن است؟ کلیدِ ناشناخته خطاست، نه «روشن».
+
+    پیش از این کلیدِ ناشناخته `True` برمی‌گشت. تنها راهِ رسیدن به آن شاخه یک
+    غلطِ تایپی در خودِ کد است (ردیفِ دیتابیس زودتر پیدا می‌شود)، و نتیجه‌اش
+    گاردی بود که همیشه می‌گذارد — یعنی درست همان حالتی که به‌نظر گارد است و
+    نیست. حالا بلند می‌شکند و تست همان لحظه می‌گیردش.
+    """
+    module = MODULES_BY_KEY.get(key)
+    if module is None:
+        raise KeyError(f"ماژولی با کلید «{key}» تعریف نشده است (core/modules.py)")
     row = db.get(ModuleSetting, key)
     if row is not None:
         return row.enabled
-    module = MODULES_BY_KEY.get(key)
-    return module.default_enabled if module else True
+    return module.default_enabled
+
+
+def ensure_module_enabled(db: Session, key: str) -> None:
+    """گاردِ ماژولِ خاموش — یک تابعِ ساده، عمداً نه یک `Depends`.
+
+    تا امروز این گارد یک `Depends`ِ استفاده‌نشده در `api/deps.py` بود
+    (`require_module`) و هیچ روتی به آن وصل نبود، پس *همهٔ* سوییچ‌های ماژول
+    فقط ظاهری بودند: سازمانی که کانالِ اعتراض را عمداً باز نکرده بود همچنان
+    اعتراض می‌پذیرفت، و سازمانی که خودارزیابی را خاموش کرده بود همچنان
+    خودارزیابی ثبت می‌کرد.
+
+    و چرا `Depends` نه: مسیرِ دستیار *تابعِ* endpoint را صدا می‌زند و نه خودِ
+    HTTP را، پس `Depends`ها اجرا نمی‌شوند — همان ریشه‌ای که C1–C3 از آن آمد.
+    گاردی که فقط در یکی از دو مسیر باشد گارد نیست. این‌جا در بدنهٔ خودِ
+    endpoint صدا زده می‌شود، پس هر دو مسیر از آن رد می‌شوند.
+    """
+    if not is_module_enabled(db, key):
+        module = MODULES_BY_KEY[key]
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=f"بخش «{module.label}» توسط مدیر سامانه غیرفعال شده است",
+        )

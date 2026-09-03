@@ -76,6 +76,10 @@ def synthetic_tool():
             risky=risky,
             capabilities=caps,
             roles=roles,
+            # ابزارِ بی‌اعلان دیگر سرِ ثبت رد می‌شود؛ این ابزارهای آزمایشی
+            # عمداً دامنه ندارند چون چیزِ *دیگری* را می‌سنجند (سوییچِ نوشتن،
+            # rollback، اجرای تک‌باره)، پس همان حالت را صریح اعلام می‌کنند.
+            guarded_inline=not caps and not roles,
             parameters=parameters or {"type": "object", "properties": {}},
         )(fn)
         added.append(name)
@@ -608,6 +612,8 @@ def test_a_second_confirm_during_execution_is_refused_and_runs_once(monkeypatch)
             category="تست",
             read_only=False,
             risky=True,
+            # چیزی که این تست می‌سنجد اجرای تک‌بارهٔ تأیید است و نه دامنه.
+            guarded_inline=True,
             parameters={"type": "object", "properties": {}},
         )(_slow_write)
 

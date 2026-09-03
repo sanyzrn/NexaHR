@@ -50,6 +50,21 @@ class ToolSpec:
     capabilities: frozenset[Capability] = frozenset()
     #: نقش‌های مجاز. تهی یعنی «هر نقشی که مجوزهایش را دارد».
     roles: frozenset[UserRole] = frozenset()
+    #: «گاردِ من در بدنهٔ خودم است، نه در این اعلان.»
+    #:
+    #: بعضی ابزارها دامنه‌شان را نمی‌توان با یک مجموعهٔ نقش/مجوز گفت: مثلاً
+    #: `get_evaluation` به *پروندهٔ همان کاربر* بند است (`_ensure_can_view`)،
+    #: و `advance_evaluation` گاردش را از خودِ endpoint می‌گیرد. آن‌ها واقعاً
+    #: اعلانِ ثابتی ندارند.
+    #:
+    #: ولی تا امروز «نداشتنِ اعلان» *بی‌صدا* یعنی «برای همه»: `is_allowed` برای
+    #: ابزارِ بی‌اعلان `True` برمی‌گرداند. یعنی پیش‌فرضِ باز، در سامانه‌ای که
+    #: همه‌جای دیگرش fail-closed است — و ابزارِ تازه‌ای که یادش برود گاردش را
+    #: بنویسد، بی هیچ خطایی به همه تبلیغ می‌شود.
+    #:
+    #: حالا این حالت باید *گفته* شود. ثبتِ ابزاری که نه مجوز دارد، نه نقش، و
+    #: نه این پرچم، سرِ import می‌شکند.
+    guarded_inline: bool = False
 
     def to_openai_schema(self) -> dict:
         return {
@@ -123,12 +138,24 @@ def tool(
     risky: bool = False,
     capabilities: tuple = (),
     roles: tuple = (),
+    guarded_inline: bool = False,
 ) -> Callable:
-    """دکوراتورِ ثبت ابزار. هر ابزار دقیقاً یک‌بار ثبت می‌شود."""
+    """دکوراتورِ ثبت ابزار. هر ابزار دقیقاً یک‌بار ثبت می‌شود.
+
+    و هر ابزار باید *چیزی* دربارهٔ دامنه‌اش بگوید: یک مجوز، یک نقش، یا
+    `guarded_inline=True` (یعنی «دامنه‌ام را خودِ بدنه‌ام می‌سنجد»). سکوت
+    پیش از این «برای همه» معنا می‌شد و هیچ‌جا اعلام نمی‌شد؛ حالا سرِ import
+    می‌شکند، که تنها جای درستِ گرفتنِ این اشتباه است.
+    """
 
     def register(fn: Callable) -> Callable:
         if name in REGISTRY:
             raise ValueError(f"ابزار تکراری: {name}")
+        if not capabilities and not roles and not guarded_inline:
+            raise ValueError(
+                f"ابزار «{name}» دامنه‌اش را اعلام نکرده است: یا `capabilities`، "
+                "یا `roles`، یا `guarded_inline=True` اگر گارد در بدنهٔ خودش است."
+            )
         REGISTRY[name] = ToolSpec(
             name=name,
             description=description,
@@ -139,6 +166,7 @@ def tool(
             risky=risky,
             capabilities=frozenset(capabilities),
             roles=frozenset(roles),
+            guarded_inline=guarded_inline,
         )
         return fn
 
@@ -169,11 +197,16 @@ def get_tool(name: str) -> ToolSpec | None:
 def is_allowed(spec: ToolSpec, user: CurrentUser, caps: set[Capability]) -> bool:
     """همان معادله‌ای که کنش‌های نسخهٔ قبل داشتند، حالا برای همهٔ ابزارها.
 
-    مجوزِ متناسب موجود باشد *یا* نقشِ کاربر یکی از نقش‌های صریح ابزار — و اگر
-    ابزار هیچ‌کدام را نسنجیده باشد، برای همه است.
+    مجوزِ متناسب موجود باشد *یا* نقشِ کاربر یکی از نقش‌های صریح ابزار.
+
+    ابزاری که هیچ‌کدام را اعلام نکرده باید `guarded_inline=True` داشته باشد —
+    یعنی صریح گفته باشد «گاردم در بدنهٔ خودم است». پیش از این نبودِ اعلان
+    بی‌صدا «برای همه» معنا می‌شد، و ثبت هم جلویش را نمی‌گرفت.
     """
-    if not spec.capabilities and not spec.roles:
+    if spec.guarded_inline and not spec.capabilities and not spec.roles:
         return True
+    if not spec.capabilities and not spec.roles:
+        return False
     if spec.capabilities and (set(spec.capabilities) & set(caps)):
         return True
     if spec.roles and user.role in spec.roles:

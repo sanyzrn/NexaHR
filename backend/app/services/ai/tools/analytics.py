@@ -34,6 +34,7 @@ def _parse_date(value: str | None) -> date | None:
     ),
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -75,6 +76,7 @@ def report_summary(
     description="مقایسهٔ امتیاز یک فرد با میانگین واحد خودش (ارزیابی نهایی‌شده؛ با رعایت سرکوب کوهورت).",
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {"personnel_id": {"type": "integer"}, "period_id": {"type": "integer"}},
@@ -107,6 +109,7 @@ def employee_vs_unit(ctx: ToolContext, personnel_id: int, period_id: int | None 
     ),
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {}},
 )
 def dashboard_overview(ctx: ToolContext) -> ToolOutcome:
@@ -123,6 +126,7 @@ def dashboard_overview(ctx: ToolContext) -> ToolOutcome:
     description="پرسنلِ فعالِ قراردادش رو به اتمام است یا منقضی شده — ورودیِ طبیعی تصمیم تمدید.",
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -187,6 +191,7 @@ def my_scoring_analysis(ctx: ToolContext) -> ToolOutcome:
     ),
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -237,19 +242,27 @@ def search_audit_log(
         from datetime import timedelta
 
         stmt = stmt.where(AuditLog.created_at < to_dt + timedelta(days=1))
-    # دامنهٔ دید: دارندهٔ گزارش کامل همه‌چیز؛ دارندهٔ سلامت فقط رویدادهای سامانه‌ای
+    # دامنهٔ دید: دارندهٔ گزارش کامل همه‌چیز؛ دارندهٔ سلامت فقط رویدادهای
+    # سامانه‌ای — و *همان* فهرستِ رابط، نه یک نسخهٔ دستیِ موازی.
+    #
+    # نسخهٔ قبلی فهرستِ خودش را داشت و دو نامِ اولش (`user_login`،
+    # `user_login_failed`) هیچ‌وقت emit نمی‌شدند؛ نام‌های واقعی
+    # `login_succeeded` و `login_failed`اند. یعنی تنها کاربردی که برای این
+    # مجوز اعلام شده — «چرا این حساب وارد نمی‌شود» — از راه دستیار هیچ
+    # برنمی‌گرداند. کمربندِ دومِ رابط (`evaluation_record_id is None`) هم
+    # نبود.
     if not can_full:
-        system_events = {
-            "user_login", "user_login_failed", "account_locked", "ai_settings_changed",
-            "ai_access_changed", "ai_tool_invoked", "ai_tool_failed", "ai_action_confirmed",
-            "ai_action_rejected", "capabilities_changed",
-        }
-        stmt = stmt.where(AuditLog.event_type.in_(system_events))
+        from app.api.routers.audit_log import SYSTEM_EVENT_TYPES
+
+        stmt = stmt.where(
+            AuditLog.event_type.in_(SYSTEM_EVENT_TYPES),
+            AuditLog.evaluation_record_id.is_(None),
+        )
 
     rows = list(db.scalars(stmt.order_by(AuditLog.id.desc()).limit(max(1, min(int(limit or 20), 100)))))
     actor_ids = {r.actor_user_id for r in rows if r.actor_user_id}
     usernames = (
-        dict(db.execute(select(User.id, User.username).where(User.id.in_(actor_ids))))
+        dict(db.execute(select(User.id, User.username).where(User.id.in_(actor_ids))).all())
         if actor_ids
         else {}
     )
@@ -275,6 +288,7 @@ def search_audit_log(
     description="مجوزهای اداری و نقشِ خود شما — برای پاسخ به «چه کاری از دستم برمی‌آید».",
     category="گزارش",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {}},
 )
 def my_permissions(ctx: ToolContext) -> ToolOutcome:

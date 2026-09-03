@@ -126,8 +126,23 @@ def activate(db: Session, scheme: ScoringScheme, *, actor_user_id: int) -> None:
     گزارش ممیزی): یک نفرِ تنها با مجوزِ manage_scoring می‌توانست قاعدهٔ
     نمره‌دهیِ کل سازمان را بسازد و فعال کند.
 
+    به همان استدلال، «فقط پیش‌نویس فعال می‌شود» هم این‌جاست و نه در endpoint.
+    آن گارد فقط در روتر بود و مسیر دستیار از کنارش می‌گذشت، پس یک نسخهٔ
+    *بازنشسته* از راه دستیار دوباره فعال می‌شد — یعنی برگشتِ بی‌صدای قاعدهٔ
+    نمره‌دهیِ سازمان، و هر پروندهٔ تازه‌ای با آن نسخهٔ احیاشده مهر می‌خورد.
+    نسخهٔ فعال یا بازنشسته تغییرناپذیر است؛ راهِ درست، پیش‌نویسِ تازه است.
+
+    نکته: برای نسخهٔ ۱ که با seed آمده `created_by_user_id is None` است، پس
+    گاردِ دو‌نفره روی آن اصلاً اعمال نمی‌شود — دلیلِ دیگری برای این‌که گاردِ
+    «فقط پیش‌نویس» جدا و همیشگی باشد.
+
     commit با فراخواننده است تا لاگ ممیزی در همان تراکنش بنشیند.
     """
+    if scheme.status is not SchemeStatus.draft:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="فقط پیش‌نویس را می‌توان فعال کرد؛ نسخهٔ فعال یا بازنشسته تغییرناپذیر است",
+        )
     if scheme.created_by_user_id is not None and scheme.created_by_user_id == actor_user_id:
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,

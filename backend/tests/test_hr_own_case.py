@@ -26,6 +26,9 @@ from tests.helpers import (
     make_user,
 )
 
+#: نمایِ خودِ کارمند پیش‌فرض خاموش است و این فایل رفتارِ *روشن* را می‌سنجد.
+pytestmark = pytest.mark.usefixtures("employee_view_on")
+
 
 @pytest.fixture()
 def hr_under_review(client, db_session):

@@ -24,9 +24,18 @@ def _queue_outbound(db: Session, notification: Notification) -> None:
 
     فقط *ثبت* می‌شود؛ هیچ ارسالی این‌جا رخ نمی‌دهد. اگر ارسال روی مسیر درخواست
     بود، کندی سرویس پیامک به شکست «تأیید پرونده» ترجمه می‌شد.
+
+    ماژولِ «اعلان بیرونی» این‌جا سنجیده می‌شود و نه در فرستنده: نقطهٔ درستِ
+    خاموش‌کردن، *صف نریختن* است. اگر ردیف‌ها ساخته می‌شدند و فرستنده ردشان
+    می‌کرد، خاموش‌کردن سوییچ یک صفِ روبه‌رشدِ ردیف‌های مرده می‌ساخت که روزی
+    که کسی سوییچ را برگرداند، همه‌شان یک‌جا بیرون می‌رفتند. اعلانِ
+    درون‌برنامه‌ای دست‌نخورده می‌ماند — آن هسته است، نه کانال.
     """
+    from app.services.authorization import is_module_enabled
     from app.services.delivery import enqueue_for
 
+    if not is_module_enabled(db, "outbound_notifications"):
+        return
     # شناسه لازم است تا ردیف تحویل به آن ارجاع دهد
     db.flush()
     enqueue_for(db, notification)
@@ -141,13 +150,19 @@ def employee_results_are_visible(db: Session) -> bool:
 
 
 def subject_user_ids(db: Session, personnel_id: int) -> list[int]:
-    """حساب‌های فعالِ کارمندیِ متصل به این پرسنل — گیرندهٔ اعلان‌های «دربارهٔ خودت»."""
+    """حساب‌های فعالِ متصل به این پرسنل — گیرندهٔ اعلان‌های «دربارهٔ خودت».
+
+    عمداً نقش سنجیده نمی‌شود. تا امروز `User.role == employee` بود، و نتیجه‌اش
+    این بود که مسئولِ واحد و کارمندِ منابع انسانی و معاونت — که خودشان هم
+    ارزیابی می‌شوند — هیچ‌وقت خبر نمی‌شدند که پروندهٔ *خودشان* نهایی شد.
+    «چه کسی ارزیابی می‌شود» با «چه نقشی در زنجیره دارد» یکی نیست؛ همان
+    تفکیکی که `require_own_personnel` در مسیرهای `/api/me` انجام داد.
+    """
     from app.models.user import User
 
     return list(
         db.scalars(
             select(User.id).where(
-                User.role == UserRole.employee,
                 User.personnel_id == personnel_id,
                 User.is_active.is_(True),
             )

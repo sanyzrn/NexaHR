@@ -22,6 +22,7 @@ from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, t
     description="فهرست شاخص‌های ارزیابی با بخش، دسته و فعال/غیرفعال بودن.",
     category="چارچوب",
     read_only=True,
+    guarded_inline=True,
     parameters={
         "type": "object",
         "properties": {
@@ -78,30 +79,35 @@ def list_indicators(ctx: ToolContext, section: str = "", include_inactive: bool 
     },
 )
 def create_indicator(ctx: ToolContext, section: str, category: str, description: str) -> ToolOutcome:
-    from app.models.enums import IndicatorSection
-    from app.models.indicator import Indicator
-    from app.services.audit import log_event
+    """از راهِ endpointِ رسمی، نه یک `db.add` موازی.
 
-    db = ctx.db
+    بدنهٔ قبلی خودش ردیف را می‌ساخت و دو چیزِ endpoint را جا می‌گذاشت:
+
+    * `display_order` را صفر می‌گذاشت. endpoint عمداً ورودی را نادیده می‌گیرد
+      و شاخص را به *انتهای* همان بخش می‌برد؛ با صفر، شاخصِ تازه سرِ فهرستِ
+      فرمِ نمره‌دهی می‌نشست.
+    * و مهم‌تر: `_publish` را صدا نمی‌زد — یعنی نسخهٔ چارچوب جلو نمی‌رفت و
+      پرونده‌های دست‌نخوردهٔ باز به نسخهٔ تازه نمی‌رفتند. مستنداتِ خودِ
+      `_publish` می‌گوید «هر مسیری که *عضویت* را عوض می‌کند باید از این‌جا رد
+      شود. یادش رفتن یعنی برگشتِ همان خرابی، فقط از دری که تست‌ها نگاهش
+      نمی‌کنند.» این همان در بود.
+    """
+    from app.api.routers.indicators import create_indicator as create_endpoint
+    from app.models.enums import IndicatorSection
+    from app.schemas.indicator import IndicatorCreate
+
     text = (description or "").strip()
     if not text:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "متن شاخص خالی است")
-    indicator = Indicator(
-        section=IndicatorSection(section.strip()),
-        category=(category or "").strip()[:150],
-        description=text[:1000],
-        display_order=0,
-        is_active=True,
+    indicator = create_endpoint(
+        payload=IndicatorCreate(
+            section=IndicatorSection(section.strip()),
+            category=(category or "").strip()[:150],
+            description=text[:1000],
+        ),
+        db=ctx.db,
+        current_user=ctx.user,
     )
-    db.add(indicator)
-    db.flush()
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="indicator_created",
-        new_value={"id": indicator.id, "section": section, "category": category, "via": "ai_copilot"},
-    )
-    db.commit()
     return ToolOutcome(
         content=json_content(
             {"created": True, "indicator": {"id": indicator.id, "description": indicator.description}}
@@ -133,6 +139,14 @@ create_indicator.describe = _describe_create_indicator
             "description": {"type": "string"},
             "category": {"type": "string"},
             "is_active": {"type": "boolean"},
+            "wording_fix_reason": {
+                "type": "string",
+                "description": (
+                    "اگر به این شاخص قبلاً نمره داده شده و فقط نگارش را اصلاح می‌کنید، "
+                    "دلیلش را این‌جا بنویسید تا ثبت شود. اگر معنای سؤال عوض می‌شود، "
+                    "به‌جای ویرایش باید «جایگزین» شود."
+                ),
+            },
         },
         "required": ["indicator_id"],
     },
@@ -143,35 +157,45 @@ def update_indicator(
     description: str | None = None,
     category: str | None = None,
     is_active: bool | None = None,
+    wording_fix_reason: str | None = None,
 ) -> ToolOutcome:
-    from app.models.indicator import Indicator
-    from app.services.audit import log_event
+    """از راهِ endpointِ رسمی. بدنهٔ قبلی دو گاردِ آن را نداشت.
 
-    db = ctx.db
-    indicator = db.get(Indicator, int(indicator_id))
-    if indicator is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "شاخصی با این شناسه پیدا نشد")
-    before = {"description": indicator.description, "category": indicator.category, "is_active": indicator.is_active}
-    changed = {}
+    * گاردِ «بازنویسیِ معنا» (P1-05): متنِ شاخصی که قبلاً نمره خورده را
+      نمی‌شود بی اعلامِ صریحِ «این اصلاح نگارشی است» عوض کرد — وگرنه نمودارِ
+      دوساله دو سؤالِ متفاوت را کنارِ هم می‌گذارد و چیزی این را نمی‌گوید.
+      مسیرِ دستیار آن ۴۰۹ را نداشت، پس معنای یک شاخصِ نمره‌خورده را بی‌صدا
+      عوض می‌کرد.
+    * و `_publish` روی تغییرِ فعال/غیرفعال: عضویتِ چارچوب عوض می‌شود، پس
+      نسخه باید جلو برود و پرونده‌های دست‌نخوردهٔ باز به آن بروند.
+
+    `wording_fix_reason` به همین دلیل به شِما اضافه شد: بی آن، دستیار
+    راهی برای *گذشتن* از آن گارد نداشت — فقط ۴۰۹ می‌گرفت و پیامش هم درست
+    همین را می‌خواهد.
+    """
+    from app.api.routers.indicators import update_indicator as update_endpoint
+    from app.schemas.indicator import IndicatorUpdate
+
+    fields: dict = {}
     if description is not None and description.strip():
-        indicator.description = description.strip()[:1000]
-        changed["description"] = indicator.description
+        fields["description"] = description.strip()[:1000]
     if category is not None and category.strip():
-        indicator.category = category.strip()[:150]
-        changed["category"] = indicator.category
+        fields["category"] = category.strip()[:150]
     if is_active is not None:
-        indicator.is_active = bool(is_active)
-        changed["is_active"] = indicator.is_active
-    if not changed:
+        fields["is_active"] = bool(is_active)
+    if not fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "تغییری داده نشده است")
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="indicator_updated",
-        old_value={"id": indicator.id, **{k: str(v) for k, v in before.items()}},
-        new_value={"id": indicator.id, "via": "ai_copilot", **{k: str(v) for k, v in changed.items()}},
+    if wording_fix_reason is not None and wording_fix_reason.strip():
+        fields["wording_fix_reason"] = wording_fix_reason.strip()[:500]
+
+    indicator = update_endpoint(
+        indicator_id=int(indicator_id),
+        # `exclude_unset` در endpoint یعنی فقط کلیدهای *داده‌شده* اعمال
+        # می‌شوند؛ ساختنِ مدل با همان کلیدها همین را نگه می‌دارد.
+        payload=IndicatorUpdate(**fields),
+        db=ctx.db,
+        current_user=ctx.user,
     )
-    db.commit()
     return ToolOutcome(
         content=json_content({"updated": True, "indicator_id": indicator.id}),
         summary=f"شاخص «{indicator.category}» به‌روز شد",
@@ -529,7 +553,7 @@ def search_improvement_plans(ctx: ToolContext, status: str = "", limit: int = 15
     if status:
         stmt = stmt.where(ImprovementPlan.status == status)
     rows = list(db.scalars(stmt.order_by(ImprovementPlan.id.desc()).limit(max(1, min(int(limit or 15), 50)))))
-    names = dict(db.execute(select(PersonnelLite.id, PersonnelLite.full_name)))
+    names = dict(db.execute(select(PersonnelLite.id, PersonnelLite.full_name)).all())
     items = [
         {
             "id": p.id,

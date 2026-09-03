@@ -25,6 +25,7 @@ from app.schemas.period import (
     PeriodUpdate,
 )
 from app.services.audit import log_event
+from app.services.authorization import ensure_module_enabled
 from app.services.bulk_evaluation import BulkOutcome, CohortFilter, execute, plan, summarise
 from app.services.notifications import notify
 from app.services.workflow import IS_OPEN_RECORD
@@ -59,6 +60,7 @@ def create_period(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> EvaluationPeriod:
+    ensure_module_enabled(db, "periods")
     already_open = db.scalar(
         select(EvaluationPeriod).where(EvaluationPeriod.status == PeriodStatus.open)
     )
@@ -124,6 +126,7 @@ def update_period(
     هر گزارش و روی هر کارنامه می‌نشیند — تا ابد می‌ماند، و تنها راهش ساختن دورهٔ
     تازه بود که پرونده‌های موجود را جا می‌گذاشت.
     """
+    ensure_module_enabled(db, "periods")
     period = db.get(EvaluationPeriod, period_id)
     if period is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="دوره یافت نشد")
@@ -167,6 +170,8 @@ def close_period(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> EvaluationPeriod:
+    # «بستن» عمداً گاردِ ماژول ندارد: خاموش‌کردن ماژولِ دوره‌ها نباید دوره‌ای
+    # را که باز مانده برای همیشه باز نگه دارد. گارد روی *افزودن* است.
     period = _get_period_or_404(db, period_id)
     if period.status != PeriodStatus.open:
         raise HTTPException(
@@ -368,6 +373,7 @@ def preview_bulk_create(
     نفر کاری است که برگرداندنش دستی و پرزحمت است، پس باید بشود پیش از انجامش
     دیدش.
     """
+    ensure_module_enabled(db, "periods")
     return _to_result(plan(db, _to_cohort(payload)), dry_run=True)
 
 
@@ -388,6 +394,7 @@ def run_bulk_create(
     عملیات idempotent است: اجرای دوباره با همان کوهورت، برای کسانی که پرونده
     گرفته‌اند «از قبل باز دارد» برمی‌گرداند، نه پروندهٔ دوم.
     """
+    ensure_module_enabled(db, "periods")
     plans = execute(db, _to_cohort(payload))
     result = _to_result(plans, dry_run=False)
     # ساخت دسته‌ای یک تصمیم سازمانی است، نه یک کلیک: چه کوهورتی و با چه نتیجه‌ای،

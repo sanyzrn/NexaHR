@@ -7,6 +7,8 @@
 """
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.core.config import settings
 from app.models.enums import Capability
 from app.models.evaluation import EvaluationRecord
@@ -19,6 +21,9 @@ from tests.helpers import (
     make_user,
     set_module,
 )
+
+#: نمایِ خودِ کارمند پیش‌فرض خاموش است و این فایل رفتارِ *روشن* را می‌سنجد.
+pytestmark = pytest.mark.usefixtures("employee_view_on")
 
 
 def _case(client, db_session, *, finalize: bool):

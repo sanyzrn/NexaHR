@@ -227,13 +227,10 @@ def activate_scheme(
     scheme = db.get(ScoringScheme, scheme_id)
     if scheme is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="طرح یافت نشد")
-    if scheme.status is not SchemeStatus.draft:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="فقط پیش‌نویس را می‌توان فعال کرد؛ نسخهٔ فعال یا بازنشسته تغییرناپذیر است",
-        )
-    # جداسازیِ وظایف (سازنده ≠ فعال‌کننده) داخل خودِ سرویس سنجیده می‌شود تا
-    # *هر* مسیری که activate() را صدا می‌زند — رابط و دستیار — از آن عبور نکند.
+    # هر دو گارد — «فقط پیش‌نویس» و «سازنده ≠ فعال‌کننده» — داخل خودِ سرویس
+    # سنجیده می‌شوند تا *هر* مسیری که activate() را صدا می‌زند (رابط و دستیار)
+    # از آن‌ها عبور نکند. تا امروز گاردِ «فقط پیش‌نویس» همین‌جا بود و مسیر
+    # دستیار از کنارش می‌گذشت: یک نسخهٔ بازنشسته دوباره فعال می‌شد.
     previous = db.scalar(
         select(ScoringScheme).where(ScoringScheme.status == SchemeStatus.active)
     )

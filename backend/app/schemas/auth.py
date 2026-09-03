@@ -6,8 +6,20 @@ from app.models.enums import UserRole
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    """ورودیِ ورود، با سقفِ طول روی هر دو میدان.
+
+    بی سقف، Argon2 هرچه رسیده را هش می‌کند و تنها مهارِ موجود
+    `client_max_body_size 20m` در nginx بود — عددی که برای *بارگذاریِ فایلِ
+    دستیار* انتخاب شده و ربطی به فرمِ ورود ندارد. یعنی یک درخواستِ
+    احراز‌هویت‌نشده می‌توانست چند مگابایت رمز بفرستد و پروسه را روی تابعِ
+    عمداً کندِ هش نگه دارد.
+
+    ۲۵۶ سخاوتمندانه است: از سقفِ عملیِ هر مدیرِ رمزی بیشتر است و هیچ رمزِ
+    واقعی‌ای را رد نمی‌کند. سقفِ نام کاربری هم از ستونِ خودش می‌آید.
+    """
+
+    username: str = Field(max_length=150)
+    password: str = Field(max_length=256)
 
 
 class LoginResponse(BaseModel):

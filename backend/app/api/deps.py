@@ -7,7 +7,7 @@ from app.db.session import get_db
 from app.models.enums import Capability, UserRole
 from app.models.user import User
 from app.schemas.auth import CurrentUser
-from app.services.authorization import capabilities_of, is_module_enabled
+from app.services.authorization import capabilities_of
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -191,22 +191,14 @@ def require_role_or_capability(role: UserRole, capability: Capability):
     return dependency
 
 
-def require_module(key: str):
-    """گاردِ ماژول خاموش‌شده.
-
-    روی نوشتن‌ها می‌نشیند نه خواندن‌ها: خاموش‌کردن یک ماژول نباید دادهٔ موجود را
-    از دسترس خارج کند — فقط جلوی *افزودن* تازه را می‌گیرد. سوییچی که داده را
-    ناپیدا کند، سوییچ نیست.
-    """
-
-    def dependency(db: Session = Depends(get_db)) -> None:
-        if not is_module_enabled(db, key):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="این بخش توسط مدیر سامانه غیرفعال شده است",
-            )
-
-    return dependency
+# گاردِ ماژول این‌جا نیست: `services/authorization.ensure_module_enabled`.
+#
+# تا امروز یک `require_module(key)` این‌جا بود که *هیچ روتی* از آن استفاده
+# نمی‌کرد، پس همهٔ سوییچ‌های ماژول ظاهری بودند. دلیلِ برنگرداندنش به‌شکل
+# `Depends`: مسیرِ دستیار تابعِ endpoint را صدا می‌زند و نه خودِ HTTP را، پس
+# `Depends`ها اجرا نمی‌شوند — همان ریشه‌ای که C1–C3 از آن آمد. گارد در بدنهٔ
+# خودِ endpoint صدا زده می‌شود تا هر دو مسیر از آن رد شوند، و یک مکانیزم
+# باشد و نه دو.
 
 
 def audit_log_reader(

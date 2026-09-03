@@ -15,6 +15,17 @@ class AppConfig(BaseModel):
     bonus_max_points: float
     # حداقل طول توضیح امتیاز ویژه؛ قاعدهٔ مشترک فرانت و سرور.
     bonus_reason_min_length: int
+    #: {شناسهٔ شاخص: وزن} — شاخصِ غایب وزن ۱ دارد.
+    #:
+    #: بی این، پیش‌نمایشِ فرم *نمی‌توانست* درست باشد: `computePreview` هر شاخص
+    #: را وزن ۱ می‌گرفت، در حالی که سرور از `rules.weight_for` استفاده می‌کند.
+    #: روی هر طرحی با وزن‌های نابرابر، عددی که ارزیاب نگاه می‌کرد و تصمیمش را
+    #: بر آن می‌ساخت با عددی که ثبت می‌شد یکی نبود — و «وزنِ هر شاخص» یکی از
+    #: قابلیت‌های اصلیِ طرح است، نه یک گوشه.
+    #:
+    #: کلیدها در JSON رشته‌اند (قاعدهٔ خودِ JSON)؛ فرانت با همان `String(id)`
+    #: می‌خواندشان.
+    indicator_weights: dict[int, float]
 
     @classmethod
     def from_rules(cls, rules) -> "AppConfig":
@@ -33,4 +44,5 @@ class AppConfig(BaseModel):
             specialized_section_weight=rules.specialized_section_weight,
             bonus_max_points=rules.bonus_max_points,
             bonus_reason_min_length=BONUS_REASON_MIN,
+            indicator_weights=dict(rules.indicator_weights),
         )

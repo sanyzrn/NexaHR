@@ -23,6 +23,7 @@ from app.services.indicator_framework import (
     impact_of_membership_change,
     rebind_untouched_open_records,
 )
+from app.services.scoring_scheme import current_rules
 
 router = APIRouter(prefix="/api/indicators", tags=["indicators"])
 
@@ -71,8 +72,11 @@ def list_indicators(
     if not include_inactive:
         query = query.where(Indicator.is_active.is_(True))
     query = query.order_by(Indicator.section, Indicator.display_order)
+    rules = current_rules(db)
     return [
-        IndicatorRead.model_validate(indicator).model_copy(update={"usage_count": used})
+        IndicatorRead.model_validate(indicator).model_copy(
+            update={"usage_count": used, "scheme_weight": rules.weight_for(indicator.id)}
+        )
         for indicator, used in db.execute(query)
     ]
 
@@ -299,6 +303,15 @@ def replace_indicator(
             status_code=status.HTTP_409_CONFLICT,
             detail="این شاخص از قبل غیرفعال است؛ برای افزودن سؤال تازه از «شاخص جدید» استفاده کنید",
         )
+    # وزنی که با این جایگزینی از دست می‌رود (M-4).
+    #
+    # `indicator_weights` با شناسه کلید خورده و طرحِ فعال تغییرناپذیر است، پس
+    # جایگزین با وزن ۱ شروع می‌کند. این‌جا بستنِ کار راه نیست — شناسهٔ تازه
+    # پیش از جایگزینی وجود ندارد، پس پیش‌نویسی که وزنش را داشته باشد هم ساخته
+    # نمی‌شود و HR در بن‌بست می‌افتد. کاری که می‌شود کرد این است که عدد
+    # *دیده* شود: پیش از کلیک در فهرست شاخص‌ها (`scheme_weight`)، و پس از
+    # آن در لاگ ممیزی، تا برگرداندنش لازم نباشد کسی از حفظ بداندش.
+    dropped_weight = current_rules(db).weight_for(old.id)
 
     replacement = Indicator(
         section=old.section,
@@ -328,6 +341,10 @@ def replace_indicator(
             "description": replacement.description,
             "reason": payload.reason,
             "rebound_open_records": moved,
+            # وزنِ شاخصِ قدیم، و وزنی که جایگزین می‌گیرد. تنها جایی که این
+            # عدد پس از جایگزینی قابل بازخوانی است.
+            "weight_before": dropped_weight,
+            "weight_after": 1.0,
         },
     )
     db.commit()

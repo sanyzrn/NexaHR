@@ -104,3 +104,26 @@ def client(db_session):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def employee_view_on(db_session):
+    """سه ماژولِ «نمایِ خودِ کارمند» را صریح روشن می‌کند.
+
+    پیش‌فرضِ هر سه *خاموش* است (`core/modules.py`)، و از وقتی سوییچ‌ها واقعاً
+    اعمال می‌شوند این دیگر یک جزئیاتِ بی‌اثر نیست: تستی که رؤیت یا اعتراض یا
+    دیدنِ نتیجه را می‌سنجد باید خودش آن‌ها را روشن کند، وگرنه ۴۰۳ می‌گیرد و
+    شکستش شبیه رگرسیونِ گردش‌کار به‌نظر می‌رسد.
+
+    تا امروز همان تست‌ها سبز بودند چون گاردی وجود نداشت — یعنی سبزیِ‌شان
+    ثابت می‌کرد سوییچ کار *نمی‌کند*.
+    """
+    from tests.helpers import set_module
+
+    for key in (
+        "employee_evaluation_visibility",
+        "employee_result_acknowledgement",
+        "objections",
+    ):
+        set_module(db_session, key, True)
+    db_session.commit()

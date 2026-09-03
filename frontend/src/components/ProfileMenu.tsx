@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
+import { ThemeToggle } from "../ui/ThemeToggle";
 import { ROLE_LABELS } from "../types";
 import type { CurrentUser } from "../types";
 
@@ -72,6 +73,16 @@ export function ProfileMenu({ user, onLogout }: { user: CurrentUser; onLogout: (
                   {ROLE_LABELS[user.role]}
                 </span>
               </span>
+            </div>
+
+            {/* انتخابِ تم این‌جا هم می‌آید (M-3).
+                در نوار بالا زیر ۶۴۰px `display:none` است و جای دیگری در پوستهٔ
+                برنامه نیست — نه در کشوی موبایل، نه این‌جا. یعنی کاربرِ PWA که
+                «شب» می‌خواست، باید *خارج* می‌شد تا به نسخهٔ صفحهٔ ورود برسد.
+                «حساب من» جای درستِ این تنظیم در هر عرضی است. */}
+            <div className="flex items-center justify-between gap-2 border-b border-gray-100 px-2.5 py-2.5">
+              <span className="text-xs font-medium text-gray-600">ظاهر برنامه</span>
+              <ThemeToggle />
             </div>
 
             <div className="p-1.5">

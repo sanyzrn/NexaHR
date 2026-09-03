@@ -244,6 +244,7 @@ def _require_importer(ctx: ToolContext) -> None:
     ),
     category="فایل‌ها",
     read_only=True,
+    guarded_inline=True,
     parameters={"type": "object", "properties": {"upload_id": {"type": "integer"}}, "required": ["upload_id"]},
 )
 def inspect_upload(ctx: ToolContext, upload_id: int) -> ToolOutcome:

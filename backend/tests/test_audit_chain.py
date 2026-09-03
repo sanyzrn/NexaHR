@@ -139,6 +139,23 @@ def test_the_database_refuses_to_delete_an_audit_row(db_session):
         db_session.execute(text("DELETE FROM audit_log WHERE id = :i"), {"i": target.id})
 
 
+def test_the_database_refuses_to_truncate_the_audit_log(db_session):
+    """L-2 — تریگرِ سطری `TRUNCATE` را نمی‌بیند.
+
+    `TRUNCATE` هیچ ردیفی را UPDATE/DELETE نمی‌کند، پس تریگرِ
+    `FOR EACH ROW` از کنارش می‌گذشت و کلِ زنجیره بی هیچ اعتراضی پاک می‌شد.
+    و شدنی بود: `audit_log` سمتِ *ارجاع‌دهندهٔ* کلیدهای خارجی‌اش است، پس
+    `TRUNCATE` بی `CASCADE` هم موفق می‌شود.
+    """
+    actor = make_user(db_session, "hr")
+    db_session.flush()
+    _log_some(db_session, actor, 1)
+
+    with pytest.raises((InternalError, ProgrammingError), match="append-only"):
+        db_session.execute(text("TRUNCATE audit_log"))
+    db_session.rollback()
+
+
 # ──────────────────────────────────── endpoint HR
 
 
@@ -247,3 +264,67 @@ def test_logging_keeps_the_chain_intact(client, db_session):
     client.get("/api/users/export.xlsx", headers=auth_header(hr))
 
     assert verify_chain(db_session)["ok"] is True
+
+
+# ── پنجرهٔ انتهایی (M-12) ───────────────────────────────────────────────────
+
+
+def test_a_limited_verification_looks_at_the_newest_rows_not_the_oldest(db_session):
+    """`limit` پنجرهٔ *انتهایی* است.
+
+    پیش از این `order_by(id).limit(n)` بود، یعنی `n` ردیفِ اولی که در تاریخِ
+    سامانه نوشته شده. پارامتر استفاده نمی‌شد پس چیزی خراب نبود، ولی اولین کسی
+    که برای سرعت «۱۰۰۰ ردیفِ آخر را بسنج» می‌نوشت، سنجشی می‌گرفت که هرگز به
+    فعالیتِ اخیر نگاه نمی‌کند — و همیشه هم سبز است.
+    """
+    actor = make_user(db_session, "hr")
+    db_session.flush()
+    for i in range(6):
+        log_event(db_session, actor_user_id=actor.id, event_type=f"probe_{i}", new_value={"i": i})
+    db_session.flush()
+    rows = list(db_session.scalars(select(AuditLog).order_by(AuditLog.id)))
+    assert len(rows) >= 6
+
+    # آخرین ردیف را دست می‌زنیم — مثل خویشاوندانش در همین فایل، از راهِ
+    # موقتاً خاموش‌کردنِ تریگرِ append-only. پنجرهٔ کوچکِ انتهایی باید بگیردش.
+    target = rows[-1]
+    db_session.execute(text("ALTER TABLE audit_log DISABLE TRIGGER trg_audit_log_append_only"))
+    db_session.execute(
+        text("UPDATE audit_log SET new_value = '{\"i\": 999}'::jsonb WHERE id = :i"),
+        {"i": target.id},
+    )
+    db_session.execute(text("ALTER TABLE audit_log ENABLE TRIGGER trg_audit_log_append_only"))
+    db_session.expire_all()
+
+    tail = verify_chain(db_session, limit=3)
+    assert tail["ok"] is False
+    assert tail["broken_at_id"] == target.id
+    assert tail["full"] is False
+    assert tail["checked"] <= 3
+
+    db_session.rollback()
+
+
+def test_a_limited_verification_starts_from_the_windows_own_boundary(db_session):
+    """درونِ پنجره سالم = سبز، حتی وقتی پنجره از ابتدای زنجیره شروع نشده."""
+    actor = make_user(db_session, "hr")
+    db_session.flush()
+    for i in range(8):
+        log_event(db_session, actor_user_id=actor.id, event_type=f"clean_{i}", new_value={"i": i})
+    db_session.flush()
+
+    tail = verify_chain(db_session, limit=3)
+    assert tail["ok"] is True, tail
+    assert tail["full"] is False
+    assert tail["checked"] == 3
+
+
+def test_a_full_verification_still_says_so(db_session):
+    """و «سبز» بی‌قید فقط از سنجشِ کامل می‌آید."""
+    actor = make_user(db_session, "hr")
+    db_session.flush()
+    log_event(db_session, actor_user_id=actor.id, event_type="probe_full", new_value={})
+    db_session.flush()
+    result = verify_chain(db_session)
+    assert result["ok"] is True
+    assert result["full"] is True

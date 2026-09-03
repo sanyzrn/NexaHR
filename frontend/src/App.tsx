@@ -270,7 +270,9 @@ function App() {
               <Route path="/executive" element={<ExecutivePage />} />
             </Route>
 
-            <Route element={<ProtectedRoute allowedRoles={["employee"]} />}>
+            {/* «کارنامه من» برای هر کسی که پروندهٔ پرسنلی دارد، نه فقط نقش
+                کارمند — همان قاعده‌ای که `require_own_personnel` در سرور دارد. */}
+            <Route element={<ProtectedRoute requireOwnPersonnel />}>
               <Route path="/me" element={<MyEvaluationsPage />} />
             </Route>
           </Route>

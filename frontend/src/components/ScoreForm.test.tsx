@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { ScoreFormTable, computePreview, scoredRows, useScoreForm } from "./ScoreForm";
-import { type Indicator } from "../types";
+import { ScoreFormTable, SegmentedScore, computePreview, scoredRows, useScoreForm } from "./ScoreForm";
+import { DEFAULT_APP_CONFIG, type Indicator } from "../types";
 
 function indicator(id: number, section: "general" | "specialized" = "general"): Indicator {
   return {
@@ -14,6 +14,7 @@ function indicator(id: number, section: "general" | "specialized" = "general"): 
     created_at: "",
     updated_at: "",
     usage_count: 0,
+    scheme_weight: 1,
   };
 }
 
@@ -188,7 +189,16 @@ describe("ScoreFormTable slider", () => {
     expect(onScoreChange).toHaveBeenCalledWith(1, 5);
   });
 
-  it("enables the evidence box only for scores 1/5", () => {
+  it("جعبهٔ شواهد برای هر امتیازی قابل نوشتن است — اجباری بودنش فرق دارد", () => {
+    /* پیش از این برای امتیازِ ۲ و ۳ و ۴ `disabled` بود و در همان حال خودش را
+       «اختیاری» معرفی می‌کرد. سرور هیچ‌وقت شواهد را *ممنوع* نمی‌کند
+       (`validate_evidence` فقط حداقل را برای امتیازهای اجباری می‌خواهد و سقف
+       را برای همه)، پس ارزیابی که می‌خواست امتیاز ۲ — یعنی همان نمره‌ای که
+       بیشتر از همه محل اعتراض است — را مستند کند، *نمی‌توانست*.
+
+       و دادهٔ بی‌صاحب هم می‌ساخت: شواهد را روی ۵ می‌نوشتی، اسلایدر را به ۴
+       می‌بردی، متن در پیش‌نویس می‌ماند، به سرور فرستاده می‌شد، همهٔ
+       بازبین‌های بعدی می‌دیدندش، و نویسنده‌اش دیگر نمی‌توانست عوضش کند. */
     const { rerender } = render(
       <ScoreFormTable
         section="general"
@@ -198,7 +208,9 @@ describe("ScoreFormTable slider", () => {
         onEvidenceChange={() => {}}
       />
     );
-    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect(screen.getByRole("textbox")).toBeEnabled();
+    // ستارهٔ «اجباری» نباید باشد…
+    expect(screen.queryByText("*")).toBeNull();
 
     rerender(
       <ScoreFormTable
@@ -210,6 +222,29 @@ describe("ScoreFormTable slider", () => {
       />
     );
     expect(screen.getByRole("textbox")).toBeEnabled();
+    // …و برای امتیازِ اجباری، شمارنده کمبود را می‌گوید.
+    expect(screen.getByText(/واژهٔ دیگر لازم است/)).toBeInTheDocument();
+  });
+});
+
+describe("SegmentedScore در حالتِ بی‌امتیاز", () => {
+  it("نشانگر تا اولین انتخاب روی طیف نمی‌نشیند", () => {
+    /* پیش از این `value ?? 3` بود، یعنی نشانگرِ خالی دقیقاً وسطِ طیف
+       می‌ایستاد. اسلایدرِ پیوسته با نقطهٔ استراحتِ دیدنی، لنگرِ
+       گرایش-به-میانه است: عددی که هنوز انتخاب نشده به‌شکلِ «۳» دیده می‌شود و
+       انتخابِ ارزیاب را به سمتِ همان می‌کشد. برای سامانه‌ای که خروجی‌اش
+       تصمیمِ تمدیدِ قرارداد است، این یک سوگیریِ اندازه‌گیری است. */
+    const { container, rerender } = render(
+      <SegmentedScore value={null} onChange={() => {}} label="شاخص" />
+    );
+    const slider = screen.getByRole("slider");
+    expect(slider).toHaveAttribute("aria-valuetext", "امتیازی انتخاب نشده");
+    expect(slider).not.toHaveAttribute("aria-valuenow");
+    // نشانگر همان `div`ِ گردِ ۲۲ پیکسلی است.
+    expect(container.querySelector(".h-\\[22px\\]")).toBeNull();
+
+    rerender(<SegmentedScore value={3} onChange={() => {}} label="شاخص" />);
+    expect(container.querySelector(".h-\\[22px\\]")).not.toBeNull();
   });
 });
 
@@ -241,5 +276,44 @@ describe("computePreview", () => {
       INDICATORS
     );
     expect(preview).toEqual({ general_pct: 60, specialized_pct: 20, final_pct: 44 });
+  });
+
+  /* دو چیزی که این فرمول نداشت و هر دو عددِ حلقهٔ پیش‌نمایش را با عددِ
+     ثبت‌شده جدا می‌کرد — و ارزیاب تصمیمش را روی همان حلقه می‌سازد. */
+
+  it("وزنِ هر شاخص را مثل سرور اعمال می‌کند", () => {
+    // شاخصِ ۱ وزن ۳ دارد: عمومی = (5×3 + 1×1)/(5×3 + 5×1) = 16/20 = ۸۰٪
+    // تخصصی = 1/5 = ۲۰٪ ← نهایی = 80×0.6 + 20×0.4 = ۵۶٪
+    const preview = computePreview(
+      [
+        { indicator_id: 1, score: 5, evidence_text: "" },
+        { indicator_id: 2, score: 1, evidence_text: "" },
+        { indicator_id: 3, score: 1, evidence_text: "" },
+      ],
+      INDICATORS,
+      { ...DEFAULT_APP_CONFIG, indicator_weights: { "1": 3 } }
+    );
+    expect(preview).toEqual({ general_pct: 80, specialized_pct: 20, final_pct: 56 });
+  });
+
+  it("چارچوبِ تک‌بخشی: فرمِ پُرِ ۵ باید ۱۰۰٪ باشد، نه ۶۰٪", () => {
+    // بخشِ تخصصی در این پرونده شاخصی ندارد، پس وزنش بین بخش‌های موجود پخش
+    // می‌شود و سقف ۱۰۰ می‌ماند. پیش از این `general × 0.6 + 0 × 0.4` حساب
+    // می‌شد: نمرهٔ کامل به‌عنوان «تمدید مشروط» پیش‌نمایش می‌شد و ۱۰۰٪ ثبت.
+    const generalOnly = INDICATORS.filter((i) => i.section === "general");
+    const preview = computePreview(
+      generalOnly.map((i) => ({ indicator_id: i.id, score: 5, evidence_text: "دلیل" })),
+      generalOnly
+    );
+    expect(preview).toEqual({ general_pct: 100, specialized_pct: 0, final_pct: 100 });
+  });
+
+  it("و قرینه‌اش برای چارچوبی که فقط شاخصِ تخصصی دارد", () => {
+    const specializedOnly = INDICATORS.filter((i) => i.section !== "general");
+    const preview = computePreview(
+      specializedOnly.map((i) => ({ indicator_id: i.id, score: 5, evidence_text: "دلیل" })),
+      specializedOnly
+    );
+    expect(preview).toEqual({ general_pct: 0, specialized_pct: 100, final_pct: 100 });
   });
 });

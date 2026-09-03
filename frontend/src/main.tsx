@@ -19,8 +19,17 @@ import { registerServiceWorker } from './pwa.ts'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // خطاهای 401/403/404 با تلاش دوباره درست نمی‌شوند؛ فقط خطای شبکه یک‌بار retry می‌شود
-      retry: 1,
+      // خطاهای 401/403/404 با تلاش دوباره درست نمی‌شوند؛ فقط خطای شبکه یک‌بار
+      // retry می‌شود.
+      //
+      // `retry: 1` تنها این را *ادعا* می‌کرد: هر شکستی را دوباره می‌فرستاد، پس
+      // هر ردِ دسترسی دو بار به سرور می‌رفت — دو ردیف لاگ، دو بار تأخیر، و
+      // برای مسیرهای محدودشدهٔ نرخ، دو بار مصرفِ سهمیه.
+      retry: (failureCount, error) => {
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status !== undefined && status >= 400 && status < 500) return false;
+        return failureCount < 1;
+      },
       staleTime: 30_000,
       refetchOnWindowFocus: false,
     },

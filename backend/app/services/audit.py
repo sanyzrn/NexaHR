@@ -108,19 +108,39 @@ def log_event(
 
 
 def verify_chain(db: Session, limit: int | None = None) -> dict:
-    """زنجیره را از ابتدا بازمحاسبه و با آن‌چه ذخیره شده مقایسه می‌کند.
+    """زنجیره را بازمحاسبه و با آن‌چه ذخیره شده مقایسه می‌کند.
 
     خروجی: وضعیت کلی + شناسهٔ اولین ردیفِ ناسازگار (اگر باشد). عمداً اولین را
     برمی‌گرداند نه همه: از نقطهٔ شکست به بعد همهٔ حلقه‌ها می‌شکنند، پس فهرست‌کردن
     همه‌شان فقط نویز است — چیزی که باید بررسی شود همان اولی است.
+
+    `limit` پنجرهٔ *انتهایی* است، نه ابتدایی
+    ---------------------------------------
+    پیش از این `order_by(id).limit(n)` بود، یعنی `n` ردیفِ *اولی که در تاریخِ
+    سامانه نوشته شده*. پارامتر هیچ‌جا استفاده نمی‌شد پس چیزی خراب نبود، ولی
+    اولین کسی که برای سرعت «۱۰۰۰ ردیفِ آخر را بسنج» می‌نوشت، سنجشی می‌گرفت که
+    هرگز به فعالیتِ اخیر نگاه نمی‌کند — و همیشه هم سبز است.
+
+    حالا `n` ردیفِ آخر برداشته می‌شود و از `prev_hash`ِ خودِ قدیمی‌ترین ردیفِ
+    همان پنجره شروع می‌شود. یعنی *درونِ* پنجره کامل سنجیده می‌شود و مرزِ
+    ابتداییِ پنجره مبنا گرفته می‌شود. `full` در خروجی می‌گوید کدام حالت بوده،
+    تا «سبز» با «سبزِ کامل» اشتباه گرفته نشود: پنجرهٔ انتهایی حذفِ ردیفی
+    *پیش از* پنجره را نمی‌بیند.
     """
-    query = select(AuditLog).order_by(AuditLog.id)
-    if limit is not None:
-        query = query.limit(limit)
+    full = limit is None
+    if full:
+        rows = list(db.scalars(select(AuditLog).order_by(AuditLog.id)))
+        expected_prev = GENESIS_HASH
+    else:
+        tail = list(db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)))
+        rows = list(reversed(tail))
+        # مرزِ پنجره: حلقهٔ قدیمی‌ترین ردیفِ پنجره مبناست، چون ردیفِ پیش از آن
+        # خوانده نشده. اگر پنجره تصادفاً از ابتدای زنجیره شروع شود، همان
+        # GENESIS است و تفاوتی نمی‌کند.
+        expected_prev = rows[0].prev_hash if rows else GENESIS_HASH
 
     checked = 0
-    expected_prev = GENESIS_HASH
-    for row in db.scalars(query):
+    for row in rows:
         checked += 1
         recomputed = compute_hash(
             actor_user_id=row.actor_user_id,
@@ -136,6 +156,7 @@ def verify_chain(db: Session, limit: int | None = None) -> dict:
                 "checked": checked,
                 "broken_at_id": row.id,
                 "reason": "حلقهٔ زنجیره با ردیف قبلی نمی‌خواند (ردیفی حذف یا جابه‌جا شده)",
+                "full": full,
             }
         if recomputed != row.entry_hash:
             return {
@@ -143,7 +164,8 @@ def verify_chain(db: Session, limit: int | None = None) -> dict:
                 "checked": checked,
                 "broken_at_id": row.id,
                 "reason": "محتوای این ردیف با هشِ ثبت‌شده‌اش نمی‌خواند (ردیف ویرایش شده)",
+                "full": full,
             }
         expected_prev = row.entry_hash
 
-    return {"ok": True, "checked": checked, "broken_at_id": None, "reason": None}
+    return {"ok": True, "checked": checked, "broken_at_id": None, "reason": None, "full": full}

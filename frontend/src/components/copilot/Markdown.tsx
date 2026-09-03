@@ -11,6 +11,33 @@ import { Fragment, type ReactNode } from "react";
  * امنیت: هیچ HTML خامی تفسیر نمی‌شود — همه‌چیز رشتهٔ React است.
  */
 
+/** آدرسی که می‌شود رویش لنگر گذاشت — یا `null`.
+ *
+ *  متنِ این پیام از مدل می‌آید، و متنِ مدل از زمینه‌ای می‌آید که هر کسی با
+ *  دسترسیِ نوشتنِ یک ردیفِ پرسنلی یا بارگذاریِ یک اکسل می‌تواند در آن بنویسد.
+ *  تا امروز `href` عیناً همان چیزی بود که در متن آمده بود، بی هیچ سنجشی:
+ *  `[کلیک](javascript:…)` و `data:text/html` هم لنگرِ زنده می‌شدند. CSPِ
+ *  نسخهٔ nginx اجرا را می‌بندد — ولی فقط در همان استقرار، و فقط تا وقتی آن
+ *  سیاست سخت‌گیرانه بماند. سنجشِ خودِ طرح جای درستِ این گارد است.
+ *
+ *  مجاز: `http:`، `https:`، `mailto:`، و مسیرهای نسبیِ همین اصل (`/…`).
+ *  هر چیز دیگر — از جمله `//host` که در مرورگر protocol-relative است — رد. */
+function safeHref(raw: string | undefined): string | null {
+  const value = (raw ?? "").trim();
+  if (!value) return null;
+  // `//host` در مرورگر protocol-relative است: مسیرِ نسبی به‌نظر می‌رسد و
+  // به میزبانِ دیگری می‌رود. پیوندِ بیرونی راهِ صریحِ خودش را دارد
+  // (`https://…`)، پس این شکل فقط ابهام است.
+  if (value.startsWith("//")) return null;
+  if (value.startsWith("/")) return value;
+  try {
+    const scheme = new URL(value, window.location.origin).protocol;
+    return ["http:", "https:", "mailto:"].includes(scheme) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 function renderInline(text: string): ReactNode {
   // ترتیب مهم است: کدِ درون‌خطی اول، تا ستاره‌ها و براکت‌های داخل کد دست‌نخورده بمانند
   const pattern =
@@ -43,16 +70,23 @@ function renderInline(text: string): ReactNode {
       );
     } else if (token.startsWith("[")) {
       const linkMatch = /\[([^\]]+)\]\(([^)\s]+)\)/.exec(token);
+      const href = safeHref(linkMatch?.[2]);
+      // پیوندی که طرحش مجاز نیست، *متن* می‌شود و نه لنگرِ مرده: کاربر باید
+      // ببیند مدل چه نوشته، بی‌آنکه بشود رویش کلیک کرد.
       nodes.push(
-        <a
-          key={key++}
-          href={linkMatch?.[2] ?? "#"}
-          target="_blank"
-          rel="noreferrer"
-          className="text-pulse-600 underline decoration-pulse-200 underline-offset-2 hover:decoration-pulse-500"
-        >
-          {linkMatch?.[1] ?? token}
-        </a>,
+        href === null ? (
+          <Fragment key={key++}>{token}</Fragment>
+        ) : (
+          <a
+            key={key++}
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-pulse-600 underline decoration-pulse-200 underline-offset-2 hover:decoration-pulse-500"
+          >
+            {linkMatch?.[1] ?? token}
+          </a>
+        ),
       );
     } else {
       nodes.push(

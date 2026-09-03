@@ -19,6 +19,7 @@ from app.schemas.user import UserCreate, UserPage, UserRead, UserUpdate
 from app.services.audit import log_event
 from app.services.authorization import apply_default_hr_capabilities
 from app.services.excel import build_users_workbook
+from app.services.login_guard import unlock as unlock_login
 from app.services.self_evaluation import ensure_user_link_is_not_self_evaluation
 from app.services.sessions import revoke_all_for_user
 
@@ -208,6 +209,41 @@ def update_user(
         event_type="user_updated",
         old_value=old_value,
         new_value={"id": user.id, "username": user.username, **audited_changes},
+    )
+    db.commit()
+    db.refresh(user)
+    return _to_read([user], _linked_names(db, [user]))[0]
+
+
+@router.post("/{user_id}/unlock", response_model=UserRead)
+def unlock_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_capability(Capability.manage_users)),
+) -> UserRead:
+    """قفلِ ورودِ یک حساب را برمی‌دارد (M-11).
+
+    قفلِ خودکار پس از پنج شکست در برابر حدسِ رمز درست است. ولی تا امروز هیچ
+    راهِ باز کردنی نداشت، و ترکیبش با پیام‌های متمایزِ ورود — «چنین کاربری
+    نیست» در برابر «رمز اشتباه است»، که تصمیمِ آگاهانه‌ای است — یعنی هر کسی
+    از بیرون می‌توانست حساب‌های معتبر را بشمارد و بعد هرکدام را با پنج
+    درخواست از کار بیندازد. تنها درمان «پانزده دقیقه صبر کن» بود، که تکرارش
+    از دستِ مهاجم برنمی‌آمد بلکه *در* دستش بود.
+
+    شکلِ سنجش دست‌نخورده می‌ماند (نه آستانه، نه زمانِ برابرِ پاسخ)؛ فقط یک
+    خروجیِ ممیزی‌پذیر اضافه می‌شود، تا یک انکارِ سرویسِ ادامه‌دار به یک
+    مزاحمت تبدیل شود.
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="کاربر یافت نشد")
+
+    was_locked = unlock_login(db, user.username)
+    log_event(
+        db,
+        actor_user_id=current_user.id,
+        event_type="account_unlocked",
+        new_value={"id": user.id, "username": user.username, "was_locked": was_locked},
     )
     db.commit()
     db.refresh(user)
