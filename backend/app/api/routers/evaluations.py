@@ -25,6 +25,7 @@ from app.models.personnel import Personnel
 from app.models.self_assessment import SelfAssessmentScore
 from app.models.user import User
 from app.schemas.auth import CurrentUser
+from app.schemas.common import AppConfig
 from app.schemas.evaluation import (
     CancelRequest,
     CommentCreate,
@@ -76,12 +77,16 @@ from app.services.workflow import (
     IS_OPEN_RECORD,
     IS_SHIELDED_FROM_HR_PANEL,
     OPEN_STATUSES,
+    SEAT_LABEL,
+    SEAT_ROLE,
     apply_transition,
     finalize_scoring,
     is_ceo_only_path,
     is_manager_path,
     may_act_at,
     objection_resolver_field,
+    scorer_field,
+    scorer_seat,
     skips_hr_review,
 )
 
@@ -133,7 +138,7 @@ def _is_the_scorer(record: EvaluationRecord, current_user: CurrentUser) -> bool:
     """
     if record.status is not EvaluationStatus.draft:
         return False
-    stage_role, scorer_id = _scorer_seat(record)
+    stage_role, scorer_id = scorer_seat(record)
     return (
         scorer_id is not None
         and current_user.id == scorer_id
@@ -141,17 +146,7 @@ def _is_the_scorer(record: EvaluationRecord, current_user: CurrentUser) -> bool:
     )
 
 
-def _scorer_seat(record: EvaluationRecord) -> tuple[UserRole, int | None]:
-    """کدام صندلی به این پرونده نمره می‌دهد، و نقشِ آن مرحله چیست.
 
-    سه شکل، به ترتیبِ خالی‌شدنِ زنجیره از پایین: مسئول واحد، معاونت (مسیر
-    «مدیر»)، و خودِ مدیرعامل (کسی که بالای سرش دیگر کسی نیست).
-    """
-    if is_ceo_only_path(record):
-        return UserRole.ceo, record.ceo_user_id
-    if is_manager_path(record):
-        return UserRole.deputy, record.deputy_user_id
-    return UserRole.unit_supervisor, record.unit_supervisor_user_id
 
 
 def _ensure_can_view(record: EvaluationRecord, current_user: CurrentUser) -> None:
@@ -255,6 +250,10 @@ def _to_detail(
             ),
             "indicator_ids": sorted(indicator_ids_for_record(db, record)),
             "indicator_framework_version": framework.version if framework else None,
+            # قواعدِ *این* پرونده، نه طرحِ فعال — همان چیزی که سرور با آن
+            # اعتبارسنجی می‌کند (`rules_for_record`). بی این، فرم و سرور روی
+            # پرونده‌های باز دو قاعدهٔ متفاوت داشتند.
+            "scoring_rules": AppConfig.from_rules(rules_for_record(db, record)),
             **_deadline_fields(db, record),
         }
     )
@@ -355,24 +354,14 @@ def create_evaluation(
     # باز نمی‌شد.
     #
     # زنجیره از پایین خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است.
-    if access.unit_supervisor_user_id is not None:
-        scorer_role, scorer_id = UserRole.unit_supervisor, access.unit_supervisor_user_id
-        scorer_label = "مسئول واحد"
-    elif access.deputy_user_id is not None:
-        # مسیر «مدیر»: معاونت خودش نمره‌دهندهٔ اول است.
-        #
-        # پرونده مثل هر پروندهٔ دیگری از `draft` شروع می‌شود. پیش از این
-        # مستقیماً در `hr_approved` ساخته می‌شد، یعنی *مرحلهٔ بررسی منابع
-        # انسانی را رد می‌کرد*: معاونت نمره می‌داد و خودش همان نمره را تأیید
-        # می‌کرد و پرونده می‌رفت روی میز مدیرعامل. پروندهٔ مدیران — پرامدترین
-        # ارزیابی‌های سازمان — با دو چشم بسته می‌شد، در حالی که پروندهٔ یک
-        # کارشناس با چهار.
-        scorer_role, scorer_id = UserRole.deputy, access.deputy_user_id
-        scorer_label = "معاونت"
-    else:
-        # مسیرِ «مستقیمِ مدیرعامل»: بالای سرِ این فرد کسِ دیگری وجود ندارد.
-        scorer_role, scorer_id = UserRole.ceo, access.ceo_user_id
-        scorer_label = "مدیرعامل"
+    # مسیر «مدیر» (معاونت نمره می‌دهد) پرونده را هم مثل بقیه از `draft` شروع
+    # می‌کند. پیش از این مستقیماً در `hr_approved` ساخته می‌شد، یعنی *مرحلهٔ
+    # بررسی منابع انسانی را رد می‌کرد*: معاونت نمره می‌داد و خودش همان نمره را
+    # تأیید می‌کرد و پرونده می‌رفت روی میز مدیرعامل. پروندهٔ مدیران —
+    # پرامدترین ارزیابی‌های سازمان — با دو چشم بسته می‌شد، در حالی که پروندهٔ
+    # یک کارشناس با چهار.
+    seat = scorer_field(access.unit_supervisor_user_id, access.deputy_user_id)
+    scorer_role, scorer_id, scorer_label = SEAT_ROLE[seat], getattr(access, seat), SEAT_LABEL[seat]
 
     if not may_act_at(current_user.role, scorer_role) or current_user.id != scorer_id:
         raise HTTPException(
@@ -1056,6 +1045,20 @@ def extend_submission_window(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 "این پرونده دیگر در مرحلهٔ ثبت نیست، پس تمدیدِ مهلت چیزی را باز نمی‌کند."
+            ),
+        )
+    # پروندهٔ بی‌دوره اصلاً مهلتی ندارد، پس تمدید هم چیزی را باز نمی‌کند.
+    #
+    # پیش از این پذیرفته می‌شد و — بدتر — همان پروندهٔ بی‌مهلت را مهلت‌دار
+    # می‌کرد (`evaluation_window.window_for`). حالا که آن رفع شده، پذیرفتنش
+    # فقط یک پیامِ موفقیت است روی کاری که هیچ اثری ندارد؛ و کاری که به‌نظر
+    # انجام شده ولی نشده، از خطا بدتر است.
+    if window_for(db, record).unlimited:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "این پرونده به هیچ دورهٔ ارزیابی‌ای وصل نیست و از ابتدا مهلتی ندارد؛ "
+                "ثبت روی آن همچنان باز است و تمدید چیزی را عوض نمی‌کند."
             ),
         )
 

@@ -15,3 +15,22 @@ class AppConfig(BaseModel):
     bonus_max_points: float
     # حداقل طول توضیح امتیاز ویژه؛ قاعدهٔ مشترک فرانت و سرور.
     bonus_reason_min_length: int
+
+    @classmethod
+    def from_rules(cls, rules) -> "AppConfig":
+        """`Rules` → شکلی که فرم لازم دارد.
+
+        یک سازنده و نه دو، تا `/api/config` (طرحِ فعال) و جزئیاتِ پرونده
+        (طرحِ خودِ پرونده) هرگز دو زیرمجموعهٔ متفاوت از قواعد نفرستند.
+        """
+        from app.core.text_limits import BONUS_REASON_MIN
+
+        return cls(
+            evidence_min_words=rules.evidence_min_words,
+            evidence_max_words=rules.evidence_max_words,
+            evidence_required_scores=list(rules.evidence_required_scores),
+            general_section_weight=rules.general_section_weight,
+            specialized_section_weight=rules.specialized_section_weight,
+            bonus_max_points=rules.bonus_max_points,
+            bonus_reason_min_length=BONUS_REASON_MIN,
+        )

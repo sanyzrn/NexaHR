@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.notification import Notification
+from app.services.workflow import owner_after_hr_review, scorer_seat
 
 
 def _queue_outbound(db: Session, notification: Notification) -> None:
@@ -173,20 +174,11 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
     name = record.subject.full_name
     link = f"/evaluations/{record.id}"
 
-    # نمره‌دهندهٔ اولِ *این* پرونده: مسئول واحد، یا معاونت (مسیر «مدیر»)، یا
-    # خودِ مدیرعامل (کسی که بالای سرش دیگر کسی نیست). سومی تا امروز `None`
-    # می‌شد و هر اعلانی که به «نمره‌دهنده» می‌رفت — برگشتِ منابع انسانی، خبرِ
-    # تأیید نهایی — بی‌صدا به هیچ‌کس نمی‌رسید.
-    evaluator_id = (
-        record.unit_supervisor_user_id
-        or record.deputy_user_id
-        or record.ceo_user_id
-    )
-    # زنجیره می‌تواند معاونت نداشته باشد؛ آن‌وقت نفرِ بعد از منابع انسانی خودِ
-    # مدیرعامل است. بدون این، اعلان به `None` فرستاده می‌شد و کل گذارِ تأیید
-    # منابع انسانی با NotNullViolation شکست می‌خورد — یعنی نبودِ معاونت، پرونده
-    # را در همان مرحله قفل می‌کرد.
-    after_hr_id = record.deputy_user_id or record.ceo_user_id
+    # نمره‌دهندهٔ اول و نفرِ بعد از منابع انسانی — هر دو از یک قاعدهٔ مشترک
+    # (`workflow`)، چون همین دو محاسبه در چهار جای دیگر هم لازم است و
+    # نسخه‌های جداشان هر کدام برای یک شکلِ زنجیره `None` می‌دادند.
+    _, evaluator_id = scorer_seat(record)
+    after_hr_id = owner_after_hr_review(record)
 
     recipients: list[int] = []
     message = ""

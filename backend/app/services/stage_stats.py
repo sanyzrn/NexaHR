@@ -40,6 +40,7 @@ from app.models.audit_log import AuditLog
 from app.models.enums import EvaluationStatus, UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.user import User
+from app.services.workflow import scorer_field
 
 #: مرحله‌ها به ترتیبِ واقعیِ گردش‌کار، با «چه کسی الان نگهش داشته».
 #:
@@ -67,13 +68,31 @@ STAGE_HOLDER: dict[EvaluationStatus, str] = {
 
 #: ستونی که می‌گوید در این مرحله پرونده دستِ چه کسی بوده.
 #: `finalized` مسئول ندارد چون مرحله نیست، مقصد است.
+#:
+#: `draft` و `hr_approved` این‌جا نیستند: صاحبشان به *شکلِ زنجیره* بند است، نه
+#: فقط به وضعیت. `_owner_field_for` آن دو را حساب می‌کند.
 _OWNER_FIELD: dict[EvaluationStatus, str | None] = {
-    EvaluationStatus.draft: "unit_supervisor_user_id",
     EvaluationStatus.submitted: "hr_user_id",
-    EvaluationStatus.hr_approved: "deputy_user_id",
     EvaluationStatus.deputy_approved: "ceo_user_id",
     EvaluationStatus.finalized: None,
 }
+
+
+def _owner_field_for(status: EvaluationStatus, seats: dict[str, int | None]) -> str | None:
+    """ستونِ صاحبِ این مرحله برای *این* پرونده.
+
+    نگاشتِ ثابتِ قبلی `draft` را همیشه «مسئول واحد» و `hr_approved` را همیشه
+    «معاونت» می‌گرفت. برای دو شکلِ سالمِ زنجیره آن ستون خالی بود — مسیر «مدیر»
+    و مسیرِ مستقیمِ مدیرعامل — و ردیفِ صاحب `None` می‌شد و از تفکیکِ
+    «کجا گیر کرده، دستِ کی» بی‌صدا حذف می‌شد. یعنی جدولی که کارش نشان‌دادنِ
+    گلوگاه است، پروندهٔ مدیران را نمی‌شمرد.
+    """
+    if status is EvaluationStatus.draft:
+        return scorer_field(seats["unit_supervisor_user_id"], seats["deputy_user_id"])
+    if status is EvaluationStatus.hr_approved:
+        # نفرِ بعد از منابع انسانی: معاونت، و اگر نباشد خودِ مدیرعامل.
+        return "deputy_user_id" if seats["deputy_user_id"] is not None else "ceo_user_id"
+    return _OWNER_FIELD.get(status)
 
 
 @dataclass
@@ -210,8 +229,9 @@ def stage_stats(db: Session) -> list[dict]:
                 bucket.closed += 1
                 bucket.finished_seconds.append(seconds)
 
-            owner_field = _OWNER_FIELD[EvaluationStatus(status_value)]
-            owner_id = owners_by_record[row.id][owner_field] if owner_field else None
+            seats = owners_by_record[row.id]
+            owner_field = _owner_field_for(EvaluationStatus(status_value), seats)
+            owner_id = seats[owner_field] if owner_field else None
             if owner_id is None:
                 continue
             owner_bucket = per_owner[(status_value, owner_id)]

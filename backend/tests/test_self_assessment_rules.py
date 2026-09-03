@@ -297,3 +297,36 @@ def test_extending_a_case_that_is_past_the_scoring_stage_is_refused(client, db_s
         headers=auth_header(case["hr"]),
     )
     assert response.status_code == 400
+
+
+def test_extending_a_case_that_had_no_deadline_never_closes_it(client, db_session):
+    """«باز کردنِ دوباره» هیچ‌وقت نباید چیزی را ببندد — حتی وقتی چیزی بسته نبوده.
+
+    پرونده‌ای که به هیچ دوره‌ای وصل نیست عمداً مهلت ندارد (پرونده‌های پیش از
+    معرفیِ دوره‌ها نباید یک‌شبه غیرقابل‌ثبت شوند). ولی `window_for` تمدید را
+    فقط با *پایانِ دوره* می‌سنجید و وقتی دوره‌ای نبود بی‌قید قبولش می‌کرد — پس
+    یک تمدیدِ خیرخواهانه، همان پروندهٔ بی‌مهلت را مهلت‌دار می‌کرد و از تاریخِ
+    تمدید به بعد می‌بست. مهلتی که هیچ‌وقت وجود نداشت.
+
+    «بی‌مهلت» از هر تاریخی دیرتر است، پس هیچ تمدیدی از آن جلو نمی‌زند.
+    """
+    case = _open_case(client, db_session)  # بدون دوره
+    rows = client.get("/api/me/evaluations/open", headers=auth_header(case["subject"])).json()
+    assert rows[0]["submission_deadline"] is None
+
+    # و خودِ درخواست هم صریح رد می‌شود: کاری که اثری ندارد نباید پیامِ موفقیت
+    # بگیرد.
+    extended = client.post(
+        f"/api/evaluations/{case['id']}/extend-submission",
+        json={
+            "until": (date.today() + timedelta(days=1)).isoformat(),
+            "reason": "درخواستِ خودِ فرد برای مهلتِ بیشتر",
+        },
+        headers=auth_header(case["hr"]),
+    )
+    assert extended.status_code == 400, extended.text
+    assert "مهلتی ندارد" in extended.json()["detail"]
+
+    rows = client.get("/api/me/evaluations/open", headers=auth_header(case["subject"])).json()
+    assert rows[0]["submission_deadline"] is None, "تمدید، مهلتی ساخت که وجود نداشت"
+    assert rows[0]["self_assessment_open"] is True

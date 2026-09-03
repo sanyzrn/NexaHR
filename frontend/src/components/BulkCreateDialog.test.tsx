@@ -32,10 +32,10 @@ describe("sortResults", () => {
     const sorted = sortResults([
       row("الف", "created"),
       row("ب", "skipped_already_open"),
-      row("پ", "blocked_no_supervisor"),
+      row("پ", "blocked_inactive_seat"),
     ]);
     expect(sorted.map((r) => r.outcome)).toEqual([
-      "blocked_no_supervisor",
+      "blocked_inactive_seat",
       "created",
       "skipped_already_open",
     ]);

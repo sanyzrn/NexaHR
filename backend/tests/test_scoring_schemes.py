@@ -465,3 +465,44 @@ def test_finalised_scores_record_which_scheme_computed_them(client, db_session, 
         if e["event_type"] == "score_submitted" and e["evaluation_record_id"] == record_id
     )
     assert entry["new_value"]["scheme_version"] == 1
+
+
+def test_the_detail_payload_carries_the_records_own_rules(client, db_session, org):
+    """فرم باید قواعدِ *این پرونده* را بگیرد، نه طرحِ فعالِ امروز.
+
+    سرور از ابتدا با `rules_for_record` می‌سنجید، ولی فرم قواعدش را از
+    `/api/config` می‌گرفت که همیشه طرحِ فعال را می‌دهد. تا وقتی طرحی عوض نشده
+    بود این دو یکی بودند؛ لحظه‌ای که منابع انسانی وسط چرخه طرح تازه‌ای فعال
+    می‌کرد، پروندهٔ باز دو قاعده پیدا می‌کرد — و ارزیاب یا تیک سبز می‌گرفت و بعد
+    ردِ سرور، یا فرمی می‌دید که چیزی را می‌بست که سرور می‌پذیرفت.
+
+    قرینهٔ `indicator_ids` است که همین مشکل را برای *سؤال‌ها* حل کرده بود.
+    """
+    record_id = client.post(
+        "/api/evaluations",
+        json={"subject_personnel_id": org["person"].id},
+        headers=auth_header(org["sup"]),
+    ).json()["id"]
+
+    before = client.get(
+        f"/api/evaluations/{record_id}", headers=auth_header(org["sup"])
+    ).json()["scoring_rules"]
+    assert before is not None
+    assert before["evidence_min_words"] == 3, "طرحِ پایه"
+
+    scheme_id = _draft(client, org["hr"]).json()["id"]
+    activated = client.post(
+        f"/api/scoring-schemes/{scheme_id}/activate", headers=auth_header(org["hr2"])
+    )
+    assert activated.status_code == 200, activated.text
+
+    # طرحِ فعال عوض شد …
+    live = client.get("/api/config", headers=auth_header(org["sup"])).json()
+    assert live["evidence_min_words"] == STRICTER["evidence_min_words"]
+
+    # … ولی پروندهٔ باز همچنان قواعدِ خودش را می‌دهد، همان‌که سرور با آن می‌سنجد.
+    after = client.get(
+        f"/api/evaluations/{record_id}", headers=auth_header(org["sup"])
+    ).json()["scoring_rules"]
+    assert after == before
+    assert after["general_section_weight"] != live["general_section_weight"]

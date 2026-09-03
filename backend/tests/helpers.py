@@ -86,13 +86,19 @@ def make_access(
     db: Session,
     personnel: Personnel,
     supervisor: User | None,
-    deputy: User,
+    deputy: User | None,
     ceo: User,
 ) -> EvaluationAccess:
+    """دسترسیِ ارزیابی. هر دو صندلیِ میانی می‌توانند خالی باشند.
+
+    `deputy` هم مثل `supervisor` اختیاری است: زنجیرهٔ بی‌معاونت یک شکلِ سالم
+    است (`test_no_deputy_chain.py`) و تایپِ اجباریِ قبلی، تستی که می‌خواست
+    آن شکل را بسازد وادار می‌کرد خودش ردیف را دستی بنویسد.
+    """
     access = EvaluationAccess(
         personnel_id=personnel.id,
         unit_supervisor_user_id=supervisor.id if supervisor else None,
-        deputy_user_id=deputy.id,
+        deputy_user_id=deputy.id if deputy else None,
         ceo_user_id=ceo.id,
     )
     db.add(access)

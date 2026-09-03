@@ -66,6 +66,50 @@ def test_compute_result_weights_general_60_specialized_40():
     assert result["recommendation"] == "تمدید مشروط به برنامه بهبود مکتوب"
 
 
+@pytest.mark.parametrize("section", [IndicatorSection.general, IndicatorSection.specialized])
+def test_a_perfect_score_is_100_even_when_a_section_is_empty(section):
+    """بخشی که هیچ شاخصی ندارد نباید سقفِ نمره را پایین بیاورد.
+
+    پیش از این بخشِ غایب با درصدِ صفر وارد جمعِ وزنی می‌شد، پس چارچوبی که فقط
+    شاخصِ «عمومی» داشت به کسی که به هر سؤال ۵ داده بود ۶۰ می‌داد — و ۶۰ در
+    جدولِ آستانه‌ها «تمدید مشروط به برنامهٔ بهبود» است. با فقط شاخصِ «تخصصی»
+    عدد ۴۰ می‌شد، یعنی «عدم تمدید». نمرهٔ کامل، پیشنهادِ اخراج.
+
+    و رسیدنش آسان بود: هیچ گاردی جلوی خالی‌شدنِ یک بخش را نمی‌گیرد.
+    """
+    indicators = {i: _indicator(i, section) for i in (1, 2, 3)}
+    scores = [{"indicator_id": i, "score": 5} for i in indicators]
+
+    result = compute_result(scores, indicators)
+
+    assert result["final_weighted_pct"] == 100.0
+    assert result["recommendation"] == recommendation_for(100.0)
+
+
+@pytest.mark.parametrize("section", [IndicatorSection.general, IndicatorSection.specialized])
+def test_a_single_section_framework_keeps_its_own_scale(section):
+    """پخشِ وزن نسبت‌ها را هم نگه می‌دارد، نه فقط سقف را."""
+    indicators = {i: _indicator(i, section) for i in (1, 2)}
+    # ۵ و ۱ از ۵ ← میانگینِ ۳ از ۵ ← ۶۰٪
+    result = compute_result(
+        [{"indicator_id": 1, "score": 5}, {"indicator_id": 2, "score": 1}], indicators
+    )
+    assert result["final_weighted_pct"] == 60.0
+
+
+def test_both_sections_present_keeps_the_configured_split():
+    """قرینهٔ تست بالا: وقتی هر دو بخش هستند، هیچ چیز عوض نشده."""
+    indicators = {
+        1: _indicator(1, IndicatorSection.general),
+        2: _indicator(2, IndicatorSection.specialized),
+    }
+    result = compute_result(
+        [{"indicator_id": 1, "score": 5}, {"indicator_id": 2, "score": 1}], indicators
+    )
+    # همان ۱۰۰×۰٫۶ + ۲۰×۰٫۴
+    assert result["final_weighted_pct"] == 68.0
+
+
 def test_compute_result_threshold_boundaries():
     indicators = {1: _indicator(1, IndicatorSection.general), 2: _indicator(2, IndicatorSection.specialized)}
     # both sections at exactly 90% -> final 90% -> top tier
