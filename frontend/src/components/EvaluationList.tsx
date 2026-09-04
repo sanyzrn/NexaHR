@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { extractErrorMessage } from "../api/client";
 import { useDebouncedValue, useEvaluations, useOrgUnits } from "../api/queries";
@@ -77,10 +77,28 @@ export function EvaluationList({
   enableAdvancedFilters?: boolean;
   enableExcelExport?: boolean;
 }) {
+  // فیلترِ «صندلیِ فلان کاربر» فقط از راهِ لینک می‌آید و کنترلِ خودش را در فرم
+  // ندارد — چون تنها فرستنده‌اش اعلانِ «صندلی بی‌صاحب» است، که پس از خروجِ یک
+  // نفر می‌گوید کدام پرونده‌ها مسئولِ مرحله‌شان را از دست داده‌اند. بی این،
+  // متنِ اعلان کدها را نام می‌برد و منابع انسانی باید یکی‌یکی می‌چسباندشان.
+  const [urlParams, setUrlParams] = useSearchParams();
+  const seatUserId = urlParams.get("seat_user_id");
+  const seatFilter = seatUserId && /^\d+$/.test(seatUserId) ? Number(seatUserId) : undefined;
+
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [activeTabKey, setActiveTabKey] = useState(tabs[0]!.key);
+  // تبِ آغازین از آدرس خوانده می‌شود و نه فقط `tabs[0]`: لینکِ اعلان `tab=all`
+  // می‌فرستد، چون پروندهٔ متأثر می‌تواند در هر مرحله‌ای باشد و تبِ پیش‌فرض
+  // («در انتظار بررسی منابع انسانی») بیشترشان را پنهان می‌کرد — یعنی فهرست
+  // خالی به‌نظر می‌رسید.
+  //
+  // در *مقدارِ اولیه* و نه در محاسبهٔ هر رندر، وگرنه کلیکِ کاربر روی تبِ دیگر
+  // بی‌اثر می‌شد: پارامترِ آدرس همیشه برنده می‌ماند.
+  const [activeTabKey, setActiveTabKey] = useState(() => {
+    const linked = urlParams.get("tab");
+    return tabs.some((t) => t.key === linked) ? linked! : tabs[0]!.key;
+  });
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<AdvancedFilters>(EMPTY_FILTERS);
   const debouncedSearch = useDebouncedValue(search);
@@ -95,6 +113,7 @@ export function EvaluationList({
     q: debouncedSearch,
     status: activeTab.status,
     ...filtersToParams(filters),
+    seat_user_id: seatFilter,
     limit: pageSize,
     offset: page * pageSize,
   });
@@ -109,6 +128,30 @@ export function EvaluationList({
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      {/* فیلترِ آمده از لینک باید *دیده* شود و برداشتنش یک کلیک باشد. فهرستی
+          که بی‌صدا فیلتر شده، بدترین حالت است: کاربر فکر می‌کند پرونده‌ای وجود
+          ندارد. */}
+      {seatFilter !== undefined && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span>
+            فقط پرونده‌هایی که این کاربر رویشان مسئولِ مرحله است ({total.toLocaleString("fa-IR")}{" "}
+            مورد). برای هرکدام از «نجات پروندهٔ گیرکرده» جایگزین تعیین کنید.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(urlParams);
+              next.delete("seat_user_id");
+              setUrlParams(next, { replace: true });
+              setPage(0);
+            }}
+            className="rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium transition-colors hover:bg-amber-100"
+          >
+            نمایش همه
+          </button>
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-bold text-gray-900">{title}</h2>

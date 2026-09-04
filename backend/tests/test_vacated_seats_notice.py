@@ -196,7 +196,7 @@ def test_one_aggregated_notice_not_one_per_record(client, db_session):
     ceo = make_user(db, "ceo")
     hr = _hr(db, capabilities=[Capability.manage_personnel])
     db.commit()
-    for i in range(4):
+    for _ in range(4):
         person = make_personnel(db, org_unit="واحد چند")
         make_access(db, person, sup, None, ceo)
         db.commit()
@@ -209,8 +209,8 @@ def test_one_aggregated_notice_not_one_per_record(client, db_session):
 def test_copilot_separation_takes_the_same_path(client, db_session, departing_supervisor):
     """ابزارِ همکار هم `_close_out_departure` را صدا می‌زند، پس اعلان می‌آید."""
     from app.api.routers.personnel import _close_out_departure
-    from app.schemas.auth import CurrentUser
     from app.models.enums import UserRole
+    from app.schemas.auth import CurrentUser
 
     db = db_session
     sup_person, sup, subordinate, ceo, hr = departing_supervisor

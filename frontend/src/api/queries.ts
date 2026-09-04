@@ -65,6 +65,9 @@ export interface EvaluationListParams {
   max_final_pct?: number;
   subject_personnel_id?: number;
   was_returned?: boolean;
+  /** «پرونده‌هایی که این کاربر رویشان صندلی دارد» — فقط از راهِ لینکِ اعلانِ
+   *  «صندلی بی‌صاحب» می‌آید و کنترلی در فرم ندارد. */
+  seat_user_id?: number;
   limit: number;
   offset: number;
 }

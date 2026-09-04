@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -490,6 +490,7 @@ def _apply_evaluation_filters(
     max_final_pct: float | None,
     subject_personnel_id: int | None = None,
     was_returned: bool | None = None,
+    seat_user_id: int | None = None,
 ):
     """فیلترهای ترکیب‌پذیر فهرست/خروجی ارزیابی‌ها — یک‌جا تا list و export.xlsx
     همیشه رفتار یکسان داشته باشند (خروجی همان چیزی است که HR فیلتر کرده)."""
@@ -538,6 +539,23 @@ def _apply_evaluation_filters(
         query = query.where(EvaluationRecord.final_weighted_pct <= max_final_pct)
     if subject_personnel_id is not None:
         query = query.where(EvaluationRecord.subject_personnel_id == subject_personnel_id)
+    if seat_user_id is not None:
+        # «پرونده‌هایی که این کاربر رویشان صندلی دارد» — هر چهار صندلی، چون
+        # صندلیِ منابع انسانیِ *برداشته‌شده* هم مثل آن سه قفل می‌شود
+        # (`workflow.claimable_if_unassigned` فقط صندلیِ خالی را باز می‌گذارد).
+        #
+        # این فیلتر برای همان کاری است که اعلانِ «صندلی بی‌صاحب» می‌خواهد: تا
+        # پیش از این، متنِ اعلان کدها را نام می‌برد و منابع انسانی باید یکی‌یکی
+        # در جست‌وجو می‌چسباندشان — و برای فهرستِ بلند، بقیه اصلاً نام برده
+        # نمی‌شدند. حالا اعلان یک لینک دارد و لینک همین فیلتر است.
+        query = query.where(
+            or_(
+                EvaluationRecord.unit_supervisor_user_id == seat_user_id,
+                EvaluationRecord.deputy_user_id == seat_user_id,
+                EvaluationRecord.ceo_user_id == seat_user_id,
+                EvaluationRecord.hr_user_id == seat_user_id,
+            )
+        )
     if was_returned is not None:
         # پرونده‌های «برگشتی» یعنی دست‌کم یک رویداد evaluation_returned در سابقهٔ همان
         # پرونده — همان قانونی که در پاسخ (was_returned روی هر آیتم) استفاده می‌شود،
@@ -616,6 +634,7 @@ def list_evaluations(
     max_final_pct: float | None = Query(default=None, ge=0, le=100),
     subject_personnel_id: int | None = None,
     was_returned: bool | None = None,
+    seat_user_id: int | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -640,6 +659,7 @@ def list_evaluations(
         max_final_pct=max_final_pct,
         subject_personnel_id=subject_personnel_id,
         was_returned=was_returned,
+        seat_user_id=seat_user_id,
     )
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
