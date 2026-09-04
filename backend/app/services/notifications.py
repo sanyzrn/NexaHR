@@ -236,6 +236,11 @@ def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int
         f"مرحله بود: {listed}{more}. برای هرکدام با «تغییر مسئول مرحله» جایگزین "
         "تعیین کنید، وگرنه آن پرونده‌ها در همان مرحله می‌مانند."
     )
+    # لینک به *همان* فهرست، نه به یک صفحهٔ عمومی. بی این، متنِ اعلان کدها را
+    # نام می‌برد و منابع انسانی باید یکی‌یکی در جست‌وجو می‌چسباندشان — و برای
+    # فهرستِ بلندتر از ده مورد، بقیه اصلاً نام برده نمی‌شدند و راهی برای
+    # پیداکردنشان نبود.
+    link = f"/hr/queue?seat_user_id={user_id}&tab=all"
 
     # کلیدِ dedup به *مجموعهٔ* پرونده‌ها گره خورده و نه فقط به فرد: اگر فردا
     # پروندهٔ تازه‌ای روی همان صندلیِ مرده باز شود، مجموعه عوض می‌شود و اعلانِ
@@ -257,6 +262,7 @@ def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int
             message=message,
             dedup_key=f"seats_vacated:{user_id}:{fingerprint}",
             within_days=settings.notification_dedup_days,
+            link=link,
         ):
             created += 1
     return created
