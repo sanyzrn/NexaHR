@@ -196,6 +196,26 @@ def validate_bonus(
         )
 
 
+def applied_bonus(raw: float | None, rules: Rules, base_pct: float) -> float:
+    """امتیازِ ویژه‌ای که *واقعاً* اعمال می‌شود — نه عددی که ارزیاب وارد کرده.
+
+    دو سقف دارد: سقفِ طرح، و فاصلهٔ تا ۱۰۰. سقفِ دوم روی *افزوده* می‌نشیند و نه
+    روی حاصلِ جمع، تا این تساوی همیشه برقرار بماند:
+
+        امتیاز فرم + امتیاز ویژه = امتیاز نهایی
+
+    مقدارِ خامِ ثبت‌شده دست‌نخورده در خودِ پرونده و در ردِ ممیزی می‌ماند؛ این‌جا
+    فقط اثرش محاسبه می‌شود.
+
+    و چرا یک *تابع* و نه دو خط داخلِ `compute_result`: سندِ نهایی هم همین عدد را
+    لازم دارد و پیش از این نسخهٔ خودش را نداشت — مقدارِ خام را چاپ می‌کرد. با
+    پایهٔ ۹۸ و امتیازِ خامِ ۵، سند سه عدد نشان می‌داد که با هم جمع نمی‌شدند:
+    «۹۸ + ۵ = ۱۰۰». نوشتنِ دوبارهٔ همین فرمول در `snapshot.py` همان جفتِ همتایی
+    می‌شد که روزی از هم دور می‌افتد.
+    """
+    return round(max(0.0, min(float(raw or 0.0), rules.bonus_max_points, 100.0 - base_pct)), 2)
+
+
 def compute_result(
     scores: list[dict],
     indicators_by_id: dict[int, Indicator],
@@ -262,14 +282,8 @@ def compute_result(
     # می‌بریدیم، سند نهایی سه عددی نشان می‌داد که با هم جمع نمی‌شوند.
     # مقدار خامِ *ثبت‌شده* دست‌نخورده در خود پرونده می‌ماند؛ این‌جا فقط اثرش روی
     # نتیجه محاسبه می‌شود.
-    applied_bonus = round(
-        max(
-            0.0,
-            min(float(bonus_points or 0.0), rules.bonus_max_points, 100.0 - base_pct),
-        ),
-        2,
-    )
-    final_pct = round(base_pct + applied_bonus, 1)
+    applied = applied_bonus(bonus_points, rules, base_pct)
+    final_pct = round(base_pct + applied, 1)
 
     return {
         "general_score_pct": general_pct,
@@ -277,7 +291,7 @@ def compute_result(
         # امتیازِ فرم، پیش از امتیاز ویژه. در سند نهایی و لاگ ممیزی می‌نشیند تا
         # بعداً بشود گفت این عدد از کجا آمده، نه فقط اینکه چند شد.
         "base_weighted_pct": base_pct,
-        "bonus_points": applied_bonus,
+        "bonus_points": applied,
         "final_weighted_pct": final_pct,
         "recommendation": rules.recommendation_for(final_pct),
         # نسخهٔ طرحی که این نتیجه با آن حساب شده — در لاگ ممیزی و سند نهایی

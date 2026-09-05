@@ -11,6 +11,7 @@ from datetime import date
 
 from fastapi import HTTPException, status
 
+from app.core.clock import local_day_end, local_day_start
 from app.models.enums import UserRole
 from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
 
@@ -237,11 +238,12 @@ def search_audit_log(
     from_dt = _parse_date(created_from)
     to_dt = _parse_date(created_to)
     if from_dt:
-        stmt = stmt.where(AuditLog.created_at >= from_dt)
+        stmt = stmt.where(AuditLog.created_at >= local_day_start(from_dt))
     if to_dt:
-        from datetime import timedelta
 
-        stmt = stmt.where(AuditLog.created_at < to_dt + timedelta(days=1))
+        # همان مرزِ محلی که `audit_log.py` دارد — وگرنه همین جست‌وجو از راهِ
+        # دستیار ردیف‌های دیگری می‌داد تا از راهِ صفحهٔ ممیزی.
+        stmt = stmt.where(AuditLog.created_at < local_day_end(to_dt))
     # دامنهٔ دید: دارندهٔ گزارش کامل همه‌چیز؛ دارندهٔ سلامت فقط رویدادهای
     # سامانه‌ای — و *همان* فهرستِ رابط، نه یک نسخهٔ دستیِ موازی.
     #

@@ -5,7 +5,7 @@
 مشخص، بازهٔ تاریخ شروع ارزیابی، وضعیت پرسنل و بازهٔ تاریخ پایان قرارداد (برای دیدن
 افرادِ رو به اتمام/منقضی). خروجی Excel ترکیبی هم دقیقاً از همین فیلترها پیروی می‌کند.
 """
-from datetime import date, timedelta
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_roles
+from app.core.clock import local_day_end, local_day_start
 from app.db.session import get_db
 from app.models.enums import EvaluationStatus, PersonnelStatus, UserRole
 from app.models.evaluation import EvaluationRecord, EvaluationScore
@@ -57,10 +58,16 @@ def _record_conditions(
         conditions.append(Personnel.org_unit == org_unit)
     if personnel_id is not None:
         conditions.append(EvaluationRecord.subject_personnel_id == personnel_id)
+    # مرزِ روزِ *محلی* و نه نیمه‌شبِ UTC. `created_at` از نوع `timestamptz` است و
+    # مقایسهٔ مستقیمِ یک `date` با آن، مرز را روی نیمه‌شبِ منطقهٔ نشستِ دیتابیس
+    # می‌گذارد — یعنی سه‌ونیم ساعتِ اولِ هر روزِ تهران از فیلترِ همان روز جا
+    # می‌افتاد و زیرِ روزِ قبل دیده می‌شد. این همان اصلاحی است که
+    # `core/clock.py` برای فهرستِ ارزیابی‌ها و ردِ ممیزی انجام شد و *این‌جا*
+    # جا افتاده بود.
     if created_from is not None:
-        conditions.append(EvaluationRecord.created_at >= created_from)
+        conditions.append(EvaluationRecord.created_at >= local_day_start(created_from))
     if created_to is not None:
-        conditions.append(EvaluationRecord.created_at < created_to + timedelta(days=1))
+        conditions.append(EvaluationRecord.created_at < local_day_end(created_to))
     if personnel_status is not None:
         conditions.append(Personnel.status == personnel_status)
     if contract_end_from is not None:
@@ -276,9 +283,9 @@ def employee_vs_unit(
         if period_id is not None:
             conds.append(EvaluationRecord.period_id == period_id)
         if created_from is not None:
-            conds.append(EvaluationRecord.created_at >= created_from)
+            conds.append(EvaluationRecord.created_at >= local_day_start(created_from))
         if created_to is not None:
-            conds.append(EvaluationRecord.created_at < created_to + timedelta(days=1))
+            conds.append(EvaluationRecord.created_at < local_day_end(created_to))
         return conds
 
     # امتیازهای خودِ فرد

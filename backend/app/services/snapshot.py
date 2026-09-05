@@ -12,6 +12,8 @@ from app.models.indicator import Indicator
 from app.models.personnel import Personnel
 from app.models.self_assessment import SelfAssessmentScore
 from app.models.user import User
+from app.services.evaluation import applied_bonus
+from app.services.scoring_scheme import rules_for_record
 from app.services.workflow import SEAT_LABEL, scorer_field
 
 # ۴: افزودن `self_assessment` — برگهٔ مقایسهٔ «خود فرد / مسئول مستقیم» داخل سند.
@@ -26,6 +28,19 @@ def _evaluator_seat(record: EvaluationRecord) -> tuple[int | None, str]:
     """کدام صندلی به این پرونده نمره داد، و در سند چه نامیده می‌شود."""
     field = scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
     return getattr(record, field), SEAT_LABEL[field]
+
+
+def _applied_bonus_for_document(db: Session, record: EvaluationRecord) -> float | None:
+    """امتیازِ ویژه‌ای که در نتیجه اثر کرده — همان که سند باید چاپش کند.
+
+    `None` وقتی امتیازی ثبت نشده، تا شرطِ قالب (`{% if snapshot.bonus_points %}`)
+    مثل قبل کار کند و بلوکِ سه‌عددی اصلاً نیاید.
+    """
+    raw = float(record.bonus_points or 0.0)
+    if not raw:
+        return None
+    base = float(record.base_weighted_pct) if record.base_weighted_pct is not None else 0.0
+    return applied_bonus(raw, rules_for_record(db, record), base) or None
 
 
 def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
@@ -95,7 +110,14 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         "base_weighted_pct": float(record.base_weighted_pct)
         if record.base_weighted_pct is not None
         else None,
-        "bonus_points": float(record.bonus_points) if record.bonus_points else None,
+        # امتیازِ *اعمال‌شده* و نه خام. سند سه عدد کنار هم چاپ می‌کند — «امتیاز
+        # فرم»، «امتیاز ویژه»، «امتیاز نهایی» — و تا امروز عددِ وسط خام بود، پس
+        # هر جا سقفِ ۱۰۰ می‌بُرید، سه عدد با هم جمع نمی‌شدند: پایهٔ ۹۸ با امتیازِ
+        # خامِ ۵ روی کاغذ می‌شد «۹۸ + ۵ = ۱۰۰». روی مدرکی که هش و QR دارد.
+        #
+        # قاعده از `evaluation.applied_bonus` می‌آید و با قواعدِ *مهرشدهٔ همین
+        # پرونده* حساب می‌شود، نه طرحِ فعالِ امروز.
+        "bonus_points": _applied_bonus_for_document(db, record),
         "bonus_reason": record.bonus_reason,
         "recommendation": record.recommendation,
         "evaluator_comment": record.evaluator_comment,
