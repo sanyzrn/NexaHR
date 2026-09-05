@@ -1,0 +1,84 @@
+﻿我将进行一次聚焦于隐私与披露的实际代码审查。让我先制定好计划，然后运行代码，并阅读实际执行的部分。
+Repo 已克隆。当前没有运行 PostgreSQL — 正在安装，同时我来概览一下代码仓库结构。
+没有 root 权限。我将改为使用无 root 权限的 PostgreSQL（通过 pip 获取的 pgserver 捆绑二进制文件）。
+PostgreSQL 服务器通过套接字运行。现在我来读取 CI 脚本和测试 `config`，以便正确地将一切连接起来。
+依赖项已安装。现在将捆绑的 PostgreSQL 暴露在 TCP 5432 上，并使用测试预期的角色/数据库。
+PostgreSQL 已准备就绪。现在开始运行完整的 CI 套件 —— 从后端（ruff + ~1035 pytest）开始。
+虽然后端测试正在运行，我将深入阅读隐私相关的核心代码。
+现在我将对照抑制分析，完整地阅读那三个 `aggregation routers`。
+`executive_overview` 中的 `recommendation_mix` 饼图看起来未受抑制 —— 已记录。现在我来读取 `dashboard.py` 和 `reports.py`。
+已记录 `role_overview` 中潜在的切换旁路（switch-bypass）问题。现在进入防护核心——`_can_view_personnel`、`workflow.py` 中的屏蔽对（shield pair）以及 `modules.py`。
+接下来是核心文件 —— `evaluations router`，它是庞大的文件。正在分块读取。
+现在我来看看配套服务——`modules`、`self-assessment visibility`、`me router`、`notifications` 和 `audit`。
+`/api/me/evaluations/open` 从未检查可见性开关 —— 这是相对于 `my_evaluations` 的一个潜在偏差。让我验证一下 schema 字段和其余服务。
+`_with_accounts` 将自我评估状态暴露给座位持有者 —— 这与“仅限 HR 和本人”规则相矛盾。已记录。现在处理通知、审计和导出。
+现在来看看 copilot 工具 —— 该仓库的标志性缺陷类别。
+后端测试仍在运行。同时，前端界面——员工实际看到的内容。
+后台任务终止了。正在以分离模式重新启动测试运行，然后继续审查。
+沙盒全局注入了 `DATABASE_URL` (sqlite)，它会覆盖测试默认值。现在使用正确的 env 覆盖重新运行。
+后台进程会被沙箱回收。现在以前台模式、设置长超时来运行测试套件。
+1035 个后端测试全部通过。现在我来使用实时测试环境对疑似泄露进行实证验证。
+这三个疑点确实存在。让我捕获确切的泄露 payload，作为证据。
+所有四个探针均已解决——其中三个已确认为漏洞，HR-shield 保持正常。在修复探测文件之前，我还需要再检查一个屏蔽接口（shield surface）：`stage_stats`（HR 面板聚合）。
+`stage_stats` and `pipeline` count shielded cases without the filter — checking whether scheduled SLA reminders do the same.
+另外发现一个扫描漏洞（`orphaned_case`）将屏蔽的案件数据泄露给了人力资源部。现在在收尾前检查 AI 上下文注入和确认流程。
+PROBE6 captured with exact body text. One final probe: `recommendation_mix` small-cell exposure in the executive overview.
+All probes confirmed. Cleaning the repo and running the remaining CI jobs (launcher, frontend, e2e).
+Frontend green (270/270). Now the e2e job.
+四个 CI 任务均已通过。最终差异检查，以及针对 rule-4 变更对的最后两次代码验证。
+所有验证均已完成。正在更新工作日志并完成审核。
+## 结论 — 3行
+
+
+运行了完整的本地 CI：后端（ruff + 1035 pytest），启动器（89），前端（oxlint + 270 vitest + build），e2e API 场景 — 全部通过（绿色）；`--check-drift` 清洁（沙盒需要手动 `DATABASE_URL` 导出，因为全局的 sqlite `DATABASE_URL` 会覆盖测试默认值）。防护机制、抑制调用点和 copilot 委托确实非常稳固；我通过实时探测确认了它们。但我发现了 6 个真实存在的泄露点，全部集中在“员工/HR 面板表面的自评结果”上 — 每一个都通过探针执行，而不仅仅是阅读代码 — 其中的共同主题是：一个从不读取代码的注释的开关。
+
+
+## 发现的问题 — 严重程度 | 文件:行号 | 破坏点 | 触发方式 | 修复方法
+
+
+**1. HIGH（高危） — `backend/app/api/routers/dashboard.py:814-815`（`_self_cards` 在 599-630；已防护的孪生分支在 650-662），以及 `backend/app/services/ai/tools/evaluations.py:507-516` 和 `backend/app/services/ai/context.py:152-166`**
+即便在 `employee_evaluation_visibility` 和 `employee_overview_cards` 均为关闭状态（默认值）时，仍有三个服务器端表面会将员工自己的结果提供给员工本人：(a) `GET /api/dashboard/role-overview` 使用默认的 `scope=role` 返回卡片 `[{"key":"avg","label":"میانگین امتیاز نهایی (٪)","value":60.0}, {"key":"finalized"}, {"key":"pending_ack"}]` — 同一个函数的 `scope=self` 分支（650-662行）却检查了这两个开关，而 814 行的员工分支并没有检查；(b) copilot 工具 `my_open_cases` 直接返回该员工已定案记录的 `final_weighted_pct` + `recommendation`；(c) copilot 的上下文块（`context.py` 通过 `scope_evaluations_for_role` 进行委托，其员工分支允许已定案记录）将“— نتیجه ۶۰٪”注入到模型提示词中。这直接打破了明确做出的决定，即该开关“控制服务器端读取，而不仅仅是 UI”。触达方式：带有已定案评估记录的员工账号，模块保持默认关闭 → 执行上述三个调用中的任意一个即可（已通过探针验证：scope=self 返回 `[]`，scope=role 返回平均值；前端仅调用 `scope=self`，因此这些属于直接调用的 API 漏洞）。修复方法：通过现有的 `employee_results_are_visible(db)`（`notifications.py:133-150`）或在那两个模块检查点后面，对 814 行的员工分支、工具中的员工分支以及上下文块进行防护 — 使用一个共享的辅助函数，而不是三个临时的检查点。
+
+
+**2. MEDIUM（中危） — `backend/app/api/routers/me.py:87-139` 对比 `backend/app/core/modules.py:64-69`**
+`GET /api/me/evaluations/open` 从未查询过 `_VISIBILITY_MODULE`，尽管该模块自身的标签/描述承诺会控制“نتیجه و وضعیت پروندهٔ کارمند … و اینکه پروندهٔ در جریان اکنون در کدام مرحله است”，并且它的兄弟接口 `/api/me/evaluations`（`me.py:74-75`）也执行了这一检查。在开关关闭的情况下，该端点仍然会返回：案例是否存在、`evaluation_code`、`status` + `stage_label`、`hr_review_skipped`、完整的 `indicator_ids`、`self_assessment_open: true` 以及截止日期（探针负载：`[{'status':'draft', 'stage_label':'در حال تکمیل توسط ارزیاب', 'self_assessment_open':True, …}]`）。UI 可能会隐藏该部分，但好奇的员工直接调用 curl 命令即可获知评估程序已打开以及评估处于哪个阶段。修复方法：像 `my_evaluations` 一样，在此处添加相同的 `is_module_enabled(db, _VISIBILITY_MODULE)` 提前返回逻辑。
+
+
+**3. MEDIUM（中危） — `backend/app/api/routers/personnel.py:166`（`_with_accounts` 在 113-177 行，通过 `list_personnel` 181-219 行提供给席位持有者）**
+`GET /api/personnel` 会为每一位调用者（包括部门主管、副手、CEO）填充 `self_assessment_state`，这破坏了 `self_assessment.py:14-25` 中承诺的唯一规则（“چه کسی خودارزیابی را می‌بیند — فقط خودِ فرد و منابع انسان”）。该代码库甚至移除了自评提交时的评分员通知，理由是“告知评分员员工对自己的评价……恰恰在评分的时候”（`notifications.py:260-266`）— 然而这个端点却把“提交（submitted）”这一状态直接告诉了评分员，而此时他桌面上正放着该员工的评估草案。触达方式：主管提交自评后，下属会执行 `GET /api/personnel` → 探针返回其下属行的 `self_assessment_state: 'submitted'`（已验证；单条记录端点 `get_personnel` 不会填充此信息，因此只有列表接口存在泄露）。修复方法：仅在调用者为 `UserRole.hr`（该字段预期的“邀请按钮”受众）时，才将 `self_assessment_state`/`account_username`/`open_evaluation_id` 填充到 `_with_accounts` 中。
+
+
+**4. MEDIUM（中危） — HR 面板防护（shield）中缺失 `~IS_SHIELDED_FROM_HR_PANEL`：`backend/app/api/routers/dashboard.py:349-372` (pipeline), `dashboard.py:427-438` + `backend/app/services/stage_stats.py:150-163` (stage-stats), `backend/app/services/scheduled.py:153-194` (`run_orphaned_case_sweep`, 通知文本在 178-181 行)**
+该防护机制保护了列表（`evaluations.py:595`）、详情（`ensure_hr_may_handle`）和导出功能，但同一个 HR 面板的聚合视图和夜间扫描（sweep）却统计了受保护的 HR 单位案例。通过探针验证，使用一个处于 `hr_approved` 阶段的 HR 单位成员的开放案例（HR 详情返回 403，HR 列表中也缺失该案例）：`/api/dashboard/pipeline` 返回 `hr_approved: {count: 1, oldest_created_at: …}`；`/api/dashboard/stage-stats` 返回 `active: 1, longest_active_days, by_owner: [{name: "deputy_…"}]` — 这是通过另一个受防护的案例窗口对特定人员进行的小存储桶归因；如果副手停用，`run_orphaned_case_sweep` 会向每个活跃的 HR 用户发送 «پرونده EVL-06xx (همکار منابع ۳) گیر کرده است…» — 包含完整的受保护人员姓名、案例代码以及一个链接，即受保护人员自己的案例出现在了 HR 通知源中。这正是 `workflow.py:124-128` 所描述的不匹配类别（“ناهم‌ترازیِ این دو همان چیزی است که یک بار ستونِ نتیجه را در فهرست لو داد”）。修复方法：将 `~IS_SHIELDED_FROM_HR_PANEL` 添加到 pipeline 和 stage-stats 的记录查询中，并添加到 `run_orphaned_case_sweep` 的 `open_records` 游标中。
+
+
+**5. LOW-MEDIUM（低中危） — `backend/app/api/routers/analytics.py:331-369`**
+`executive_overview.recommendation_mix` 会为每个结果带发布 `count` 和 `share_pct`，且没有进行任何同类群组抑制（cohort suppression） — 这违反了该文件自身的规则 2（“هر میانگینِ گروهی از سرکوب کوهورت رد می‌شود”，`analytics.py:18-19`），并且与 `privacy.py` 存在冲突，因为对于结果带（recommendation band）来说，计数本身就是性能数据。触达方式：一个拥有 6 名员工（高于阈值）的组织，其中有一人处于最差结果带；副手（其故意不获取自己链条之外的记录）调用 `GET /api/analytics/executive` → `[{'recommendation': 'عدم تمدید / بازنگری اساسی شرایط همکاری', 'count': 1, 'share_pct': 16.7}, …]`，然后与 `by_org_unit` 的计数和 `contract_exposure` 进行交叉引用，从而确定具体个人（已通过探针验证）。copilot 的 `executive_analysis` 工具继承了相同的载荷。修复方法：使用 `is_below_cohort`（`privacy.py:45`）来限制单元格，使其返回 `count=None` 或合并到剩余部分，并将相同的单元格规则应用于具有相同模式的 `contract_exposure.without_finalized_evaluation`。
+
+
+**6. LOW（低危） — `backend/app/api/routers/evaluations.py:1499-1520`**
+`GET /api/evaluations/{id}/summary.pdf` 会向主体本人提供完整的官方哈希文档（最终百分比、建议、评论、证据），且完全没有 `employee_evaluation_visibility` 检查 — 这是除发现 1 之外，唯一一个忽略该开关的结果表面。向主体授予访问权限显然是有意的（1494-1501 行的注释），但在组织的“员工看不到结果”的立场下（开关关闭），该员工仍然可以自助获取正式文档。触达方式：主体 + 已定案记录 + 开关关闭 → 返回 200（代码已确认；这是此列表中唯一通过阅读代码而非通过探针确认的发现 — 已通过是否存在任何模块检查进行验证）。修复方法：在 `is_subject` 分支中增加一行 `employee_results_are_visible(db)` 的防护；如果确实是要刻意保持打开状态，则在此处写下该例外情况，并削弱模块描述中承诺的内容。
+
+
+## 已验证无误
+
+
+- **HR 面板防护对（规则 4）**：`hr_panel_is_shielded` (`workflow.py:104-121`) 和 `IS_SHIELDED_FROM_HR_PANEL` (`workflow.py:124`) 在逻辑上完全一致；通过探针验证：受保护的案例在 HR 列表中缺失（`evaluations.py:595`），在详情中报 403，在 `export.xlsx` 中缺失（`evaluations.py:712-724` 应用了 `scope_evaluations_for_role`），并且 copilot 上下文使用了与 `context.py:143-157` 相同的范围函数。
+- **`ensure_hr_may_handle` 的覆盖率**：存在于所有 HR 触点 — approve, return, cancel, extend, claim, handover, reassign, resolve-objection, `add_comment`（包括自评注释打印为 PDF 的情况），以及 `improvement_plans.py:202` — 并且 additionally 在 `workflow.apply_transition`（`workflow.py:406-409`）内部重新运行，因此 copilot 路径无法绕过它；`add_comment` 现在将注释视为一种受保护的行为（`evaluations.py:1655-1666`）。
+- **Copilot 一致性（规则 3）**：每一个写入工具都使用真实的 Pydantic 载荷委托给端点函数（`tools/evaluations.py:167-184, 223-297, 416-440`）；角色表复制了 `require_roles/require_chain_stage`（287-297 行）；`execute_tool` 在运行时（而非仅在推广时）重新检查工具访问权限和只写开关（`base.py:326-340`）；工具注册默认关闭（`base.py:154-158`）；uploads/对话严格限制在自身范围内（`ai.py:298-303`, `uploads.py:217-224`）。
+- **统计表面的同类群组抑制（规则 4）**：`dashboard` 中的 `by_org_unit`/`by_evaluator`/`indicator stats`/`period-trend`，`reports` 中的 `summary`/`indicator`/`employee-vs-unit`，以及 `analytics` 中的 `my-scoring`，全部都使用 `cohort_size(distinct subject)` + `suppressed_avg`，包括对 `general/specialized splits` 的抑制（`dashboard.py:205-223`）；“5 lowest units” 仅对未抑制的行进行排名（`dashboard.py:300-306`）；报告 Excel 明确将受抑制的单元格打印为 «— (جمعیت کمتر از حد نمایش)»（`excel.py:278-284`）。
+- **其余配对不变量（规则 4）**：`IS_OPEN_RECORD`/`OPEN_STATUSES` 是单一来源（`workflow.py:26-36`）；`uq_open_evaluation_per_personnel` 谓词是 `status NOT IN ('finalized','cancelled')`（在 `e4b8d03ca712` 中修正），与 Python 保持一致；`compute_result` (`evaluation.py:199-262`) ≡ 前端 `computePreview` (`ScoreForm.tsx:153-221`)，包括基于记录方案权重的缺失部分重新分配和零权重回退；`self_assessment.may_view` 仅限 HR 使用，且在唯一的详情服务点（`evaluations.py:276-283`）强制执行，评分仅流经 `/api/me`（本人）。
+- **员工端结果通知**：`evaluation_finalized_self`（`notifications.py:358-370`）和 objection-resolution（`evaluations.py:1574-1581`）都受到 `employee_results_are_visible` 的限制；无通知发送给自我评估后的评分员（`me.py:260-266`）。
+- **审计日志与导出**：哈希链 + 建议锁（`audit.py:75-107`） + UPDATE/DELETE 触发器；非 `view_audit_log` 持有者只能获取带有第二个限制 `evaluation_record_id IS NULL` 的 `SYSTEM_EVENT_TYPES`（`audit_log.py:130-152`），copilot 镜像完全相同的允许列表（`tools/analytics.py:254-260`）；工具参数被递归地进行了脱敏（`base.py:298-323`）；每个工作簿写入路径都经过了公式注入中和处理（`excel.py:59-103`）。
+- **PII（个人身份信息）在服务器日志和渠道中**：请求中间件仅记录 `request.url.path` — 没有查询字符串，因此 `q=<person name>` 搜索永远不会触及日志（`main.py:124-130`）；登录失败仅记录 IP，从不记录用户名（`auth.py:136-181`）；向日志写入消息体的控制台交付渠道是可选的，仅限开发使用（`config.py:167`, `channels/__init__.py:26-31`）；QR 码验证是公开的，但基于 24 字节随机令牌键控并进行速率限制，仅返回该文档自身的最终数据（`evaluations.py:1449`, `verify.py`）。
+- **全部四个 CI 任务 + `--check-drift` 在此机器上运行通过**（1035 + 89 + 270 个测试，e2e API 场景，使用全新的 `nexahr` 数据库）。
+
+
+## 未能检查的内容及原因
+
+
+- **真实的 PDF 渲染**：未安装 WeasyPrint 的原生库 (Pango/Cairo)（端点本身返回带有解释的 500 错误），并且 e2e 运行使用了 `--api-only`，因此我从未检查过渲染后的文档内容 — 仅有 `documents.py`/`pdf.py` 中的快照/归档逻辑，以及相应的测试套件。
+- **真实的 SMTP/SMS 投递**：没有外部服务；`delivery.py` 和渠道已通过阅读代码验证，e2e 的模拟路径已通过测试，但没有任何内容实际离开过机器。
+- **针对真实模型运行 copilot**：e2e 使用了 `e2e/mock_llm.py`；每个工具的防护已通过阅读代码验证，并通过 `test_ai_*` 一致性测试进行了验证，而非通过实际推理模型。
+- **浏览器点击测试**：我验证了 API 响应（通过探针）并阅读了调用点（`RoleOverviewCards`, `MyEvaluationsPage` 使用了已防护的 `scope=self`），但未运行视觉 UI 会话；因此，上述发现是服务器端漏洞，而非 UI 漏洞。
+- **`/api/me` 自我服务表面的多账户/并发行为**：该套件的并发测试已通过，但我未在 PostgreSQL 数据库之外对锁定/竞争路径进行压力测试。

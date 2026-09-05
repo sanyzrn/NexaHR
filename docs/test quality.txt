@@ -1,0 +1,127 @@
+﻿Repo cloned. Now let me set up the environment — check Python, PostgreSQL, and the CI script.
+PostgreSQL server isn't installed — only the client lib. Let me install it.
+No root access for apt. I'll get a portable PostgreSQL (either prebuilt binaries or compile from source).
+EDB blocks downloads. I'll compile PostgreSQL from source — gcc/make are available. Let me start that in the background while I explore the test suite.
+While PostgreSQL compiles, let me study the CI script and test infrastructure.
+The background process got killed when the shell session ended. Let me use `nohup` + `setsid` to detach properly.
+Build running. Meanwhile, let me set up the backend venv.
+While PostgreSQL compiles, let me hunt the false-green patterns across the suite.
+Now let me survey mock-assertion and status-only patterns across the suite.
+No mock-assertion tests — the suite is integration-style. Now let me AST-scan for tests whose only check is `status_code == 200`.
+195 status-only tests — many legitimately assert 403. The dangerous subset: tests whose ONLY assertion is a **success code** on a write/read, with no body or DB check.
+38 success-only tests. Let me inspect the riskiest ones.
+The ack write itself is covered by behavior tests elsewhere — good. Now the wall-clock angle: let me find date/time-dependent assertions.
+PDF tests are fixed-date now. But `make_personnel` defaults `contract_end_date=date(2026, 1, 1)` — today is 2026-09-05. Let me check whether anything computes status from contract dates.
+Build died silently. Let me run it in the foreground.
+Incomplete extraction. Re-extracting and building:
+Configured. Now compiling (this takes a few minutes):
+No pre-generated parser files and no bison. Let me try the theseus-rs portable PostgreSQL binaries instead.
+Zonky binaries from Maven Central worked. Extracting:
+Server binaries present; need `psql` client too. Let me extract it from the Debian package:
+Full PostgreSQL toolchain ready. Now initialize the cluster:
+Database up. Now run the CI drift check and the backend job:
+My sandbox shell has a stray `DATABASE_URL` env var that overrides the conftest default. Running with it unset:
+Need the venv's bin on PATH (as ci-local.sh does). Re-running:
+Backend: **1035 passed** — exactly as claimed. Now check the af_race pollution claim directly in the shared test DB:
+One `af_race` user leaked per run. Let me check the second committing test (H-2) and what else leaks:
+The H-2 test uses the savepoint session — only M-7 (`af_race`) commits for real, and its cleanup is not in `finally`. Let me check what a *failed* run leaks, and who reads that state:
+Now let me set up the frontend while I continue analysis:
+npm ci done. Running the frontend job in background while I examine e2e:
+Now the af_race accumulation experiment — run just that test twice and watch the shared DB:
+Count grows by exactly 1 per run — confirmed unbounded accumulation. Let me reproduce that transient error from the double-run:
+Now let me run the suite with coverage to map untested paths:
+85% overall. The riskiest gaps: `ai/actions.py` (17.6%), `ai/tools/framework.py` (47.6%), `ai/tools/people.py` (47.7%), `core/scheduler.py` (51.8%). Let me see exactly what's uncovered:
+`ai/actions.py` — a write-execution layer with guards — is 17.6% covered. Is it reachable? Let me check who imports it:
+`actions.py` is dead code — no production import. Now let me examine the LIVE copilot path (tools framework, 47.6% covered):
+Let me enumerate the live tool registry and check which tools have any test references:
+`run_bulk_evaluations`, `create_improvement_plan`, `update_improvement_plan_goal`, `create_scoring_scheme_draft`, `set_evaluation_access` have zero direct test references. But let me check the parity tests — they may cover guards generically:
+`create_scoring_scheme_draft` writes directly via `db.add` — not the endpoint. Let me check what guards the endpoint's schema has that the tool bypasses:
+Checking whether the bulk-create endpoint guards the `periods` module and whether the copilot tool bypasses it:
+Confirmed: `run_bulk_evaluations` tool skips `ensure_module_enabled` that the endpoint has. Let me check frontend status, then run the mutation experiments:
+Background jobs die between sessions. Running frontend in foreground:
+All frontend jobs pass. Now the e2e job:
+E2E fails at AI status. Let me diagnose:
+The trap killed servers on exit. Let me restart them manually and inspect the status reason:
+Environment mismatch on my part — `JWT_SECRET_KEY` differed between setup and server. Re-running the e2e job exactly as ci-local.sh does:
+All four CI jobs green. Now the mutation experiments. First, calibration — remove a guard the suite should catch (`ensure_hr_may_handle` from `add_comment`):
+Guard removal caught — good calibration. Restore, then run the untested-tool mutation:
+**1035 passed with the authorization guard deleted** — the suite cannot catch it. Restoring, then probing the two live tool bypasses:
+Both bypasses proven live. Let me verify no probe rows leaked (the outer-transaction pattern should contain the tool commits), then clean up:
+Now the af_race failure-path experiment — simulate a mid-test regression failure and observe what leaks:
+Massive leak confirmed. Now show the cascade — run the AI test files (which run first alphabetically) on the polluted DB:
+Cascade proven. Restore the file, reset the test DB, and check the second committer (M-10 scheduler test):
+Second instance — M-10 commits a `succeeded` SchedulerRun and its janitor is also outside `finally`. Let me verify the cascade on this one too:
+Second cascade confirmed. Restore and reset:
+Now the wall-clock hunt — checking default timezone and tests using real `new Date()` / `today`:
+Backend wall-clock class is clean. Now the launcher tests — quality scan:
+Launcher tests are behavior-driven with DI — solid. Now the frontend/backend `computePreview` parity pair:
+Parity pair is a hand-maintained mirror with the key case tested both sides. Now map the remaining untested high-risk paths:
+The tool mirrors of tested endpoints are systematically untested. Check whether a broken-weight draft can be activated:
+`activate()` checks status and two-person rule only — no weight re-validation. Broken drafts are activatable. Quick final scans — frontend mock-assertion density and the audit-chain test strength:
+One more check — which other tests create their own engines and commit outside the savepoint:
+Let me inventory ALL rows that survive a fresh full-suite run (I ran the coverage suite on a clean DB):
+DB was reset. Re-run the suite once on the fresh DB and inventory leftovers:
+The recovery-flow status asserts are behaviorally meaningful. Now the last mutation experiment — role-gated no-op in `acknowledge` (the parametrized test only checks 200):
+The ack write is transitively verified. Restore and test the sharper mutation — skip only audit/notification for non-employee roles:
+1035 green — audit-skip mutation undetected. Restore and check the shielded-pair drift guard:
+The shielding pair is behaviorally pinned (list + export + touch + finalized). One last flake check — the transient ERROR I saw on back-to-back af_race runs:
+Let me verify the last claim precisely — deputy executive-view content assertions:
+All evidence gathered. Writing the worklog, then the final review:
+## Verdict — 3 lines
+The suite is real: 1035/89/270 tests plus the e2e API scenario all pass on a fresh PostgreSQL 17, they run against real indexes/triggers/locks, and it caught every guard-removal I threw at the *endpoint* layer. But the copilot tool layer — the repo's own signature risk class — has five risky write tools with zero coverage, two of which verifiably bypass guards the endpoints enforce, and two committer tests poison the shared test DB in a way I reproduced as cross-run false failures. Where the suite is weak, it is weak precisely where the Persian comments are most confident.
+
+
+## Findings — severity | file:line | what breaks | how to reach it | fix
+
+
+**1. HIGH | `app/services/ai/tools/framework.py:261-310` (`create_scoring_scheme_draft`) | The tool builds `ScoringScheme` via its own `db.add`, bypassing `SchemeInput` (`app/schemas/scoring_scheme.py:46-80`), so the copilot can draft a scheme whose section weights don't sum to 1 and whose `evidence_min_words > evidence_max_words`. `activate()` (`app/services/scoring_scheme.py:120-150`) checks only draft-status + two-person rule, so a second HR can activate it; from then on every new case computes `final_weighted_pct` under weights summing to ≠1 — e.g. 1.8 means score-5-everywhere lands at ~56% and maps to «عدم تمدید». | HR user with `manage_scoring` → copilot chat → confirm `create_scoring_scheme_draft {name, general_section_weight: 0.9, specialized_section_weight: 0.9}` → a second HR confirms `activate_scoring_scheme`. I executed the tool: draft scheme created with weights 0.9+0.9 and min_words 50 > max_words 10. The endpoint `POST /api/scoring-schemes` rejects both. | Delegate to the endpoint function exactly as `create_indicator` does at framework.py:102-110 (`create_endpoint(payload=SchemeInput(...))`). Mutation the suite cannot catch: any edit to this tool's body — 0 of its lines are covered (verified by branch coverage; `create_scoring_scheme_draft` appears in 0 test files).
+
+
+**2. HIGH | `app/services/ai/tools/framework.py:491-526` (`run_bulk_evaluations`) | The tool calls `services.bulk_evaluation.execute` directly, so the `periods` module switch — enforced inside the endpoint body at `app/api/routers/periods.py:397` (`ensure_module_enabled`) — never runs. It also skips the per-assignee notifications (`periods.py:416-431`): supervisors get cases they are never told about. With the module off, bulk cycle-opening still works through the copilot. | Admin disables «دوره‌های ارزیابی» → HR → copilot confirms `run_bulk_evaluations {org_unit}`. I executed this with the module off: endpoint returned 403, the tool answered «اجرای گروهی ارزیابی انجام شد» and created a draft `EvaluationRecord`. | Route through `run_bulk_create`'s endpoint function (as `create_period` does — that one is clean), or add `ensure_module_enabled(ctx.db, "periods")` + the assignee `notify` loop. Mutation uncatchable: 0 test files reference the tool.
+
+
+**3. HIGH | `backend/tests/test_audit_fixes.py:578-690` (M-7) and `:725-769` (M-10) | Both tests commit through their own engine (`create_engine` at :589/:728) — outside the conftest rollback — and their cleanup (row deletion at :676-687, janitor at :755-764) runs *inside* `try`, not in `finally`. On any mid-test failure the committed rows survive: M-7 leaks `AiSettings(enabled=true)`, `AiUserAccess`, `AiPendingAction`, personnel `P-AUDIT-ONCE` and the `af_race_*` user; M-10 leaks a `succeeded` `SchedulerRun`. I injected a failing assertion and reproduced both cascades: the next run fails `tests/test_ai_assistant.py::test_status_tells_not_configured_from_not_permitted` (AI now appears configured) and `tests/test_observability.py::test_last_successful_sweep_ignores_runs_that_were_skipped` (history no longer empty). Even on success, one `af_race_*` HR user + capability rows leak per run (verified: 1 user after a fresh green run, +1 per run, never deleted — the cleanup docstring admits why). A developer debugging the *first* failure sees a *different* failure on re-run, pointing at the wrong code. | Any regression that fails either test once (I simulated it; run the file to see the leak: `psql ... -c "select * from ai_settings"`). | Move both cleanups into a fixture finalizer the way `tests/test_score_write_lock.py:36-119` already does correctly (teardown after `yield`, runs even on failure); the af_race user needs either a dedicated role/user per test DB or a finalizer that disables the append-only trigger like the lock test does.
+
+
+**4. HIGH | `app/services/ai/tools/framework.py:648-649` (`update_improvement_plan_goal`) | The tool's inline authorization (only HR or the plan's owner may tick goals) is the only guard on this write path. I deleted it and ran the full suite: **1035 passed**. A deputy can mark goals done on plans they don't own — while the same action through the endpoint is refused. | Deputy (allowed by the tool's `roles=(hr, sup, dep, ceo)`) → copilot proposes `update_improvement_plan_goal {goal_id}` on another user's plan → user confirms → `goal.is_done = True`. | Copy the parity-test pattern of `tests/test_ai_people_parity.py` (403 for non-owner, 200 + persisted `is_done` for owner, 404 for unknown goal). The mutation I ran is the exact demonstration that nothing catches its removal.
+
+
+**5. MEDIUM-HIGH | `backend/tests/test_subject_of_any_role.py:101-112` | For the 4 non-employee subject roles the acknowledgement test asserts only `status_code == 200`. The ack *write* is transitively verified (the objection endpoint requires `acknowledged_at`, me.py:347), but the audit event `evaluation_acknowledged` and the HR notification are not. I wrapped `log_event`+`notify` (me.py:430-454) in `if current_user.role == UserRole.employee` — **full suite: 1035 passed**. A legally-relevant trail («نتیجه را دید») silently disappears for supervisors/deputies/CEO/HR as subjects. | Any subject with role ≠ employee acknowledges via `/api/me/evaluations/{id}/acknowledge` → 200, no audit row, no HR notification. | In the parametrized test, per role: reload the record and assert `acknowledged_at is not None`, plus one audit-log and one notification assertion (the employee-role version at `tests/test_employee_self_view.py:121-158` already shows how).
+
+
+**6. MEDIUM | `app/services/ai/tools/people.py:619-682` (`create_user`), `:944-1022` (`set_evaluation_access`), `:852-876` (`create_org_unit`), `framework.py:597-624` (`create_improvement_plan`) | Four more live, risky write tools whose bodies execute 0 covered lines (branch coverage; 0 test-file references). `set_evaluation_access` rewrites the four-seat approval chain; `create_user` mints accounts with initial passwords. Their endpoint twins are tested (`evaluation_access.py` 94.4%, `improvement_plans.py` 84.8%) — the copilot mirrors are not, which is exactly the half-present-guard shape this repo keeps shipping. | Any guard or validation drift inside these tool bodies is invisible; reachable via copilot confirm-cards for any user the registration gate admits. | One parametrized parity sweep: for every entry in `tools_base.REGISTRY` with `risky=True`, execute as an under-privileged user and assert 403 — `tests/test_ai_workflow_parity.py` already does this per-flow; generalize it to the registry.
+
+
+**7. MEDIUM | `app/core/startup_checks.py:35-60` (`assert_no_demo_credentials`) | The production fail-closed gate is never executed by any test (branch coverage: lines 44-60 uncovered). Only the scanner `find_active_demo_accounts` is tested (`tests/test_demo_account_guard.py`). Mutating `raise RuntimeError` → `logger.warning`, or making the DB-unreachable path return instead of raise, changes no test result — the guard that stops the container from booting in production with the repo's published demo passwords is unverified. | Set `ENVIRONMENT=production` with a seeded demo account → server must refuse to start; nothing asserts it does. | Two tests with `monkeypatch.setattr(settings, "environment", "production")`: (a) demo user active → `pytest.raises(RuntimeError)`; (b) SessionLocal raising → still raises (fail-closed, not fail-open).
+
+
+**8. MEDIUM | `app/services/ai/actions.py` (whole module, 188 stmts, 17.6% covered) | Dead code that reads as the copilot's write layer: its docstring (lines 1-15) confidently describes the propose→confirm architecture («مجوز در مجری بررسی می‌شود...»), but no production module imports it — the live path is `services/ai/tools/*` + `confirmations`. The one test touching it (`tests/test_chain_seat_lock.py:156`) tests a private function of a dead module, manufacturing assurance about a path that doesn't exist. Future "fixes" to guards here protect nothing. | n/a (unreachable) — that's the point. | Delete the module and port the seat-lock test to the live `deactivate_user` tool; or wire it back in and test it. Note its `_guard` is also cap-OR-role (`actions.py:73-75`), unlike the endpoint's cap-AND-role — divergent semantics frozen in dead code.
+
+
+**9. LOW-MEDIUM | `backend/tests/test_role_analytics.py:297-303` (+ the success-only class) | 38 backend tests assert nothing but 2xx (AST scan; script kept at `scripts/scan_success_only.py`). Most are legitimate (403-guards, or flows where the next action proves state — the recovery tests are fine). The genuinely hollow one: deputy's `/api/analytics/executive` is only ever asserted as `200`; content is asserted only for CEO (lines 235-290). Mutation: return `{"by_org_unit": [], "recommendation_mix": [], ...}` for `UserRole.deputy` → suite stays green. Weaker siblings: `test_scoring_schemes.py:162-183` discards the `PUT /scores` result (only `submit`'s 200 distinguishes old-vs-new rules) and `test_subject_of_any_role.py:101` (finding 5). | Deputy opens «تحلیل سازمان» → empty aggregate with 200. | Assert body content for the deputy case (one `by_org_unit` row with expected ordering), and assert the `PUT /scores` status in the scoring-scheme test.
+
+
+**10. LOW | `backend/tests/test_scheduler_reliability.py:135-164` | `test_a_second_instance_skips_instead_of_duplicating_work` commits a `skipped_locked` `SchedulerRun` row through its private engine and has no janitor — verified in the post-green-run inventory: exactly one `skipped_locked` row survives every full run, forever. Inert today (`last_successful_sweep` ignores skipped rows — deliberate), but it is the same leak class as finding 3 and a landmine for any future assertion over `recent_runs`. | Run the suite, then `SELECT * FROM scheduler_runs` on `nexahr_test`. | Delete the row in a `finally` (or fixture finalizer) scoped to this test's run.
+
+
+## Verified correct
+- **Isolation architecture itself**: `conftest.py:44-59` savepoint-joined session contains even mid-tool `db.commit()` — I ran write-tools against it and leaked 0 rows; the only leaks are the two tests that build their own engine (finding 3). Rate-limiter reset (`conftest.py:62-75`) correctly prevents quota bleed between tests.
+- **The historically-broken guards are now pinned**: removing `ensure_hr_may_handle` from `add_comment` (`evaluations.py:162`) failed 2 tests immediately; the cohort-people-vs-records fix is pinned four ways in `tests/test_cohort_counts_people.py` (5 records/1 person suppressed, 8 records/4 people suppressed, count-vs-average separated); the PDF UTC wall-clock bug is locked by fixed-date tests (`test_pdf_security.py:126-144`, `test_org_timezone.py:38-52`) plus byte-stability of the hashed document across an objection (`test_employee_voice.py:256-278`).
+- **Paired invariants**: `hr_panel_is_shielded` / `IS_SHIELDED_FROM_HR_PANEL` are behaviorally pinned by `test_hr_subject_chain.py` (list filter, Excel export :210, touch-guards :249/:268, finalized case reappears :417); `IS_OPEN_RECORD`/`OPEN_STATUSES` are structurally consistent (`workflow.py:26-36,121-124`); `compute_result`/`computePreview` agree on the empty-section normalization, tested on both sides.
+- **`pytestmark = usefixtures("employee_view_on")` does NOT hide the defaults**: `test_capabilities.py:284-300` hardcodes the four employee modules as default-off *and* cross-checks every key against `MODULES_BY_KEY`; `test_module_switches.py` pins off-behavior per switch and `test_every_module_key_is_enforced_somewhere_on_the_server` greps the source for unreferenced keys.
+- **Audit hash chain**: tamper detection at the DB level, including the TRUNCATE-bypass trigger (`test_audit_chain.py:120-160`) — this is the strongest area in the suite.
+- **Real concurrency tests**: `test_score_write_lock.py` runs genuine two-connection row-lock races with correct fixture-finalizer cleanup (0 rows leaked after green runs); `test_workflow_concurrency.py` + advisory-lock tests cover the transition paths.
+- **No wall-clock-dependent backend tests found**: every now/today usage in tests is relative (`today_local() ± N`) or mocked (`clock.now_local`); no test asserts a date derived from the live clock. The frontend `SubmissionDeadlineBar` tests use machine-relative local dates and pin the local-day-parse fix.
+- **Launcher (tools) tests**: dependency-injection style (fake probers, injected `owner_of`/`reclaim`) with assertions on decisions (kill-or-move, story, chosen port) plus real socket probes — no mock-theater.
+- **e2e API scenario**: asserts end-state data (personnel rows, Jalali→Gregorian conversion, created account), audit tool-*name* sets (deliberately count-free, `e2e_api_test.py:156-174`) and 409 double-confirm; `ci-local.sh` drops/recreates the e2e DB so no cross-run green; drift check passes for all 10 commands.
+- **Orchestrator tests** fake at the provider port (`fake_llm.py` `ScriptedAdapter`/`NoToolsAdapter`) and assert on loop behavior — the right boundary.
+
+
+## Could not check, and why
+- **`e2e/e2e_browser.sh` / `e2e_browser.py`** — not in CI's command list (`ci.yml` runs `--api-only`, drift-verified); the headless-browser scenario needs a browser runtime I did not install. The API scenario is fully run and green.
+- **Outbound channels `services/channels/smtp.py` (29%) and `http_sms.py` (38%)** — no live SMTP/SMS endpoint is reachable from this sandbox; only their unit-tested boundaries were reviewed, so their error/credential paths remain UNVERIFIED beyond coverage data showing them unexercised.
+- **`ai/provider.py` HTTP adapter against a real provider** — the e2e mock covers the happy path only; retry/timeout/error-mapping branches (71% covered) were not exercised against real LLM endpoints.
+- **Windows-only launcher branches** (psutil/tasklist ownership, `nexahr.pyw` entry) — the launcher tests were run on Linux; Windows-specific code paths are UNVERIFIED.
+- **GitHub Actions runners themselves** — I verified command parity via `--check-drift` locally, not an actual CI execution on GitHub.
+- One transient collection ERROR appeared once during back-to-back runs of the af_race test and did not reproduce in three attempts; dropped per your rule 5.
+- Everything else in this report was executed on PostgreSQL 17.5 (Zonky binaries + Debian client, no root available) with the repo's own `ci-local.sh` job structure; the environment matched CI except PostgreSQL 17 vs 16.
