@@ -1,7 +1,7 @@
-# پرامپتِ بازبینیِ NexaHR
+# NexaHR multi-angle review prompt
 
-هر ایجنت **یک** زاویه می‌گیرد. متنِ زیر را کامل بدهید و فقط خطِ
-`Your angle:` را با یکی از زاویه‌های بخشِ آخر پر کنید.
+Give each agent **one** angle. Paste the whole block below and fill only the
+`Your angle:` line from the list at the end.
 
 ---
 
@@ -140,11 +140,11 @@ OUTPUT (exactly these four sections, nothing else)
 
 ---
 
-## زاویه‌ها — هرکدام به یک ایجنت
+## Angles — one per agent
 
-هر خط را عیناً در `Your angle:` بگذارید.
+Paste one verbatim into `Your angle:`.
 
-**۱ — authz & session**
+**1 — authz & session**
 > authorization and sessions — the two-axis model (`UserRole` for chain
 > position vs `Capability` for administrative power), row-level visibility
 > (`scope_evaluations_for_role`, `_can_view_personnel`), JWT + `token_version`
@@ -153,7 +153,7 @@ OUTPUT (exactly these four sections, nothing else)
 > `/api/verify/{token}` endpoint expose. Start from `api/deps.py`,
 > `services/authorization.py`, `services/self_evaluation.py`.
 
-**۲ — workflow state machine**
+**2 — workflow state machine**
 > the approval chain — `services/workflow.py` (`TRANSITIONS`,
 > `ensure_transition_allowed`, `apply_transition`) against all three legal
 > chain shapes. Returns, cancellation, HR claim/handover, stage reassignment,
@@ -161,14 +161,14 @@ OUTPUT (exactly these four sections, nothing else)
 > full chain, the manager path and CEO-direct — the third shape is the one
 > that has broken five times.
 
-**۳ — scoring & the legal document**
+**3 — scoring & the legal document**
 > score computation and the final document — `compute_result`, per-indicator
 > weights, absent-section redistribution, scheme versioning and mid-cycle
 > activation, bonus rules, `services/snapshot.py`, `services/documents.py`,
 > `services/pdf.py`, the hash and the QR verification path. This PDF is an
 > employment document; a wrong number here reaches a person's file.
 
-**۴ — AI copilot**
+**4 — AI copilot**
 > the copilot — `services/ai/` end to end: tool registration and the
 > capability/role/`guarded_inline` declaration, `orchestrator.py`, the
 > confirmation flow (`confirmations.py`), what `context.py` puts in the
@@ -177,7 +177,7 @@ OUTPUT (exactly these four sections, nothing else)
 > and the audit split between `ai_tool_invoked` and `ai_action_confirmed`.
 > Rule 3 is your rule.
 
-**۵ — privacy & disclosure**
+**5 — privacy & disclosure**
 > what leaks — cohort suppression (`services/privacy.py`) at every call
 > site, the HR-panel shield over HR-unit employees' own files,
 > self-assessment visibility, who can read whose evaluation, PII in the audit
@@ -185,21 +185,21 @@ OUTPUT (exactly these four sections, nothing else)
 > employee-facing views. Assume the reader is a curious employee with a valid
 > account, not an anonymous attacker.
 
-**۶ — data integrity & migrations**
+**6 — data integrity & migrations**
 > the database — 58 Alembic migrations replayed from empty, `alembic check`
 > for model/schema drift, enum values that exist in Python but not in the DB
 > (or the reverse), the partial unique indexes, the append-only audit trigger
 > and `services/audit.py`'s hash chain, cascade/orphan behaviour on delete,
 > and every place a status or enum is compared as a string.
 
-**۷ — concurrency & scheduling**
+**7 — concurrency & scheduling**
 > races — `with_for_update` coverage on every read-decide-write path,
 > `pg_advisory_xact_lock` use in the audit chain, `services/scheduler_lock.py`
 > and the nightly sweeps (`services/scheduled.py`), the outbound delivery
 > queue and its retry/backoff, double-submit and double-confirm, and
 > transaction boundaries around `db.commit()` in endpoint bodies.
 
-**۸ — Persian, RTL, Jalali & time**
+**8 — Persian, RTL, Jalali & time**
 > localization — `core/clock.py` and the UTC/local boundary (storage in UTC,
 > "today" and display in `ORG_TIMEZONE`), Jalali conversion in the PDF,
 > Persian digits, date-range filters against `timestamptz` columns, logical
@@ -208,21 +208,21 @@ OUTPUT (exactly these four sections, nothing else)
 > catalogue — Persian is hard-coded — so check for stray English reaching the
 > user and for raw enum values printed instead of labels.
 
-**۹ — frontend correctness & accessibility**
+**9 — frontend correctness & accessibility**
 > the React app — React Query cache boundaries and cross-user leakage on
 > shared machines, `PermissionsContext` fail-closed module gating, focus
 > traps and keyboard paths in every overlay, form validation matching the
 > server's rules, error and empty states, touch-target size and contrast in
 > both themes, and the PWA/service-worker cache. `frontend/src/`.
 
-**۱۰ — performance**
+**10 — performance**
 > cost — N+1 queries (the evaluation list and dashboard aggregates are the
 > suspects), missing indexes for the filters that actually ship, the
 > aggregate endpoints in `api/routers/{dashboard,analytics,reports}.py`,
 > Excel/PDF generation on the request path, and frontend bundle size and
 > re-render behaviour on the heavy pages.
 
-**۱۱ — test quality (اجباری — بیشترین ارزش این‌جاست)**
+**11 — test quality (mandatory — highest value here)**
 > the test suite itself — 97 backend files (~1035 tests), 45 frontend files
 > (270), 89 launcher tests. Find tests that *cannot fail*: assertions on
 > mocks instead of behaviour, `assert response.status_code == 200` with no
@@ -238,34 +238,35 @@ OUTPUT (exactly these four sections, nothing else)
 
 ---
 
-## چطور توزیعش کنید
+## How to dispatch
 
-**همه را یک‌جا نفرستید.** یازده ایجنتِ هم‌زمان یازده گزارش می‌دهد که سه‌تایش
-همان یافته را دارد و شما سه بار بررسی می‌کنید. ترتیبِ پیشنهادی:
+**Do not send all eleven at once.** Eleven parallel agents produce eleven
+reports, three of which carry the same finding, and you verify it three
+times. Suggested order:
 
-**موجِ اول (چهار ایجنت، مستقل و کم‌هم‌پوشانی):**
-۱۱ کیفیتِ تست · ۲ ماشینِ حالت · ۴ همکارِ هوشمند · ۸ فارسی/RTL/زمان
+**Wave 1 (four agents, mostly non-overlapping):**
+11 test quality · 2 workflow state machine · 4 AI copilot · 8 Persian/RTL/time
 
-اینها چهار ناحیهٔ کمابیش جدا هستند و بیشترین احتمالِ یافتهٔ *تازه* را دارند.
-«کیفیتِ تست» عمداً اول است: اگر سوئیت جایی کور باشد، بقیهٔ زوایا باید
-بدانند کجا نمی‌توانند به سبزی تکیه کنند.
+These are four largely separate areas with the highest chance of *new*
+findings. Test quality goes first on purpose: if the suite is blind somewhere,
+every other angle needs to know where it cannot lean on green.
 
-**موجِ دوم (پس از خواندنِ موجِ اول):**
-۱ authz · ۵ محرمانگی · ۶ دیتابیس · ۷ همروندی
+**Wave 2 (after reading wave 1):**
+1 authz · 5 privacy · 6 database · 7 concurrency
 
-اینها با هم و با موجِ اول هم‌پوشانی دارند (authz و محرمانگی تقریباً یک
-مرزند). یافته‌های موجِ اول را در پرامپتِ اینها به بخشِ «ALREADY DECIDED»
-اضافه کنید تا دوباره گزارش نشوند.
+These overlap with each other and with wave 1 (authz and privacy are nearly
+the same boundary). Add wave 1's confirmed findings to the `ALREADY DECIDED`
+list in their prompt so they are not reported twice.
 
-**موجِ سوم (اختیاری):**
-۳ نمره و سند · ۹ فرانت‌اند · ۱۰ کارایی
+**Wave 3 (optional):**
+3 scoring & document · 9 frontend · 10 performance
 
-زاویهٔ ۳ عمیق‌ترین دانشِ دامنه را می‌خواهد؛ اگر فقط یک ایجنتِ قوی دارید،
-همان را به ۳ بدهید نه به ۱۰.
+Angle 3 needs the deepest domain knowledge; if you only have one strong agent
+left, give it to 3, not to 10.
 
-**دو نکته که کیفیتِ گزارش‌ها را بالا می‌برد:**
+**Two things that raise report quality:**
 
-* بگویید روی `main` کار کنند و شاخهٔ خودشان را بسازند — هم‌زمان چند ایجنت روی
-  یک شاخه، تاریخچه را به هم می‌ریزد.
-* هر یافته‌ای که تأیید کردید، پیش از موجِ بعدی به فهرستِ `ALREADY DECIDED`
-  اضافه کنید. آن فهرست تنها چیزی است که جلوی گزارشِ تکراری را می‌گیرد.
+* Tell them to work from `main` and cut their own branch — several agents on
+  one branch will tangle the history.
+* Every finding you confirm, add to `ALREADY DECIDED` before the next wave.
+  That list is the only thing preventing duplicate reports.
