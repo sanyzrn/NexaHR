@@ -108,7 +108,7 @@ def client(db_session):
 
 @pytest.fixture()
 def employee_view_on(db_session):
-    """سه ماژولِ «نمایِ خودِ کارمند» را صریح روشن می‌کند.
+    """ماژول‌های «نمایِ خودِ کارمند» را صریح روشن می‌کند.
 
     پیش‌فرضِ هر سه *خاموش* است (`core/modules.py`)، و از وقتی سوییچ‌ها واقعاً
     اعمال می‌شوند این دیگر یک جزئیاتِ بی‌اثر نیست: تستی که رؤیت یا اعتراض یا
@@ -117,12 +117,17 @@ def employee_view_on(db_session):
 
     تا امروز همان تست‌ها سبز بودند چون گاردی وجود نداشت — یعنی سبزیِ‌شان
     ثابت می‌کرد سوییچ کار *نمی‌کند*.
+
+    `employee_overview_cards` دیرتر به این فهرست آمد و همین نکته را تکرار
+    می‌کند: شاخهٔ نقشِ `employee` در `role-overview` هیچ سوییچی را نمی‌سنجید،
+    پس نبودنش در این فیکسچر هیچ تستی را نمی‌شکست. حالا می‌سنجد.
     """
     from tests.helpers import set_module
 
     for key in (
         "employee_evaluation_visibility",
         "employee_result_acknowledgement",
+        "employee_overview_cards",
         "objections",
     ):
         set_module(db_session, key, True)

@@ -1,4 +1,6 @@
 """تست داشبورد نقش‌محور (item 15): هر نقش کاشی‌های متناسب خودش را می‌گیرد."""
+import pytest
+
 from tests.helpers import (
     active_indicators,
     auth_header,
@@ -7,6 +9,13 @@ from tests.helpers import (
     make_personnel,
     make_user,
 )
+
+# کاشی‌های «پروندهٔ خودم» به دو سوییچِ پیش‌فرض-خاموش بند هستند
+# (`employee_overview_cards` و `employee_evaluation_visibility`). تا امروز این
+# فایل بی فیکسچر سبز بود — و همان سبزی ثابت می‌کرد شاخهٔ نقشِ `employee` هیچ
+# سوییچی را نمی‌سنجد. حالا می‌سنجد، پس تستی که *محتوای* کاشی‌ها را می‌خواهد
+# باید خودش روشنشان کند.
+pytestmark = pytest.mark.usefixtures("employee_view_on")
 
 
 def _cards(client, user) -> dict[str, float]:

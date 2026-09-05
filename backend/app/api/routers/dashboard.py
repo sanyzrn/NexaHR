@@ -596,6 +596,26 @@ def _fa(value: int) -> str:
     return str(value).translate(_FA_DIGITS)
 
 
+def _gated_self_cards(db: Session, personnel_id: int | None) -> list[RoleOverviewCard]:
+    """کاشی‌های «پروندهٔ خودم» — یا فهرستِ تهی، اگر سازمان نخواسته باشد.
+
+    دو سوییچ، و هر دو لازم: کاشی‌ها خودشان یک ماژول‌اند
+    (`employee_overview_cards`)، و محتوایشان *نتیجهٔ* ارزیابی است، پس به
+    سوییچِ نمایشِ نتیجه هم بند است.
+
+    و چرا یک *تابع*: همین قاعده دو جا لازم است — مسیرِ `scope="self"` و شاخهٔ
+    نقشِ `employee` — و تا امروز فقط در یکی نوشته شده بود. نوشتنش دوباره در
+    شاخهٔ دوم، همان جفتِ همتایی می‌شد که این پروژه چند بار از آن آسیب دیده.
+    """
+    if (
+        personnel_id is None
+        or not is_module_enabled(db, "employee_overview_cards")
+        or not is_module_enabled(db, "employee_evaluation_visibility")
+    ):
+        return []
+    return _self_cards(db, personnel_id)
+
+
 def _self_cards(db: Session, personnel_id: int) -> list[RoleOverviewCard]:
     """کاشی‌های «پروندهٔ خودم» — مستقل از نقش.
 
@@ -648,18 +668,9 @@ def role_overview(
     cards: list[RoleOverviewCard] = []
 
     if scope == "self":
-        # دو سوییچ، و هر دو لازم: کاشی‌ها خودشان یک ماژول‌اند
-        # (`employee_overview_cards`)، و محتوایشان *نتیجهٔ* ارزیابی است، پس
-        # به سوییچِ نمایشِ نتیجه هم بند است. پیش از این هیچ‌کدام سنجیده
-        # نمی‌شد و میانگینِ نمرهٔ فرد بی‌توجه به هر دو سوییچ برمی‌گشت — یعنی
-        # یک درخواستِ ناموفقِ `/my-permissions` در رابط کافی بود.
-        if (
-            current_user.personnel_id is None
-            or not is_module_enabled(db, "employee_overview_cards")
-            or not is_module_enabled(db, "employee_evaluation_visibility")
-        ):
-            return RoleOverview(role=role.value, cards=[])
-        return RoleOverview(role=role.value, cards=_self_cards(db, current_user.personnel_id))
+        return RoleOverview(
+            role=role.value, cards=_gated_self_cards(db, current_user.personnel_id)
+        )
 
     if role == UserRole.unit_supervisor:
         subordinates = (
@@ -811,7 +822,12 @@ def role_overview(
                 hint=f"{_fa(covered)} از {_fa(eligible)} نفر",
             ),
         ]
-    elif role == UserRole.employee and current_user.personnel_id is not None:
-        cards = _self_cards(db, current_user.personnel_id)
+    elif role == UserRole.employee:
+        # همان تابعِ گاردشده، نه `_self_cards` خام. پیش از این این شاخه هیچ
+        # سوییچی را نمی‌سنجید در حالی که شاخهٔ `scope="self"` بالاتر هر دو را
+        # می‌سنجید — یک تابع، دو شاخه، یکی گاردشده و یکی نه. کارمند با
+        # `GET /api/dashboard/role-overview` بی هیچ پارامتری میانگینِ نمرهٔ
+        # خودش را می‌گرفت، حتی وقتی «نمایش نتیجه به کارمند» خاموش بود.
+        cards = _gated_self_cards(db, current_user.personnel_id)
 
     return RoleOverview(role=role.value, cards=cards)

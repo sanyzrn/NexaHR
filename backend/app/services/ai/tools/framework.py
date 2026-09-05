@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.models.enums import Capability, UserRole
 from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
@@ -238,6 +238,26 @@ def list_scoring_schemes(ctx: ToolContext) -> ToolOutcome:
     )
 
 
+#: پیش‌فرض‌های پیش‌نویس. مدل معمولاً فقط نام و یکی-دو عدد می‌دهد، پس بقیه باید
+#: از جایی بیاید — و آن جا باید *یکی* باشد، نه پراکنده در امضای تابع.
+_DRAFT_DEFAULTS: dict = {
+    "general_section_weight": 0.6,
+    "specialized_section_weight": 0.4,
+    "evidence_required_scores": [1, 5],
+    "evidence_min_words": 3,
+    "evidence_max_words": 40,
+    "bonus_max_points": 5.0,
+    "improvement_plan_max_pct": 75.0,
+    "thresholds": [
+        {"upper_exclusive": 60, "label": "عدم تمدید"},
+        {"upper_exclusive": 75, "label": "تمدید مشروط"},
+        {"upper_exclusive": 90, "label": "تمدید"},
+        {"upper_exclusive": 101, "label": "تمدیـد ممتاز"},
+    ],
+    "indicator_weights": {},
+}
+
+
 @tool(
     name="create_scoring_scheme_draft",
     description="ساخت پیش‌نویس تازهٔ طرح نمره‌دهی. فعال‌سازی گامِ جداگانه‌ای است که سازنده نمی‌تواند خودش انجام دهد.",
@@ -268,40 +288,52 @@ def create_scoring_scheme_draft(
     bonus_max_points: float | None = None,
     improvement_plan_max_pct: float | None = None,
 ) -> ToolOutcome:
-    from app.models.scoring_scheme import ScoringScheme
-    from app.services.audit import log_event
+    """پیش‌نویسِ طرح — از راهِ *همان* endpointی که پنل استفاده می‌کند.
+
+    پیش از این این تابع `ScoringScheme(...)` را مستقیم می‌ساخت، و همهٔ گاردها
+    در `SchemeInput` بودند: وزن‌ها بین ۰ و ۱، جمعشان دقیقاً ۱، سقفِ امتیازِ
+    ویژه حداکثر ۲۰، پله‌های جدولِ نتیجه صعودی و بی‌تکرار با آخرینِ بزرگ‌تر از
+    ۱۰۰. هیچ‌کدام سرِ راهِ این تابع نبودند.
+
+    یعنی مدل می‌توانست `general=-0.5, specialized=1.5` بنویسد و بعد کارشناسِ
+    دومی همان را فعال کند — و از آن لحظه `base_pct` هر پروندهٔ تازه در بازهٔ
+    منفی تا ۱۵۰ می‌افتاد. روی سندی که هش می‌شود. تنها چیزی که جلویش را
+    می‌گرفت، سرریزِ `Numeric(4,2)` بود، آن هم به‌شکلِ ۵۰۰.
+
+    ساختنِ `SchemeInput` و سپردنِ کار به endpoint، همان الگوی C1–C3 است: یک
+    اعتبارسنجی، دو مسیر. رونویسیِ قواعد این‌جا، همان جفتِ همتایی می‌شد که روزی
+    از هم دور می‌افتد.
+    """
+    from pydantic import ValidationError
+
+    from app.api.routers import scoring_schemes as ep
+    from app.core.validation_errors import persian_validation_message
+    from app.schemas.scoring_scheme import SchemeInput
     from app.services.scoring_scheme import next_version
 
     db = ctx.db
-    scheme = ScoringScheme(
-        version=next_version(db),
-        name=(name or "").strip()[:200] or f"طرح نسخهٔ {db.scalar(select(func.max(ScoringScheme.version)))}",
-        status="draft",
-        general_section_weight=general_section_weight if general_section_weight is not None else 0.6,
-        specialized_section_weight=specialized_section_weight if specialized_section_weight is not None else 0.4,
-        evidence_required_scores=[1, 5],
-        evidence_min_words=evidence_min_words if evidence_min_words is not None else 3,
-        evidence_max_words=evidence_max_words if evidence_max_words is not None else 40,
-        bonus_max_points=bonus_max_points if bonus_max_points is not None else 5.0,
-        improvement_plan_max_pct=improvement_plan_max_pct if improvement_plan_max_pct is not None else 75.0,
-        thresholds=[
-            {"upper_exclusive": 60, "label": "عدم تمدید"},
-            {"upper_exclusive": 75, "label": "تمدید مشروط"},
-            {"upper_exclusive": 90, "label": "تمدید"},
-            {"upper_exclusive": 101, "label": "تمدیـد ممتاز"},
-        ],
-        indicator_weights={},
-        created_by_user_id=ctx.user.id,
-    )
-    db.add(scheme)
-    db.flush()
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="scoring_scheme_created",
-        new_value={"id": scheme.id, "version": scheme.version, "via": "ai_copilot"},
-    )
-    db.commit()
+    given = {
+        "general_section_weight": general_section_weight,
+        "specialized_section_weight": specialized_section_weight,
+        "evidence_min_words": evidence_min_words,
+        "evidence_max_words": evidence_max_words,
+        "bonus_max_points": bonus_max_points,
+        "improvement_plan_max_pct": improvement_plan_max_pct,
+    }
+    fields = dict(_DRAFT_DEFAULTS)
+    fields.update({k: v for k, v in given.items() if v is not None})
+    fields["name"] = (name or "").strip()[:200] or f"طرح نسخهٔ {next_version(db)}"
+
+    try:
+        payload = SchemeInput(**fields)
+    except ValidationError as exc:
+        # پیامِ فارسیِ همان لایه‌ای که رابط می‌بیند، تا مدل بتواند عددِ درست را
+        # بپرسد به‌جای اینکه یک خطای انگلیسیِ pydantic را بازگو کند.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, persian_validation_message(exc.errors())
+        ) from exc
+
+    scheme = ep.create_scheme(payload=payload, db=db, current_user=ctx.user)
     return ToolOutcome(
         content=json_content(
             {"created": True, "scheme": {"id": scheme.id, "version": scheme.version, "name": scheme.name}}
