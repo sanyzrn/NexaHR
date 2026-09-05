@@ -49,6 +49,7 @@ from app.schemas.evaluation import (
     SubmissionExtension,
 )
 from app.services.audit import log_event
+from app.services.authorization import ensure_module_enabled
 from app.services.documents import archive_final_pdf, archive_final_pdf_detached
 from app.services.evaluation import inactive_seat_labels, next_evaluation_code, validate_bonus
 from app.services.evaluation_window import ensure_open as ensure_submission_window_open
@@ -726,10 +727,18 @@ def export_evaluations_excel(
         was_returned=was_returned,
     )
     records = db.scalars(query.order_by(EvaluationRecord.created_at.desc())).all()
+    # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
+    #
+    # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
+    # ردیف‌های بارشده را باطل می‌کند. اگر workbook بعد از commit ساخته شود، هر
+    # دسترسی به هر ستون یک SELECTِ تازه می‌زند — یک N+1ِ تمام‌عیار که نه از
+    # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
+    # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
+    content = build_evaluations_workbook(list(records))
     log_event(db, actor_user_id=current_user.id, event_type="excel_exported")
     db.commit()
     return Response(
-        content=build_evaluations_workbook(list(records)),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="evaluations.xlsx"'},
     )
@@ -1335,6 +1344,11 @@ def resolve_objection(
     نتیجهٔ ارزیابی و سند نهایی عمداً دست‌نخورده می‌مانند: اگر واقعاً باید امتیاز عوض
     شود، مسیرش ارزیابی تازه است نه بازنویسی سندی که هش و امضا دارد.
     """
+    # همان گاردی که سمتِ کارمند دارد (`me.py`، ثبتِ اعتراض). نبودنش این‌جا یعنی
+    # سازمانی که کانالِ اعتراض را عمداً نبسته، همچنان *پاسخ* ثبت می‌کند — یک
+    # سوییچ که فقط نیمی از مسیر را می‌بندد، و نیمهٔ بازش همان است که در پرونده
+    # می‌ماند.
+    ensure_module_enabled(db, "objections")
     record = _get_record_or_404_for_update(db, evaluation_id)
     _ensure_can_resolve_objection(record, current_user)
 

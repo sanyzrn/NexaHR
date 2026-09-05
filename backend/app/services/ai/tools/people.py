@@ -897,6 +897,12 @@ create_org_unit.describe = _describe_create_org_unit
 def get_evaluation_access(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
     db = ctx.db
     person = _person_or_404(db, personnel_id)
+    # `guarded_inline=True` روی این ابزار *ادعای* گاردِ درون‌بدنه بود و بدنه
+    # نداشتش: هر کاربرِ دارای دستیار — از جمله کارمندی بی هیچ مجوز و بی هیچ
+    # صندلی — نامِ مسئولِ واحد و معاونت و مدیرعامل *هر* پرسنلی را می‌گرفت.
+    # همان داده از راهِ HTTP پشتِ `require_role_or_capability` است و از راهِ
+    # جزئیاتِ پرسنل پشتِ `_can_view_personnel`؛ این پنجره‌ای بود که رابط ندارد.
+    _ensure_can_view_personnel(db, person, ctx.user, ctx.caps)
     access = db.scalar(select(EvaluationAccess).where(EvaluationAccess.personnel_id == person.id))
     if access is None:
         return ToolOutcome(

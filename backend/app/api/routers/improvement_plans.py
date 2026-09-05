@@ -306,10 +306,18 @@ def export_plans_excel(
         else {}
     )
 
+    # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
+    #
+    # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
+    # ردیف‌های بارشده را باطل می‌کند. اگر workbook بعد از commit ساخته شود، هر
+    # دسترسی به هر ستون یک SELECTِ تازه می‌زند — یک N+1ِ تمام‌عیار که نه از
+    # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
+    # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
+    content = build_improvement_plans_workbook(plans, evaluation_codes, owner_usernames)
     log_event(db, actor_user_id=current_user.id, event_type="improvement_plans_excel_exported")
     db.commit()
     return Response(
-        content=build_improvement_plans_workbook(plans, evaluation_codes, owner_usernames),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="improvement-plans.xlsx"'},
     )

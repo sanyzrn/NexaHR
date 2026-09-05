@@ -97,10 +97,18 @@ def export_users_excel(
     query = _apply_user_filters(select(User), role=role, q=q, is_active=is_active)
     users = list(db.scalars(query.order_by(User.username)))
     personnel_names = _linked_names(db, users)
+    # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
+    #
+    # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
+    # ردیف‌های بارشده را باطل می‌کند. اگر workbook بعد از commit ساخته شود، هر
+    # دسترسی به هر ستون یک SELECTِ تازه می‌زند — یک N+1ِ تمام‌عیار که نه از
+    # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
+    # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
+    content = build_users_workbook(users, personnel_names)
     log_event(db, actor_user_id=current_user.id, event_type="users_excel_exported")
     db.commit()
     return Response(
-        content=build_users_workbook(users, personnel_names),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="users.xlsx"'},
     )

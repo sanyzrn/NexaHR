@@ -300,10 +300,18 @@ def export_personnel_excel(
         is_manager=is_manager,
     )
     rows = list(db.scalars(query.order_by(_personnel_order_by(sort_by, sort_dir))))
+    # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
+    #
+    # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
+    # ردیف‌های بارشده را باطل می‌کند. اگر workbook بعد از commit ساخته شود، هر
+    # دسترسی به هر ستون یک SELECTِ تازه می‌زند — یک N+1ِ تمام‌عیار که نه از
+    # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
+    # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
+    content = build_personnel_workbook(rows)
     log_event(db, actor_user_id=current_user.id, event_type="personnel_excel_exported")
     db.commit()
     return FastAPIResponse(
-        content=build_personnel_workbook(rows),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="personnel.xlsx"'},
     )
