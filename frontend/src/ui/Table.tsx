@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { motion } from "motion/react";
 import { NARROW_QUERY, useMediaQuery } from "./useMediaQuery";
+import type { TableSort } from "./useTableSort";
 
 /** جدول دادهٔ استاندارد اپ — استخراج‌شده از الگویی که پیش‌تر در چند صفحه (فهرست
  * ارزیابی‌ها، پرسنل، کاربران، داشبورد تحلیلی) عیناً کپی شده بود: هدر ساده،
@@ -22,6 +23,9 @@ export function Table({
   emptyMessage = "موردی یافت نشد.",
   cellAlign = "middle",
   mobileCards = true,
+  sort = null,
+  onSort,
+  sortableColumns = [],
 }: {
   headers: ReactNode[];
   rows: ReactNode[][];
@@ -34,12 +38,38 @@ export function Table({
   cellAlign?: "middle" | "top";
   /** برای جدول‌های دوستونیِ خلاصه که در موبایل هم جا می‌شوند، می‌توان خاموشش کرد. */
   mobileCards?: boolean;
+  /** حالتِ فعلیِ مرتب‌سازی — از `useTableSort`. */
+  sort?: TableSort;
+  /** بی این، هیچ سرستونی قابلِ کلیک نمی‌شود. */
+  onSort?: (column: number) => void;
+  /** *کدام* ستون‌ها. ستونِ دکمه‌ها یا آیکون‌ها مرتب‌شدنی نیست. */
+  sortableColumns?: number[];
 }) {
   // فقط یکی از دو نما رندر می‌شود، نه هر دو با `hidden md:block`. رندرکردنِ هر دو
   // یعنی خوانندهٔ صفحه هر ردیف را دو بار می‌خواند و هر جست‌وجوی بر اساس متن دو
   // نتیجه می‌گیرد — همان دلیلی که `useMediaQuery` برای فرم نمره‌دهی ساخته شد.
   const narrow = useMediaQuery(NARROW_QUERY);
   const asCards = mobileCards && narrow;
+
+  const sortable = (column: number) => Boolean(onSort) && sortableColumns.includes(column);
+
+  // نشانگر همیشه هست (`↕` برای ستونِ مرتب‌نشده) و نه فقط روی ستونِ فعال: بی آن،
+  // کاربر باید حدس بزند کدام سرستون کلیک‌پذیر است.
+  const sortButton = (header: ReactNode, column: number) => (
+    <button
+      type="button"
+      onClick={() => onSort?.(column)}
+      className="inline-flex items-center gap-1.5 rounded px-1 py-1 text-inherit transition-colors hover:text-pulse-700 focus-visible:outline-2 focus-visible:outline-pulse-600"
+    >
+      {header}
+      <span
+        aria-hidden="true"
+        className={sort?.column === column ? "text-pulse-700" : "text-gray-400"}
+      >
+        {sort?.column === column ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}
+      </span>
+    </button>
+  );
 
   const rowClass = `border-b border-gray-100 transition-colors last:border-0 hover:bg-gray-50 ${cellAlign === "top" ? "align-top" : ""}`;
 
@@ -49,8 +79,22 @@ export function Table({
         <thead>
           <tr className="border-b border-gray-200">
             {headers.map((h, i) => (
-              <th key={i} className="px-3 py-2 text-right text-xs font-semibold text-gray-500">
-                {h}
+              <th
+                key={i}
+                // `aria-sort` روی خودِ سرستون است و نه روی دکمه: صفحه‌خوان آن را
+                // هنگام خواندنِ *ستون* اعلام می‌کند، نه هنگام رسیدن به دکمه.
+                aria-sort={
+                  sortable(i)
+                    ? sort?.column === i
+                      ? sort.direction === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                    : undefined
+                }
+                className="px-3 py-2 text-right text-xs font-semibold text-gray-500"
+              >
+                {sortable(i) ? sortButton(h, i) : h}
               </th>
             ))}
           </tr>
@@ -120,6 +164,19 @@ export function Table({
   const content = (
     <>
       {title && <h3 className="mb-3 text-base font-bold text-gray-900">{title}</h3>}
+      {/* نمای کارتی سرستون ندارد، پس دکمه‌های مرتب‌سازی جای دیگری لازم دارند —
+          وگرنه این قابلیت روی موبایل اصلاً وجود ندارد. */}
+      {asCards && onSort && sortableColumns.length > 0 && rows.length > 0 && (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-500"
+          aria-label="مرتب‌سازی"
+        >
+          <span>مرتب‌سازی:</span>
+          {sortableColumns.map((column) => (
+            <span key={column}>{sortButton(headers[column], column)}</span>
+          ))}
+        </div>
+      )}
       {rows.length === 0 ? (
         <p className="py-6 text-center text-sm text-gray-400">{emptyMessage}</p>
       ) : asCards ? (

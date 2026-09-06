@@ -94,7 +94,7 @@
     <div><b>کد پرسنلی</b>{{ snapshot.personnel.personnel_code }}</div>
     <div><b>عنوان شغلی</b>{{ snapshot.personnel.job_title }}</div>
     <div><b>واحد سازمانی</b>{{ snapshot.personnel.org_unit }}</div>
-    <div><b>ارزیاب ({{ snapshot.evaluator.role_label }})</b>{{ snapshot.evaluator.username or '—' }}</div>
+    <div><b>ارزیاب ({{ snapshot.evaluator.role_label }})</b>{{ snapshot.evaluator.display_name or snapshot.evaluator.username or '—' }}</div>
     <div><b>تاریخ شروع ارزیابی</b>{{ snapshot.evaluation_started_at | jalali }}</div>
     <div><b>تاریخ نهایی‌شدن</b>{{ snapshot.finalized_at | jalali }}</div>
   </div>

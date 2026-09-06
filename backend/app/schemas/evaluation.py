@@ -142,6 +142,7 @@ class EvaluationRead(BaseModel):
     # مسئولِ HR این پرونده؛ null یعنی هنوز در صف مشترک منابع انسانی است
     hr_user_id: int | None = None
     hr_username: str | None = None
+    hr_display_name: str | None = None
     status: EvaluationStatus
     general_score_pct: float | None
     specialized_score_pct: float | None

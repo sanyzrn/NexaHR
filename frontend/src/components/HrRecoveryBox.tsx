@@ -80,7 +80,9 @@ export function HrOwnerBar({
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm">
       <span className="text-gray-500">مسئول منابع انسانی: </span>
-      <span className="font-medium text-gray-900">{evaluation.hr_username}</span>
+      <span className="font-medium text-gray-900">
+        {evaluation.hr_display_name || evaluation.hr_username}
+      </span>
       {mine ? (
         <span className="ms-2 rounded-full bg-pulse-50 px-2 py-0.5 text-[11px] font-medium text-pulse-700">
           شما
@@ -267,7 +269,7 @@ function ReassignPanel({
             <option value="">— انتخاب کنید —</option>
             {selectable.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.username}
+                {u.display_name || u.username}
               </option>
             ))}
           </select>
@@ -344,8 +346,8 @@ function HandoverPanel({
     <div className="space-y-3">
       <p className="text-sm font-medium text-gray-800">واگذاری مسئولیت منابع انسانی</p>
       <p className="text-xs text-gray-500">
-        {evaluation.hr_username
-          ? `مسئول فعلی: ${evaluation.hr_username}`
+        {evaluation.hr_display_name || evaluation.hr_username
+          ? `مسئول فعلی: ${evaluation.hr_display_name || evaluation.hr_username}`
           : "این پرونده هنوز مسئولی ندارد؛ واگذاری، مستقیماً مسئولش را تعیین می‌کند."}
       </p>
 
@@ -362,7 +364,7 @@ function HandoverPanel({
           <option value="">— انتخاب کنید —</option>
           {selectable.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.username}
+              {u.display_name || u.username}
             </option>
           ))}
         </select>

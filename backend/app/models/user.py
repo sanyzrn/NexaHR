@@ -1,10 +1,21 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+    select,
+)
+from sqlalchemy.orm import Mapped, column_property, mapped_column
 
 from app.db.base import Base
 from app.models.enums import UserRole
+from app.models.personnel import Personnel
 
 
 class User(Base):
@@ -25,6 +36,23 @@ class User(Base):
     # اگر حساب به پرسنل وصل باشد، منبع نام همان پرونده است و این ستون لازم نیست؛
     # `display_name` همین ترتیب را پیاده می‌کند.
     full_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    #: نامِ پروندهٔ پرسنلیِ وصل‌شده — همراهِ خودِ ردیفِ کاربر، در همان کوئری.
+    #:
+    #: ستونِ تازه‌ای در دیتابیس نمی‌سازد: یک زیرپرس‌وجوی اسکالر است که SQLAlchemy
+    #: به هر `SELECT` از `users` می‌چسباند. پس نه داده دو جا نوشته می‌شود و نه
+    #: به‌ازای هر ردیف یک کوئریِ اضافه می‌خورد.
+    #:
+    #: چرا لازم شد: `display_name` باید نامِ پرونده را ترجیح بدهد، و تا امروز
+    #: نمی‌توانست — پس *لایهٔ API* این کار را می‌کرد، و فقط در دو نقطه
+    #: (`users._to_read` و `auth.py`). بقیهٔ مصرف‌کننده‌های `display_name` —
+    #: `deps.py`، `administration.py`، `ai/prompt.py` — همچنان نام کاربری
+    #: می‌دادند. یعنی همان اشکالِ همیشگی: قاعده‌ای که فقط روی یک مسیر نشسته.
+    personnel_full_name: Mapped[str | None] = column_property(
+        select(Personnel.full_name)
+        .where(Personnel.id == personnel_id)
+        .correlate_except(Personnel)
+        .scalar_subquery()
+    )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(
         Enum(UserRole, name="user_role", values_callable=lambda e: [m.value for m in e]),
@@ -57,8 +85,10 @@ class User(Base):
         """نامی که باید به آدم‌ها نشان داده شود، و هیچ‌وقت خالی نیست.
 
         نام کاربری آخرین گزینه است، نه گزینهٔ اول: تا وقتی نامی ثبت نشده باشد
-        صفحه نباید خالی بماند. جایی که حساب به پرسنل وصل است، لایهٔ API نام
-        پرونده را ترجیح می‌دهد — آن نام را همان‌جا از قبل خوانده و اضافه‌کردن
-        یک relationship این‌جا فقط یک کوئری اضافه به‌ازای هر ردیف می‌شد.
+        صفحه نباید خالی بماند. و نامِ پروندهٔ پرسنلی بر نامِ روی حساب مقدم است،
+        چون پرونده منبعِ رسمیِ نام است و حساب فقط یک شناسهٔ ورود.
+
+        ترتیب این‌جاست و نه در لایهٔ API، تا *هر* مصرف‌کننده‌ای همین را بگیرد:
+        سند، پنل مدیریت، دستیار، و پاسخِ «من کی‌ام».
         """
-        return self.full_name or self.username
+        return self.personnel_full_name or self.full_name or self.username

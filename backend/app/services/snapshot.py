@@ -16,6 +16,7 @@ from app.services.evaluation import applied_bonus
 from app.services.scoring_scheme import rules_for_record
 from app.services.workflow import SEAT_LABEL, document_signatories, scorer_field
 
+# ۶: افزودن `evaluator.display_name` — نامِ ارزیاب، نه شناسهٔ ورودش.
 # ۵: افزودن `signatories` — بلوکِ امضا از صندلی‌های واقعیِ پرونده، نه از
 #    رشتهٔ نمایشیِ نقشِ ارزیاب. قالب برای snapshot های نسخهٔ ≤۴ همان بلوکِ
 #    قدیمی را می‌سازد، تا سندِ بایگانی‌شده همان چیزی بماند که آن روز چاپ شد.
@@ -24,7 +25,7 @@ from app.services.workflow import SEAT_LABEL, document_signatories, scorer_field
 # ۲: افزودن امتیاز ویژه (`bonus_points` / `bonus_reason` / `base_weighted_pct`).
 # افزودنی است، پس قالب PDF هر دو نسخه را رندر می‌کند: در snapshot نسخهٔ ۱ این
 # کلیدها نیستند و بخشِ مربوطه اصلاً چاپ نمی‌شود.
-SNAPSHOT_VERSION = 5
+SNAPSHOT_VERSION = 6
 
 
 def _evaluator_seat(record: EvaluationRecord) -> tuple[int | None, str]:
@@ -85,6 +86,11 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         },
         "evaluator": {
             "username": evaluator.username if evaluator else None,
+            # نامِ آدم، نه شناسهٔ ورودش. سند تا امروز کنارِ نامِ کاملِ
+            # ارزیابی‌شونده، ارزیاب را «sup1» معرفی می‌کرد — روی مدرکی که هش
+            # می‌شود و QR تأیید دارد. `username` هم می‌ماند: قالبِ نسخه‌های
+            # قدیمی به آن تکیه دارد و برای پیگیریِ فنی هم به کار می‌آید.
+            "display_name": evaluator.display_name if evaluator else None,
             "role_label": evaluator_label,
         },
         # اگر نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند، سند باید همین

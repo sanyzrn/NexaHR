@@ -182,7 +182,7 @@ export function AuditLogPage() {
                   <option value="">همهٔ کاربران</option>
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.username} ({ROLE_LABELS[u.role]})
+                      {u.display_name || u.username} ({ROLE_LABELS[u.role]})
                     </option>
                   ))}
                 </select>

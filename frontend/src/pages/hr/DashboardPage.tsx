@@ -20,6 +20,7 @@ import { FilterSelect, PageHeader } from "../../ui/Card";
 import { PctBadge, ScoreRing, SuppressedValue } from "../../ui/Meters";
 import { TAB_TRANSITION } from "../../ui/motion";
 import { Table } from "../../ui/Table";
+import { sortRows, useTableSort } from "../../ui/useTableSort";
 import { formatDate } from "../../utils/dates";
 import type {
   DashboardOverview as DashboardOverviewData,
@@ -53,6 +54,11 @@ const IS_ANALYSIS_TAB = (v: string | null): v is AnalysisTab =>
   v === "org" || v === "reports" || v === "person";
 
 export function DashboardPage() {
+  // مرتب‌سازیِ این جدول‌ها *کلاینتی* است و باید باشد: هر دو کاملاً بارگذاری
+  // می‌شوند (فهرست کوتاه و بی صفحه‌بندی)، پس `sortRows` جوابِ درست می‌دهد و
+  // یک رفت‌وبرگشت به سرور کم می‌شود.
+  const evaluatorSort = useTableSort();
+  const unitSort = useTableSort();
   // تب در نشانی صفحه زندگی می‌کند، نه در state.
   //
   // تحلیلگری که «گزارش‌های تحلیلی» را باز کرده و نشانی را برای مدیرش می‌فرستد،
@@ -199,7 +205,14 @@ export function DashboardPage() {
         <Table
           title="تحلیل الگوی امتیازدهی ارزیابان"
           headers={["ارزیاب", "میانگین", "زیرمجموعه", "ارزیابی"]}
-          rows={overview.by_evaluator.map((e) => [
+          {...evaluatorSort}
+          sortableColumns={[0, 1, 2, 3]}
+          rows={sortRows(overview.by_evaluator, evaluatorSort.sort, [
+            (e) => e.full_name ?? e.username,
+            (e) => e.avg_final_pct,
+            (e) => e.subordinate_count,
+            (e) => e.evaluation_count,
+          ]).map((e) => [
             // نامِ آدم بالا، نام کاربری زیرش. جدولی که فقط «sup_it» را نشان
             // می‌دهد، از خواننده می‌خواهد نام‌های کاربری را حفظ باشد.
             <div key="who">
@@ -218,7 +231,12 @@ export function DashboardPage() {
         <Table
           title="کمترین میانگین به تفکیک واحد"
           headers={["واحد", "میانگین"]}
-          rows={overview.lowest_by_unit.map((u) => [
+          {...unitSort}
+          sortableColumns={[0, 1]}
+          rows={sortRows(overview.lowest_by_unit, unitSort.sort, [
+            (u) => u.org_unit,
+            (u) => u.avg_final_pct,
+          ]).map((u) => [
             u.org_unit,
             <PctBadge key="pct" value={u.avg_final_pct} />,
           ])}
@@ -472,6 +490,7 @@ function IndicatorRankCard({
 function PeopleNeedingAttentionCard({ people }: { people: PersonStatData[] }) {
   const { data: sites = [] } = useSites(true);
   const [site, setSite] = useState("");
+  const sorting = useTableSort();
   const visible = site ? people.filter((p) => p.site === site) : people;
 
   return (
@@ -495,7 +514,15 @@ function PeopleNeedingAttentionCard({ people }: { people: PersonStatData[] }) {
       <Table
         bordered={false}
         headers={["فرد", "واحد", "امتیاز نهایی"]}
-        rows={visible.slice(0, 10).map((p) => [
+        {...sorting}
+        sortableColumns={[0, 1, 2]}
+        rows={sortRows(visible, sorting.sort, [
+          (p) => p.full_name,
+          (p) => p.org_unit,
+          (p) => p.final_weighted_pct,
+        ])
+          .slice(0, 10)
+          .map((p) => [
           p.full_name,
           <span key="unit" className="text-gray-500">
             {p.org_unit}
@@ -640,9 +667,18 @@ function ExpiringContractsCard() {
   const { data: contracts = [] } = useExpiringContracts(days);
   const { showSuccess, showError } = useToast();
   const queryClient = useQueryClient();
+  const sorting = useTableSort();
   const totalPages = Math.max(1, Math.ceil(contracts.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
-  const visibleContracts = contracts.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  // مرتب‌سازی *پیش از* برش صفحه: وگرنه فقط همان ده ردیفِ صفحهٔ جاری مرتب
+  // می‌شدند و ترتیبِ کلِ فهرست به‌هم می‌ریخت.
+  const visibleContracts = sortRows(contracts, sorting.sort, [
+    (c) => c.full_name,
+    (c) => c.org_unit,
+    (c) => c.contract_end_date,
+    (c) => c.days_remaining,
+    (c) => (c.has_open_evaluation ? "در جریان" : "آغاز نشده"),
+  ]).slice(safePage * pageSize, (safePage + 1) * pageSize);
 
   async function runReminders() {
     setRunning(true);
@@ -713,6 +749,9 @@ function ExpiringContractsCard() {
       <Table
         bordered={false}
         headers={["نام", "واحد", "پایان قرارداد", "باقی‌مانده", "وضعیت ارزیابی"]}
+        sort={sorting.sort}
+        sortableColumns={[0, 1, 2, 3, 4]}
+        onSort={(column) => { sorting.onSort(column); setPage(0); }}
         rowKeys={visibleContracts.map((c) => c.personnel_id)}
         animateRows={false}
         emptyMessage="در این بازه قراردادی رو به انقضا نیست."

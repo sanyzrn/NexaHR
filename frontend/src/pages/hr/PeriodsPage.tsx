@@ -28,6 +28,7 @@ export function PeriodsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showAddPeriod, setShowAddPeriod] = useState(false);
   const [showBulkCreate, setShowBulkCreate] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const { data: periods = [], error: loadError } = usePeriods();
   const openPeriod = periods.find((p) => p.status === "open") ?? null;
@@ -50,6 +51,30 @@ export function PeriodsPage() {
       const message = extractErrorMessage(err);
       setError(message);
       showError(message);
+    }
+  }
+
+  async function deletePeriod(period: EvaluationPeriod) {
+    // «بستن» و «حذف» دو کار متفاوت‌اند و پیام باید همین را بگوید: بستن، دوره را
+    // نگه می‌دارد و فقط جلوی برچسب‌خوردنِ پرونده‌های تازه را می‌گیرد؛ حذف، خودِ
+    // دوره را برمی‌دارد و فقط وقتی ممکن است که هیچ پرونده‌ای به آن وصل نباشد.
+    const ok = await confirm({
+      title: `حذف دوره «${period.name}»؟`,
+      danger: true,
+      description:
+        "دوره از فهرست برداشته می‌شود. اگر پرونده‌ای به این دوره وصل باشد، حذف انجام نمی‌شود.",
+      confirmLabel: "حذف دوره",
+    });
+    if (!ok) return;
+    setDeletingId(period.id);
+    try {
+      await apiClient.delete(`/periods/${period.id}`);
+      await invalidate();
+      showSuccess("دوره ارزیابی حذف شد");
+    } catch (err) {
+      showError(extractErrorMessage(err));
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -159,7 +184,7 @@ export function PeriodsPage() {
         )}
         <Table
           bordered={false}
-          headers={["نام", "بازه", "وضعیت"]}
+          headers={["نام", "بازه", "وضعیت", ""]}
           rowKeys={periods.map((p) => p.id)}
           emptyMessage="هنوز دوره‌ای تعریف نشده است."
           rows={periods.map((p) => [
@@ -180,6 +205,14 @@ export function PeriodsPage() {
                 بسته
               </span>
             ),
+            <Button
+              key="delete"
+              variant="secondary"
+              onClick={() => deletePeriod(p)}
+              disabled={deletingId === p.id}
+            >
+              حذف
+            </Button>,
           ])}
         />
       </div>

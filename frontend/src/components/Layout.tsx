@@ -34,9 +34,25 @@ export function Layout() {
   const drawerRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
+  const mainRef = useRef<HTMLElement>(null);
+
   // کشوی موبایل با تغییر مسیر بسته می‌شود. بدون این، کاربر روی یک لینک می‌زند،
   // صفحه عوض می‌شود و کشو باز جلوی همان صفحه می‌ماند.
   useEffect(() => setDrawerOpen(false), [location.pathname]);
+
+  // و صفحهٔ تازه از بالا شروع می‌شود.
+  //
+  // ناوبری در این برنامه SPA است، پس مرورگر خودش اسکرول را برنمی‌گرداند: کسی
+  // که تهِ فهرستِ بلندِ پرسنل است و روی «گزارش‌ها» می‌زند، صفحهٔ تازه را از
+  // وسط می‌بیند — و در بدترین حالت فکر می‌کند صفحه خالی است، چون عنوان و
+  // نوارِ ابزارش بالای دیدش مانده.
+  //
+  // هم `main` و هم خودِ پنجره: در دسکتاپ ستونِ محتوا اسکرولِ خودش را دارد و
+  // در موبایل کلِ صفحه.
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
 
   // کشو یک لایهٔ روی‌هم است، پس همان قراردادِ مودال را دارد: قفلِ اسکرول،
   // Escape، *و* قفلِ فوکوس.
@@ -178,6 +194,7 @@ export function Layout() {
         </div>
 
         <main
+          ref={mainRef}
           id="main-content"
           tabIndex={-1}
           className="w-full flex-1 py-4 sm:py-6"

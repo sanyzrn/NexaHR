@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from fastapi import BackgroundTasks as _BackgroundTasks
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -226,10 +227,30 @@ def _run_submit(db, user, evaluation_id: int, reason: str) -> None:
     ep.submit_evaluation(evaluation_id=evaluation_id, db=db, current_user=user)
 
 
+def _drain(tasks: _BackgroundTasks) -> None:
+    """کارهای پس‌زمینهٔ endpoint را همین‌جا اجرا می‌کند.
+
+    سندِ نهایی در پس‌زمینه آرشیو می‌شود، و در مسیرِ دستیار درخواستی در کار نیست
+    که آن صف را خالی کند — پس بی این، PDF تا اولین جاروی زمان‌بند ساخته
+    نمی‌شد.
+    """
+    for task in tasks.tasks:
+        task.func(*task.args, **task.kwargs)
+
+
 def _run_hr_approve(db, user, evaluation_id: int, reason: str) -> None:
     from app.api.routers import evaluations as ep
 
-    ep.hr_approve(evaluation_id=evaluation_id, db=db, current_user=user)
+    # صفِ پس‌زمینه هم لازم است، چون در زنجیرهٔ «مستقیمِ مدیرعامل» همین تأیید
+    # پرونده را *نهایی* می‌کند و سندِ PDF را برای آرشیو صف می‌کند — همان کاری
+    # که `_run_ceo_finalize` می‌کند و به همان دلیل.
+    ep.hr_approve(
+        evaluation_id=evaluation_id,
+        background_tasks=(tasks := _BackgroundTasks()),
+        db=db,
+        current_user=user,
+    )
+    _drain(tasks)
 
 
 def _run_deputy_approve(db, user, evaluation_id: int, reason: str) -> None:
@@ -239,19 +260,15 @@ def _run_deputy_approve(db, user, evaluation_id: int, reason: str) -> None:
 
 
 def _run_ceo_finalize(db, user, evaluation_id: int, reason: str) -> None:
-    from fastapi import BackgroundTasks
-
     from app.api.routers import evaluations as ep
 
-    # سندِ نهایی در پس‌زمینه آرشیو می‌شود. این‌جا درخواستی در کار نیست که صف را
-    # خالی کند، پس کارها بی‌درنگ همین‌جا اجرا می‌شوند — وگرنه PDF تا اولین
-    # جاروی زمان‌بند ساخته نمی‌شد.
-    tasks = BackgroundTasks()
     ep.ceo_finalize(
-        evaluation_id=evaluation_id, background_tasks=tasks, db=db, current_user=user
+        evaluation_id=evaluation_id,
+        background_tasks=(tasks := _BackgroundTasks()),
+        db=db,
+        current_user=user,
     )
-    for task in tasks.tasks:
-        task.func(*task.args, **task.kwargs)
+    _drain(tasks)
 
 
 def _run_return(db, user, evaluation_id: int, reason: str) -> None:

@@ -198,6 +198,7 @@ export interface EvaluationRecord {
   // مسئولِ منابع انسانیِ این پرونده؛ null یعنی هنوز در صف مشترک HR است
   hr_user_id: number | null;
   hr_username: string | null;
+  hr_display_name: string | null;
   // null برای پروندهٔ لغوشده — در هیچ مرحله‌ای از زنجیره نیست
   stage: EvaluationStage | null;
   status: EvaluationStatus;
@@ -558,6 +559,7 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   period_created: "ایجاد دوره ارزیابی",
   period_updated: "ویرایش دوره ارزیابی",
   period_closed: "بستن دوره ارزیابی",
+  period_deleted: "حذف دوره ارزیابی",
   // ── برنامهٔ بهبود ────────────────────────────────────────────────
   improvement_plan_created: "ایجاد برنامه بهبود",
   improvement_plan_updated: "ویرایش برنامه بهبود",

@@ -380,6 +380,12 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
     elif action == "ceo_finalize":
         recipients = _tell_the_scorer(record, evaluator_id)
         message = f"پرونده {code} ({name}) تأیید نهایی شد"
+    elif action == "hr_finalize_direct_ceo":
+        # این‌جا نمره‌دهنده خودِ مدیرعامل است و *کسِ دیگری* پرونده را بسته، پس
+        # برخلافِ `ceo_finalize` اعلان واقعاً خبرِ تازه‌ای دارد: کارِ او تمام
+        # شده و لازم نیست منتظرش بماند.
+        recipients = [record.ceo_user_id]
+        message = f"پرونده {code} ({name}) توسط منابع انسانی تأیید نهایی شد"
     elif action == "hr_return":
         # `evaluator_id` نه `unit_supervisor_user_id`: در مسیر «مدیر» دومی خالی
         # است، پس برگشتِ منابع انسانی به هیچ‌کس اعلان نمی‌داد و معاونت هیچ‌وقت
@@ -434,7 +440,11 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
             link=link,
         )
 
-    if action == "ceo_finalize":
+    if action in ("ceo_finalize", "hr_finalize_direct_ceo"):
+        # هر دو گذارِ نهایی‌کننده، نه فقط یکی: خودِ کارمند باید نتیجه‌اش را
+        # بگیرد، و اینکه کدام صندلی پرونده را بسته به او ربطی ندارد. شرطِ
+        # برابریِ قبلی، پروندهٔ زنجیرهٔ «مستقیمِ مدیرعامل» را بی‌صدا جا می‌گذاشت.
+        #
         # اگر خود کارمند حساب فعال دارد، نتیجه نهایی به او هم ابلاغ می‌شود
         # («کارنامه من») — ولی فقط اگر آن صفحه اصلاً چیزی نشان بدهد.
         subject_ids = subject_user_ids(db, record.subject_personnel_id)

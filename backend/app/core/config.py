@@ -199,10 +199,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _forbid_insecure_secret_in_production(self) -> "Settings":
-        if self.environment == "production" and self.jwt_secret_key == _INSECURE_DEFAULT_JWT_SECRET:
+        # هم مقدارِ پیش‌فرض رد می‌شود و هم کلیدِ *کوتاه*.
+        #
+        # سنجشِ برابری به‌تنهایی کافی نبود: `JWT_SECRET_KEY=hr2026` از آن رد
+        # می‌شد و امضای توکن‌ها را به یک رشتهٔ شش‌نویسه‌ای می‌سپرد — یعنی
+        # حدس‌زدنی. ۳۲ نویسه همان چیزی است که خودِ راهنمای استقرار پیشنهاد
+        # می‌کند (`secrets.token_urlsafe(32)`).
+        if self.environment == "production" and (
+            self.jwt_secret_key == _INSECURE_DEFAULT_JWT_SECRET
+            or len(self.jwt_secret_key.strip()) < 32
+        ):
             raise RuntimeError(
-                "JWT_SECRET_KEY هنوز مقدار پیش‌فرض دمو است. پیش از اجرا در محیط production "
-                "یک مقدار تصادفی و طولانی برای JWT_SECRET_KEY در .env تنظیم کنید."
+                "JWT_SECRET_KEY برای محیط production امن نیست: یا هنوز مقدار پیش‌فرض دموست "
+                "یا کوتاه‌تر از ۳۲ نویسه است. یک مقدار تصادفی و طولانی تنظیم کنید — "
+                'مثلاً با: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         return self
 

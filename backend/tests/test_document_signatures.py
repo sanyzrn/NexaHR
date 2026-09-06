@@ -64,9 +64,30 @@ def test_hr_does_not_sign_a_shielded_record():
     assert "منابع انسانی" not in labels
 
 
-def test_single_decider_sees_the_ceo_direct_chain():
-    """مدیرعامل هم نمره‌دهندهٔ اول است و هم تأییدکنندهٔ نهایی."""
-    assert _record(None, None, CEO, HR, False).single_decider is True
+def test_the_direct_ceo_chain_is_no_longer_a_single_decider():
+    """مدیرعامل نمره می‌دهد و منابع انسانی می‌بندد، پس دو نفرند.
+
+    ادعا عوض شد چون سیاست عوض شد: تا پیش از این همان مدیرعامل تأییدکنندهٔ نهایی
+    هم بود و سند با یک جملهٔ افشا اعلامش می‌کرد. حالا تفکیکِ واقعی برقرار است و
+    جمله‌ای برای گفتن نمانده (`models/chain.hr_finalizes`).
+    """
+    assert _record(None, None, CEO, HR, False).single_decider is False
+
+
+def test_the_hr_unit_direct_ceo_chain_is_still_a_single_decider():
+    """استثنای ناگزیر: پروندهٔ خودِ واحدِ HR مرحلهٔ بی‌طرفی ندارد.
+
+    آن پرونده به‌عمد مرحلهٔ منابع انسانی ندارد (داورش هم‌تیمیِ موضوعِ پرونده
+    می‌شد)، پس کسی جز مدیرعامل نمانده و جملهٔ افشا سرِ جایش است.
+    """
+    assert _record(None, None, CEO, None, True).single_decider is True
+
+
+def test_the_final_approver_is_hr_only_in_the_direct_ceo_chain():
+    assert _record(None, None, CEO, HR, False).final_approver_user_id == HR
+    assert _record(SUP, DEP, CEO, HR, False).final_approver_user_id == CEO
+    assert _record(None, DEP, CEO, HR, False).final_approver_user_id == CEO
+    assert _record(None, None, CEO, None, True).final_approver_user_id == CEO
 
 
 def test_single_decider_sees_the_ceo_in_the_supervisor_seat():

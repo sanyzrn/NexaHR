@@ -65,6 +65,7 @@ EVENT_LABELS: dict[str, str] = {
     "period_created": "ایجاد دوره ارزیابی",
     "period_updated": "ویرایش دوره ارزیابی",
     "period_closed": "بستن دوره ارزیابی",
+    "period_deleted": "حذف دوره ارزیابی",
     # ── برنامهٔ بهبود ────────────────────────────────────────────────
     "improvement_plan_created": "ایجاد برنامه بهبود",
     "improvement_plan_updated": "ویرایش برنامه بهبود",

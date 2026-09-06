@@ -20,6 +20,7 @@ from app.models.chain import (  # noqa: F401  (بازصادرشده برای م�
     SEAT_LABEL,
     SEAT_ORDER,
     SEAT_ROLE,
+    hr_finalizes,
     scorer_field,
 )
 from app.models.enums import EvaluationStatus, UserRole
@@ -105,6 +106,18 @@ def is_ceo_only_path(record: EvaluationRecord) -> bool:
     این حالت را هم صریح ببیند؛ گذارهای `ceo_submit*` همان‌جا هستند.
     """
     return record.unit_supervisor_user_id is None and record.deputy_user_id is None
+
+
+def hr_finalizes_record(record: EvaluationRecord) -> bool:
+    """تأییدِ نهاییِ این پرونده با منابع انسانی است.
+
+    نازک‌ترین پوسته روی `models.chain.hr_finalizes`، که قاعده را نگه می‌دارد.
+    قاعده آن‌جاست و نه این‌جا، چون `models.evaluation.single_decider` هم به آن
+    نیاز دارد و نمی‌تواند این ماژول را وارد کند.
+    """
+    return hr_finalizes(
+        record.unit_supervisor_user_id, record.deputy_user_id, record.hr_review_skipped
+    )
 
 
 def skips_hr_review(record: EvaluationRecord) -> bool:
@@ -246,13 +259,41 @@ TRANSITIONS: dict[str, Transition] = {
     # در مسیر «مدیر» معاونت نمره را از قبل داده و ثبت کرده، پس تأیید منابع انسانی
     # مستقیماً پرونده را روی میز مدیرعامل می‌گذارد. مرحلهٔ معاونت پریده می‌شود چون
     # *انجام شده*، نه چون وجود ندارد.
+    # تأییدِ نهاییِ منابع انسانی در زنجیرهٔ «مستقیمِ مدیرعامل».
+    #
+    # همان مرحلهٔ بررسیِ HR است، ولی مقصدش `finalized` است و نه `hr_approved`:
+    # بالاتر از HR کسِ دیگری در این زنجیره نمانده. تا امروز پرونده به میزِ خودِ
+    # مدیرعامل برمی‌گشت تا کاری را تأیید کند که خودش کرده بود — مجاز، ولی
+    # تفکیکِ وظایف نبود.
+    #
+    # از راهِ همان endpointِ `hr-approve` صدا زده می‌شود؛ HR کارِ متفاوتی
+    # نمی‌کند، فقط این پرونده جای دیگری برای رفتن ندارد.
+    "hr_finalize_direct_ceo": Transition(
+        from_statuses=frozenset({EvaluationStatus.submitted}),
+        to_status=EvaluationStatus.finalized,
+        allowed_role=UserRole.hr,
+        assignee_field="hr_user_id",
+        claimable_if_unassigned=True,
+        guard=hr_finalizes_record,
+        error_status=http_status.HTTP_400_BAD_REQUEST,
+        error_detail="این ارزیابی در انتظار بررسی نهایی منابع انسانی نیست",
+        owner_error_detail="این پرونده در اختیار کاربر دیگری از منابع انسانی است",
+    ),
     "hr_approve_manager": Transition(
         from_statuses=frozenset({EvaluationStatus.submitted}),
         to_status=EvaluationStatus.deputy_approved,
         allowed_role=UserRole.hr,
         assignee_field="hr_user_id",
         claimable_if_unassigned=True,
-        guard=lambda record: is_manager_path(record) and not skips_hr_review(record),
+        # `not hr_finalizes_record` لازم است و ظریف: زنجیرهٔ «مستقیمِ مدیرعامل»
+        # هم `is_manager_path` است (مسئولِ واحد ندارد)، پس بی این شرط همین
+        # گذار پرونده را به `deputy_approved` می‌بُرد — مرحله‌ای که در آن
+        # زنجیره وجود ندارد و کسی در آن نمی‌نشیند.
+        guard=lambda record: (
+            is_manager_path(record)
+            and not skips_hr_review(record)
+            and not hr_finalizes_record(record)
+        ),
         error_status=http_status.HTTP_400_BAD_REQUEST,
         error_detail="این ارزیابی در انتظار بررسی منابع انسانی نیست",
         owner_error_detail="این پرونده در اختیار کاربر دیگری از منابع انسانی است",
@@ -341,8 +382,18 @@ TRANSITIONS: dict[str, Transition] = {
     # مسیرِ «مستقیمِ مدیرعامل»: برگشت به «صفِ منابع انسانی» بی‌معناست، چون
     # چیزی که باید عوض شود نمرهٔ خودِ مدیرعامل است. تنها پلهٔ عقب‌ترش خودِ
     # نمره‌دهی است.
+    #
+    # `submitted` هم پذیرفته می‌شود، و این‌جا پنجرهٔ *اصلیِ* اصلاح است: از وقتی
+    # تأییدِ نهایی به منابع انسانی سپرده شد، این زنجیره دیگر به
+    # `deputy_approved` نمی‌رسد و فاصلهٔ بینِ ثبت و امضای HR تنها فرصتی است که
+    # مدیرعامل می‌تواند نمرهٔ خودش را پس بگیرد.
+    #
+    # `deputy_approved` عمداً مانده: پرونده‌هایی که پیش از این تغییر روی آن
+    # وضعیت نشسته‌اند نباید بی‌راهِ خروج بمانند.
     "ceo_return_ceo_only": Transition(
-        from_statuses=frozenset({EvaluationStatus.deputy_approved}),
+        from_statuses=frozenset(
+            {EvaluationStatus.deputy_approved, EvaluationStatus.submitted}
+        ),
         to_status=EvaluationStatus.draft,
         allowed_role=UserRole.ceo,
         assignee_field="ceo_user_id",

@@ -29,7 +29,7 @@ from app.core.text_limits import (
     SELF_ASSESSMENT_SUMMARY_MAX,
 )
 from app.db.base import Base
-from app.models.chain import scorer_field
+from app.models.chain import hr_finalizes, scorer_field
 from app.models.enums import CommentStage, EvaluationStatus
 from app.models.personnel import Personnel  # noqa: TC001  (relationship target)
 from app.models.user import User  # noqa: TC001  (relationship target)
@@ -285,6 +285,19 @@ class EvaluationRecord(Base):
         )
 
     @property
+    def final_approver_user_id(self) -> int | None:
+        """چه کسی این پرونده را می‌بندد.
+
+        در زنجیرهٔ «مستقیمِ مدیرعامل» منابع انسانی است و نه مدیرعامل
+        (`models/chain.hr_finalizes` می‌گوید چرا)؛ در بقیهٔ شکل‌ها مدیرعامل.
+        """
+        if hr_finalizes(
+            self.unit_supervisor_user_id, self.deputy_user_id, self.hr_review_skipped
+        ):
+            return self.hr_user_id
+        return self.ceo_user_id
+
+    @property
     def single_decider(self) -> bool:
         """نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی، یک نفرند.
 
@@ -296,10 +309,16 @@ class EvaluationRecord(Base):
         پیش از این `unit_supervisor_user_id == ceo_user_id` بود — بازنویسیِ
         دستیِ `scorer_field`، و برای همان شکلی که این پرچم *برایش ساخته شده*
         غلط: در زنجیرهٔ «مستقیمِ مدیرعامل» صندلیِ مسئولِ واحد اصلاً خالی است،
-        پس شرط `False` می‌داد و سند سکوت می‌کرد. حالا از خودِ قاعده می‌پرسد.
+        پس شرط `False` می‌داد و سند سکوت می‌کرد.
+
+        و حالا با تأییدِ نهاییِ منابع انسانی، همان زنجیره دیگر تصمیم‌گیرِ یگانه
+        *نیست*: مدیرعامل نمره می‌دهد و HR می‌بندد. پس مقایسه با
+        `final_approver_user_id` است و نه با `ceo_user_id` — پرچم فقط جایی
+        روشن می‌شود که واقعاً یک نفر هر دو کار را کرده باشد، یعنی پروندهٔ خودِ
+        واحدِ HR که مرحلهٔ بی‌طرفی برایش نمانده.
         """
         scorer_id = self.scorer_user_id
-        return scorer_id is not None and scorer_id == self.ceo_user_id
+        return scorer_id is not None and scorer_id == self.final_approver_user_id
 
     @property
     def subject_full_name(self) -> str:
@@ -308,6 +327,16 @@ class EvaluationRecord(Base):
     @property
     def hr_username(self) -> str | None:
         return self.hr_user.username if self.hr_user else None
+
+    @property
+    def hr_display_name(self) -> str | None:
+        """نامِ مسئولِ منابع انسانیِ این پرونده — برای نشان‌دادن به آدم‌ها.
+
+        `hr_username` می‌ماند چون شناسهٔ فنی است و جایی که *حساب* مقصود است به
+        کار می‌آید؛ ولی هر جا که یک انسان این را می‌خواند («مسئول فعلی: …»)
+        باید نام باشد نه شناسهٔ ورود.
+        """
+        return self.hr_user.display_name if self.hr_user else None
 
 
 class EvaluationScore(Base):

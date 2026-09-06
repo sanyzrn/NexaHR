@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_capability
 from app.core.security import hash_password
+from app.core.sorting import persian_text
 from app.db.session import get_db
 from app.models.audit_log import AuditLog
 from app.models.auth_session import AuthSession
@@ -25,6 +26,35 @@ from app.services.self_evaluation import ensure_user_link_is_not_self_evaluation
 from app.services.sessions import revoke_all_for_user
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+#: ستون‌هایی که فهرستِ کاربران با آن‌ها مرتب می‌شود.
+#:
+#: «نقش» عمداً با نامِ فارسی‌اش مرتب می‌شود و نه با مقدارِ enum: کاربری که روی
+#: ستونِ «نقش» کلیک می‌کند، انتظارِ ترتیبِ چیزی را دارد که *می‌بیند*، نه ترتیبِ
+#: `ceo, deputy, employee, hr, ...` که هیچ معنایی برایش ندارد.
+def _user_sort_column(sort_by: str):
+    role_label = case(
+        (User.role == UserRole.unit_supervisor, "مسئول واحد"),
+        (User.role == UserRole.hr, "منابع انسانی"),
+        (User.role == UserRole.deputy, "معاونت"),
+        (User.role == UserRole.ceo, "مدیرعامل"),
+        (User.role == UserRole.employee, "کارمند"),
+        else_="پشتیبانی فنی",
+    )
+    return {
+        "username": User.username,
+        # همان ترتیبی که `User.display_name` می‌سازد.
+        "display_name": func.coalesce(User.personnel_full_name, User.full_name, User.username),
+        "role": role_label,
+    }.get(sort_by, User.username)
+
+
+def _user_order_by(sort_by: str, sort_dir: str):
+    """هر سه ستون متن‌اند، پس هر سه از collationِ فارسی رد می‌شوند؛ و `User.id`
+    آخرِ صف است تا صفحه‌بندی ترتیبِ قطعی داشته باشد (`personnel.py` می‌گوید چرا)."""
+    column = persian_text(_user_sort_column(sort_by))
+    return [column.desc() if sort_dir == "desc" else column.asc(), User.id.asc()]
 
 
 def _apply_user_filters(query, *, role: UserRole | None, q: str | None, is_active: bool | None):
@@ -52,21 +82,15 @@ def _linked_names(db: Session, users: list[User]) -> dict[int, str]:
     )
 
 
-def _to_read(users: list[User], linked_names: dict[int, str]) -> list[UserRead]:
-    """پروندهٔ پرسنلی مرجع نام است، اگر باشد.
+def _to_read(users: list[User]) -> list[UserRead]:
+    """ترجیحِ نامِ پروندهٔ پرسنلی دیگر این‌جا نیست — در خودِ `User.display_name` است.
 
-    وگرنه HR می‌تواند نام یک نفر را در پروندهٔ پرسنلی اصلاح کند و صفحهٔ کاربران
-    همچنان نام قدیمی را نشان بدهد — دو منبع حقیقت، که دیر یا زود از هم دور
-    می‌افتند.
+    پیش از این همین‌جا وصله می‌شد، و نتیجه‌اش این بود که فقط *این* صفحه نامِ
+    درست را می‌داد: پنل مدیریت، پاسخِ «من کی‌ام» و متنِ دستیار همچنان نام
+    کاربری می‌دادند. حالا `personnel_full_name` روی مدل نشسته و هر
+    مصرف‌کننده‌ای همان ترتیب را می‌گیرد.
     """
-    items = []
-    for user in users:
-        item = UserRead.model_validate(user)
-        linked = linked_names.get(user.personnel_id) if user.personnel_id else None
-        if linked:
-            item.display_name = linked
-        items.append(item)
-    return items
+    return [UserRead.model_validate(user) for user in users]
 
 
 @router.get("", response_model=UserPage)
@@ -76,13 +100,15 @@ def list_users(
     is_active: bool | None = None,
     limit: int = Query(default=50, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="username", pattern="^(username|display_name|role)$"),
+    sort_dir: str = Query(default="asc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_capability(Capability.manage_users)),
 ) -> UserPage:
     query = _apply_user_filters(select(User), role=role, q=q, is_active=is_active)
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
-    items = list(db.scalars(query.order_by(User.username).limit(limit).offset(offset)))
-    return UserPage(total=total, items=_to_read(items, _linked_names(db, items)))
+    items = list(db.scalars(query.order_by(*_user_order_by(sort_by, sort_dir)).limit(limit).offset(offset)))
+    return UserPage(total=total, items=_to_read(items))
 
 
 @router.get("/export.xlsx")
@@ -90,12 +116,14 @@ def export_users_excel(
     role: UserRole | None = None,
     q: str | None = None,
     is_active: bool | None = None,
+    sort_by: str = Query(default="username", pattern="^(username|display_name|role)$"),
+    sort_dir: str = Query(default="asc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_capability(Capability.manage_users)),
 ) -> Response:
     """خروجی Excel از فهرست کاربران (فقط HR) با همان فیلترهای فهرست."""
     query = _apply_user_filters(select(User), role=role, q=q, is_active=is_active)
-    users = list(db.scalars(query.order_by(User.username)))
+    users = list(db.scalars(query.order_by(*_user_order_by(sort_by, sort_dir))))
     personnel_names = _linked_names(db, users)
     # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
     #
@@ -161,7 +189,7 @@ def create_user(
     )
     db.commit()
     db.refresh(user)
-    return _to_read([user], _linked_names(db, [user]))[0]
+    return _to_read([user])[0]
 
 
 @router.patch("/{user_id}", response_model=UserRead)
@@ -248,7 +276,7 @@ def update_user(
     )
     db.commit()
     db.refresh(user)
-    return _to_read([user], _linked_names(db, [user]))[0]
+    return _to_read([user])[0]
 
 
 @router.post("/{user_id}/unlock", response_model=UserRead)
@@ -283,7 +311,7 @@ def unlock_user(
     )
     db.commit()
     db.refresh(user)
-    return _to_read([user], _linked_names(db, [user]))[0]
+    return _to_read([user])[0]
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
