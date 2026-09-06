@@ -200,9 +200,17 @@ export function useUsersList({
   });
 }
 
-export function useIndicators(options?: { section?: "general" | "specialized"; includeInactive?: boolean }) {
+export function useIndicators(
+  options?: { section?: "general" | "specialized"; includeInactive?: boolean },
+  /** فرمی که کاربر ممکن است دقیقهٔ بعد ثبتش کند و دیگر تغییرش ندهد — مثل
+   *  خودارزیابی — نباید روی نسخهٔ کش‌شده بماند: منابع انسانی می‌تواند همین
+   *  حالا شاخصی اضافه کند و آن شاخص بی‌صدا از فرم بیفتد. */
+  live = false
+) {
   return useQuery({
     queryKey: ["indicators", options ?? {}],
+    refetchInterval: live ? 15_000 : false,
+    refetchOnWindowFocus: live,
     queryFn: async () =>
       (
         await apiClient.get<Indicator[]>("/indicators", {

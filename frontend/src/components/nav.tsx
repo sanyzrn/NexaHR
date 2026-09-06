@@ -133,7 +133,10 @@ export const NAV_BY_ROLE: Record<string, NavItem[]> = {
   hr: [
     { to: "/hr/dashboard", label: "داشبورد", icon: ICONS.dashboard },
     { to: "/hr/queue", label: "صف بررسی", icon: ICONS.queue },
-    { to: "/hr/people", label: "مدیریت حساب و پرسنل", icon: ICONS.personnel },
+    // آیکونِ *کارتِ شناسایی* و نه «دو آدم»: آن یکی مالِ «افراد زیرمجموعه» است،
+    // و یک آیکون برای دو مقصدِ متفاوت در یک منو، منو را از کار می‌اندازد —
+    // کاربر آیکون‌ها را به‌جای متن می‌خواند و دو ردیفِ هم‌شکل یعنی هیچ‌کدام.
+    { to: "/hr/people", label: "مدیریت حساب و پرسنل", icon: ICONS.accounts },
     { to: "/hr/indicators", label: "شاخص‌ها", icon: ICONS.indicators },
     // کنار «شاخص‌ها» چون هر دو «فرمِ ارزیابی» را تعریف می‌کنند: یکی چه چیزی
     // سنجیده می‌شود، دیگری چطور به نتیجه تبدیل می‌شود (P1-04).
@@ -195,7 +198,7 @@ export const NAV_BY_CAPABILITY: NavItem[] = [
   {
     to: "/hr/people",
     label: "مدیریت حساب و پرسنل",
-    icon: ICONS.personnel,
+    icon: ICONS.accounts,
     anyCapability: ["manage_personnel", "manage_users"],
   },
   { to: "/hr/indicators", label: "شاخص‌ها", icon: ICONS.indicators, anyCapability: ["manage_scoring"] },

@@ -63,8 +63,19 @@ def _apply_user_filters(query, *, role: UserRole | None, q: str | None, is_activ
     if q:
         # نام هم جست‌وجو می‌شود، نه فقط نام کاربری: کسی که دنبال «رضایی» می‌گردد
         # نمی‌داند نام کاربری‌اش dep1 است — و همین باعث می‌شد فهرست خالی برگردد.
+        #
+        # و نامِ پروندهٔ پرسنلی هم، که تا امروز جا افتاده بود — دقیقاً همان نامی
+        # که ستونِ «نام» *نشان می‌دهد*. برای حسابِ وصل‌شده `User.full_name`
+        # معمولاً تهی است (مدل می‌گوید منبعِ نام، پروندهٔ پرسنلی است)، پس نتیجه
+        # این می‌شد: فهرست «زهرا محمدی» را نشان می‌داد و جست‌وجوی «زهرا» صفر
+        # نتیجه می‌داد. جست‌وجویی که چیزی را که خودش چاپ کرده پیدا نکند، از
+        # نبودنش بدتر است.
         needle = f"%{q.strip()}%"
-        query = query.where(User.username.ilike(needle) | User.full_name.ilike(needle))
+        query = query.where(
+            User.username.ilike(needle)
+            | User.full_name.ilike(needle)
+            | User.personnel_full_name.ilike(needle)
+        )
     if is_active is not None:
         query = query.where(User.is_active == is_active)
     return query

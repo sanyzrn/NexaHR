@@ -524,6 +524,12 @@ function IndicatorRow({
       initial={false}
       layout="position"
       className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm"
+      // مقدارِ *استراحت* صریح نوشته می‌شود، وگرنه سایه پس از رها کردن روی ردیف
+      // می‌ماند: `whileDrag` مقداری می‌گذارد که هیچ حالتِ پایه‌ای برایش تعریف
+      // نشده، پس موتور انیمیشن چیزی برای برگشتن به آن ندارد و آخرین مقدار به
+      // شکلِ inline باقی می‌ماند. با این دو خط، ردیفِ رهاشده دقیقاً به همان
+      // شکلی برمی‌گردد که بقیه دارند.
+      style={{ scale: 1, boxShadow: "0 0 0 0 rgba(0,0,0,0)" }}
       whileDrag={{ scale: 1.01, boxShadow: "0 12px 32px rgba(0,0,0,0.10)" }}
     >
       <button

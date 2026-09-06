@@ -8,6 +8,7 @@ import { EvaluationList } from "../../components/EvaluationList";
 import { RoleOverviewCards } from "../../components/RoleOverviewCards";
 import { PageHeader } from "../../ui/Card";
 import { Table } from "../../ui/Table";
+import { sortRows, useTableSort } from "../../ui/useTableSort";
 import { isOpenStatus, type Personnel } from "../../types";
 
 export function DeputyHomePage() {
@@ -21,7 +22,12 @@ export function DeputyHomePage() {
     limit: 1000,
     offset: 0,
   });
-  const managers = (data?.items ?? []).filter((p) => p.is_manager);
+  const sorting = useTableSort();
+  const managers = sortRows(
+    (data?.items ?? []).filter((p) => p.is_manager),
+    sorting.sort,
+    [(p) => p.full_name, (p) => p.org_unit]
+  );
 
   // برای غیرفعال‌کردن «شروع ارزیابی جدید» وقتی ارزیابی باز از قبل هست
   const { data: myEvaluations } = useEvaluations({ limit: 200, offset: 0 });
@@ -81,6 +87,8 @@ export function DeputyHomePage() {
           <Table
             bordered={false}
             headers={["نام", "واحد", ""]}
+            {...sorting}
+            sortableColumns={[0, 1]}
             rowKeys={managers.map((p) => p.id)}
             rows={managers.map((p) => [
               <button
