@@ -226,6 +226,7 @@ def submit_self_assessment(
     # پاسخ بدهد که ارزیاب به آن نمره نمی‌دهد، مقایسه بی‌معنا می‌شود.
     allowed = indicator_ids_for_record(db, record)
     seen: set[int] = set()
+
     for item in payload.scores:
         if item.indicator_id not in allowed:
             raise HTTPException(
@@ -245,6 +246,27 @@ def submit_self_assessment(
                 score=item.score,
                 note=item.note,
             )
+        )
+
+    # همهٔ شاخص‌ها، نه بعضی‌شان.
+    #
+    # ثبت یک‌طرفه است و پس از آن قفل می‌شود، پس یک پاسخِ ناقص برای همیشه ناقص
+    # می‌ماند و ستونِ «اختلافِ دیدگاه» در سند برای آن شاخص‌ها خالی می‌شود.
+    #
+    # و راهِ رسیدن به این حالت خیالی نیست: فرمِ کارمند فهرستِ شاخص‌ها را از دو
+    # منبع می‌سازد — شناسه‌ها از خودِ پرونده و متن‌ها از `/indicators` — و اگر
+    # منابع انسانی درست همان لحظه شاخصی *اضافه* کند، نسخهٔ کش‌شدهٔ دومی آن را
+    # ندارد و شاخص بی‌صدا از فرم می‌افتد. تا امروز سرور همان ناقص را می‌پذیرفت
+    # و قفل می‌کرد. حالا رد می‌شود و پیام می‌گوید چه باید کرد.
+    missing = allowed - seen
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"به {len(missing)} شاخص امتیاز داده نشده است. اگر فهرست شاخص‌ها را "
+                "کامل نمی‌بینید، صفحه را تازه کنید؛ ممکن است منابع انسانی همین حالا "
+                "آن را تغییر داده باشد."
+            ),
         )
 
     record.self_assessment_submitted_at = datetime.now(UTC)

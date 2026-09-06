@@ -11,6 +11,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { PageHeader, TableSkeleton } from "../../ui/Card";
 import { SearchInput } from "../../ui/SearchInput";
 import { Table } from "../../ui/Table";
+import { sortRows, useTableSort } from "../../ui/useTableSort";
 import { isOpenStatus, type Personnel } from "../../types";
 
 export function SupervisorHomePage() {
@@ -30,7 +31,14 @@ export function SupervisorHomePage() {
     limit: 1000,
     offset: 0,
   });
-  const personnel = data?.items ?? [];
+  const sorting = useTableSort();
+  // مرتب‌سازیِ کلاینتی: این فهرست کاملاً بارگذاری می‌شود (زیرمجموعهٔ یک نفر،
+  // بی صفحه‌بندی)، پس `sortRows` جوابِ درست می‌دهد.
+  const personnel = sortRows(data?.items ?? [], sorting.sort, [
+    (p) => p.full_name,
+    (p) => p.job_title,
+    (p) => p.org_unit,
+  ]);
 
   // برای غیرفعال‌کردن «شروع ارزیابی جدید» وقتی ارزیابی باز از قبل هست (به‌جای
   // کلیک بی‌نتیجه و خطای ۴۰۹) — این فهرست از قبل توسط بک‌اند به ارزیابی‌های
@@ -127,6 +135,8 @@ export function SupervisorHomePage() {
         <Table
           bordered={false}
           headers={["نام", "عنوان شغلی", "واحد", "وضعیت ارزیابی", ""]}
+          {...sorting}
+          sortableColumns={[0, 1, 2]}
           rowKeys={personnel.map((p) => p.id)}
           emptyMessage={search ? "کسی با این مشخصات پیدا نشد." : "فردی زیرمجموعه شما نیست."}
           rows={personnel.map((p) => [

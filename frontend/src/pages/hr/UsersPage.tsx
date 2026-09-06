@@ -12,6 +12,7 @@ import { FilterSelect, PageHeader, TableSkeleton } from "../../ui/Card";
 import { Modal } from "../../ui/Modal";
 import { PasswordField } from "../../ui/PasswordField";
 import { Table } from "../../ui/Table";
+import { useTableSort } from "../../ui/useTableSort";
 import { ROLE_LABELS, type AppUser, type Personnel, type UserRole } from "../../types";
 import { SearchInput } from "../../ui/SearchInput";
 import { SectionTabs } from "../../components/SectionTabs";
@@ -48,10 +49,14 @@ export function UsersPage({ showPersonnelTab = true }: { showPersonnelTab?: bool
   // برای نقش «کارمند» باید پرسنل متناظر انتخاب شود تا کارنامه‌اش را ببیند
   const { data: personnelData } = usePersonnelList({ limit: 1000, offset: 0 });
 
+  const sorting = useTableSort();
   const listParams = {
     q: debouncedSearch,
     role: roleFilter || undefined,
     is_active: activeFilter === "" ? undefined : activeFilter === "true",
+    // ستون‌های جدول به ترتیب: نام کاربری، نام، نقش.
+    sort_by: sorting.sort ? (["username", "display_name", "role"] as const)[sorting.sort.column] : undefined,
+    sort_dir: sorting.sort?.direction,
   } as const;
 
   const { data, error: loadError, isPending } = useUsersList({
@@ -85,7 +90,12 @@ export function UsersPage({ showPersonnelTab = true }: { showPersonnelTab?: bool
         // برای حساب «کارمند» نام از پروندهٔ پرسنلی می‌آید؛ فرستادن دوبارهٔ آن فقط
         // یک نسخهٔ دوم می‌سازد که با اصلاح پرونده هماهنگ نمی‌ماند.
         full_name: form.role === "employee" ? undefined : fullName.trim() || undefined,
-        personnel_id: form.role === "employee" ? personnelId : undefined,
+        // اتصالِ پرسنلی به *نقش* بند نیست و نباید باشد. مسئولِ واحد و معاونت و
+        // کارشناسِ منابع انسانی هم خودشان ارزیابی می‌شوند، و همین ستون است که
+        // «کارنامهٔ من» و خودارزیابی و اعلانِ نتیجهٔ خودشان را ممکن می‌کند
+        // (`api/deps.require_own_personnel`). شرطِ قبلی، وصل‌کردنِ هر نقشِ
+        // دیگری را از راهِ رابط *ناممکن* کرده بود.
+        personnel_id: personnelId === "" ? undefined : personnelId,
       });
       setForm({ username: "", fullName: "", password: "", role: "unit_supervisor" });
       setPersonnelId("");
@@ -102,7 +112,7 @@ export function UsersPage({ showPersonnelTab = true }: { showPersonnelTab?: bool
   async function toggleActive(u: AppUser) {
     if (u.is_active) {
       const ok = await confirm({
-        title: `غیرفعال کردن «${u.username}»؟`,
+        title: `غیرفعال کردن «${u.display_name || u.username}»؟`,
         description: "این کاربر دیگر نمی‌تواند وارد سامانه شود، اما داده‌های قبلی‌اش حفظ می‌شود.",
         confirmLabel: "غیرفعال کن",
       });
@@ -217,11 +227,10 @@ export function UsersPage({ showPersonnelTab = true }: { showPersonnelTab?: bool
               ))}
             </select>
           </label>
-          {form.role === "employee" && (
-            <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
+          <label className="flex flex-col gap-1 text-xs font-medium text-gray-600">
               پرسنل متناظر
               <select
-                required
+                required={form.role === "employee"}
                 className={`${inputClass} sm:w-52`}
                 value={personnelId}
                 onChange={(e) => setPersonnelId(e.target.value === "" ? "" : Number(e.target.value))}
@@ -233,8 +242,11 @@ export function UsersPage({ showPersonnelTab = true }: { showPersonnelTab?: bool
                   </option>
                 ))}
               </select>
+              <span className="text-[11px] font-normal leading-5 text-gray-500">
+                برای خودارزیابی و کارنامهٔ شخصی — در هر نقشی — پروندهٔ پرسنلیِ خودِ
+                صاحبِ حساب را انتخاب کنید.
+              </span>
             </label>
-          )}
         </form>
         {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
         </Modal>
@@ -305,6 +317,10 @@ export function UsersPage({ showPersonnelTab = true }: { showPersonnelTab?: bool
           <Table
             bordered={false}
             headers={["نام کاربری", "نام", "نقش", "وضعیت", ""]}
+            sort={sorting.sort}
+            sortableColumns={[0, 1, 2]}
+            // بازگشت به صفحهٔ اول: ردیفِ اولِ ترتیبِ تازه، صفحهٔ ۳ نیست.
+            onSort={(column) => { sorting.onSort(column); setPage(0); }}
             rowKeys={data.items.map((u) => u.id)}
             rows={data.items.map((u) => [
               <span key="username" className="font-medium text-gray-700">
@@ -419,10 +435,22 @@ function EditUserModal({
     }
     setSaving(true);
     try {
+      // فقط چیزی که *عوض شده* فرستاده می‌شود.
+      //
+      // خطِ قبلی `personnel_id: role === "employee" ? personnelId : null` بود،
+      // یعنی هر بار که منابع انسانی حسابِ یک مسئولِ واحد یا معاونت یا کارشناسِ
+      // HR را ویرایش می‌کرد — حتی فقط برای بازنشانیِ رمز — اتصالِ پرسنلی‌اش
+      // *بی‌صدا پاک می‌شد*. و چون `require_own_personnel` دسترسیِ «پروندهٔ خودم»
+      // را از همین ستون می‌گیرد، آن فرد هم‌زمان کارنامه‌اش، خودارزیابی‌اش و
+      // اعلانِ نتیجهٔ خودش را از دست می‌داد، بی آنکه چیزی خطا بدهد.
       await apiClient.patch(`/users/${user.id}`, {
-        role,
-        full_name: fullName.trim() || null,
-        personnel_id: role === "employee" ? personnelId : null,
+        ...(role !== user.role ? { role } : {}),
+        ...((fullName.trim() || null) !== (user.full_name ?? null)
+          ? { full_name: fullName.trim() || null }
+          : {}),
+        ...(personnelId !== (user.personnel_id ?? "")
+          ? { personnel_id: personnelId === "" ? null : personnelId }
+          : {}),
         ...(newPassword ? { password: newPassword } : {}),
       });
       await queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -439,7 +467,7 @@ function EditUserModal({
 
   return (
     <Modal
-      title={`ویرایش کاربر: ${user.username}`}
+      title={`ویرایش کاربر: ${user.display_name || user.username}`}
       onClose={onClose}
       footer={
         <>
@@ -480,8 +508,7 @@ function EditUserModal({
           </select>
         </label>
 
-        {role === "employee" && (
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
+        <label className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">
             پرسنل متناظر
             <select
               className={inputClass}
@@ -495,8 +522,11 @@ function EditUserModal({
                 </option>
               ))}
             </select>
+            <span className="text-xs font-normal leading-6 text-gray-500">
+              برای خودارزیابی و کارنامهٔ شخصی — در هر نقشی — پروندهٔ پرسنلیِ خودِ
+              صاحبِ حساب را انتخاب کنید. تغییرِ نقش یا نام، این اتصال را حذف نمی‌کند.
+            </span>
           </label>
-        )}
 
         <div className="border-t border-gray-100 pt-4">
           <div className="flex flex-col gap-1.5 text-sm font-medium text-gray-700">

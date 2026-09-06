@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -161,6 +161,78 @@ def update_period(
     db.commit()
     db.refresh(period)
     return period
+
+
+@router.delete("/{period_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_period(
+    period_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+) -> Response:
+    """حذفِ دوره‌ای که هیچ پرونده‌ای به آن وصل نیست.
+
+    چرا لازم است: دوره در همان لحظهٔ ساخت به هر پروندهٔ تازه‌ای می‌چسبد و نامش
+    روی هر گزارش و کارنامه می‌نشیند. دوره‌ای که با تایپِ اشتباه در نام یا تاریخ
+    ساخته شده، تا امروز هیچ راهِ برداشتنی نداشت — «بستن» هم پاکش نمی‌کند، فقط
+    بسته‌اش می‌کند و در فهرست می‌ماند.
+
+    و چرا فقط دورهٔ خالی: دوره‌ای که پرونده دارد، بخشی از سابقهٔ آن پرونده‌هاست.
+    حذفش یا داده را می‌شکند یا — بدتر — بی‌صدا `period_id` را تهی می‌کند و
+    پرونده‌های نهایی‌شده را از دورهٔ خودشان جدا می‌کند. برای آن حالت «بستن»
+    وجود دارد، و پیام خطا همین را می‌گوید.
+
+    سه گاردِ روی هم:
+
+    * `FOR UPDATE` روی خودِ ردیف، تا بینِ شمارش و حذف کسی پروندهٔ تازه‌ای روی
+      همین دوره باز نکند. بی آن، یک درخواستِ هم‌زمانِ «ساخت پرونده» می‌توانست
+      دقیقاً در همان فاصله بنشیند.
+    * شمارشِ صریح، تا پیامِ خطا بگوید *چند* پرونده مانع است.
+    * `IntegrityError`، کمربندِ دوم برای هر ارجاعی که امروز نمی‌شناسیم.
+    """
+    period = db.scalar(
+        select(EvaluationPeriod).where(EvaluationPeriod.id == period_id).with_for_update()
+    )
+    if period is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="دوره یافت نشد")
+
+    attached = (
+        db.scalar(
+            select(func.count())
+            .select_from(EvaluationRecord)
+            .where(EvaluationRecord.period_id == period_id)
+        )
+        or 0
+    )
+    if attached:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"این دوره {attached} پروندهٔ ارزیابی دارد و قابل حذف نیست. "
+                "اگر دوره تمام شده، «بستن» همان کاری را می‌کند که لازم دارید."
+            ),
+        )
+
+    # snapshot پیش از حذف: پس از `db.delete` دیگر چیزی برای نوشتن در ممیزی
+    # نمی‌ماند، و «چه دوره‌ای حذف شد» دقیقاً همان چیزی است که بعداً پرسیده می‌شود.
+    removed = {
+        "id": period.id,
+        "name": period.name,
+        "status": period.status.value,
+        "starts_on": str(period.starts_on),
+        "ends_on": str(period.ends_on),
+    }
+    db.delete(period)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این دوره سوابق وابسته دارد و قابل حذف نیست.",
+        ) from exc
+    log_event(db, actor_user_id=current_user.id, event_type="period_deleted", old_value=removed)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{period_id}/close", response_model=PeriodRead)

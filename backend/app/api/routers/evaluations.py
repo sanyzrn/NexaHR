@@ -73,6 +73,7 @@ from app.services.self_evaluation import (
     ensure_chain_stages_are_not_redundant,
     ensure_evaluators_are_not_the_subject,
     ensure_hr_may_handle,
+    ensure_may_administer,
     subject_belongs_to_hr,
 )
 from app.services.snapshot import build_final_snapshot
@@ -84,6 +85,7 @@ from app.services.workflow import (
     SEAT_ROLE,
     apply_transition,
     finalize_scoring,
+    hr_finalizes_record,
     is_ceo_only_path,
     is_manager_path,
     may_act_at,
@@ -905,13 +907,41 @@ def submit_evaluation(
 @router.post("/{evaluation_id}/hr-approve", response_model=EvaluationRead)
 def hr_approve(
     evaluation_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> EvaluationRead:
+    """بررسی و تأییدِ منابع انسانی — که در یک شکلِ زنجیره، خودِ تأییدِ نهایی است.
+
+    سه مقصدِ ممکن، و هر سه از همین یک دکمه:
+
+    * زنجیرهٔ کامل → `hr_approved`، روی میزِ معاونت.
+    * مسیرِ «مدیر» → `deputy_approved`، چون معاونت نمره را از قبل داده.
+    * مستقیمِ مدیرعامل → **`finalized`**. بالاتر از منابع انسانی کسِ دیگری در
+      این زنجیره نیست، و برگرداندنِ پرونده به میزِ مدیرعامل یعنی او کاری را
+      تأیید کند که خودش کرده است (`models/chain.hr_finalizes`).
+    """
     record = _get_record_or_404_for_update(db, evaluation_id)
     # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش. مسیر گذارها از `_ensure_can_view`
     # نمی‌گذرد، پس گارد این‌جا صریح است نه ضمنی.
     ensure_hr_may_handle(record, current_user)
+
+    if hr_finalizes_record(record):
+        # دقیقاً همان کارِ `ceo_finalize`، از همان تابع: هر دو مسیر به یک مقصد
+        # می‌روند و اگر دو نسخه از «مهرِ نهایی‌سازی» داشته باشند، روزی یکی
+        # قاعدهٔ تازه‌ای می‌گیرد و دیگری نه.
+        apply_transition(
+            db,
+            record,
+            "hr_finalize_direct_ceo",
+            current_user,
+            before=lambda: _stamp_finalization(db, record),
+        )
+        db.commit()
+        db.refresh(record)
+        background_tasks.add_task(archive_final_pdf_detached, record.id)
+        return _to_read(db, record)
+
     # در مسیر «مدیر»، تأیید منابع انسانی پرونده را مستقیم روی میز مدیرعامل
     # می‌گذارد: مرحلهٔ معاونت مصرف شده، چون خودش نمره داده است.
     action = "hr_approve_manager" if is_manager_path(record) else "hr_approve"
@@ -937,6 +967,24 @@ def deputy_approve(
     return _to_read(db, record)
 
 
+def _stamp_finalization(db: Session, record: EvaluationRecord) -> None:
+    """مهرِ نهایی‌شدن: زمان، سند، و توکنِ صفحهٔ تأیید.
+
+    یک تابع و نه دو، چون دو مسیر به `finalized` می‌رسند — تأییدِ مدیرعامل، و
+    تأییدِ نهاییِ منابع انسانی در زنجیرهٔ «مستقیمِ مدیرعامل». هر قاعده‌ای که
+    فردا به این مهر اضافه شود، باید هر دو را بگیرد.
+
+    از `before` صدا زده می‌شود و نه پیش از گذار: `apply_transition` نبودِ
+    اسنپ‌شات را *پس از* `before` می‌سنجد، و گذاری که رد شود نباید سندی پشتِ
+    سرش جا بگذارد.
+    """
+    record.finalized_at = datetime.now(UTC)
+    record.final_snapshot = build_final_snapshot(db, record)
+    # توکن تصادفی صفحهٔ تأیید عمومی؛ evaluation_code ترتیبی است و نباید کلید
+    # جست‌وجوی یک endpoint بدون احراز هویت باشد (قابل شمارش/enumeration)
+    record.verify_token = secrets.token_urlsafe(24)
+
+
 @router.post("/{evaluation_id}/ceo-finalize", response_model=EvaluationRead)
 def ceo_finalize(
     evaluation_id: int,
@@ -945,15 +993,13 @@ def ceo_finalize(
     current_user: CurrentUser = Depends(require_chain_stage(UserRole.ceo)),
 ) -> EvaluationRead:
     record = _get_record_or_404_for_update(db, evaluation_id)
-
-    def _before() -> None:
-        record.finalized_at = datetime.now(UTC)
-        record.final_snapshot = build_final_snapshot(db, record)
-        # توکن تصادفی صفحهٔ تأیید عمومی؛ evaluation_code ترتیبی است و نباید کلید
-        # جست‌وجوی یک endpoint بدون احراز هویت باشد (قابل شمارش/enumeration)
-        record.verify_token = secrets.token_urlsafe(24)
-
-    apply_transition(db, record, "ceo_finalize", current_user, before=_before)
+    apply_transition(
+        db,
+        record,
+        "ceo_finalize",
+        current_user,
+        before=lambda: _stamp_finalization(db, record),
+    )
     db.commit()
     db.refresh(record)
     # سند PDF *پس از* ارسال پاسخ ساخته می‌شود (P2-05). قبلاً همین‌جا و به‌صورت
@@ -1042,7 +1088,12 @@ def cancel_evaluation(
     evaluation_id: int,
     payload: CancelRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    # معاونت و مدیرعامل هم راه دارند — ولی فقط روی پروندهٔ سپرشدهٔ خودِ واحدِ
+    # منابع انسانی، و `ensure_may_administer` همان‌جا تنگش می‌کند. بی این،
+    # پروندهٔ بازِ عضوِ HR با صندلیِ خالی هیچ راهِ خروجی نداشت.
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
     """لغو پروندهٔ باز با دلیل اجباری — تنها راه خروج از پروندهٔ گیرکرده.
 
@@ -1052,7 +1103,7 @@ def cancel_evaluation(
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
     # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
-    ensure_hr_may_handle(record, current_user)
+    ensure_may_administer(record, current_user)
 
     def _before() -> None:
         # دلیل هم به‌صورت کامنت در خود پرونده می‌ماند و هم در audit — تصمیم است، نه پاک‌کردن.
@@ -1073,7 +1124,10 @@ def cancel_evaluation(
             new_value={"reason": payload.reason},
         )
 
-    apply_transition(db, record, "cancel", current_user, before=_before)
+    # منابع انسانی مسیرِ خودش را دارد؛ معاونت و مدیرعامل فقط دوقلوی
+    # `cancel_hr_subject` را، که گاردش پروندهٔ سپرشده را می‌سنجد.
+    action = "cancel" if current_user.role is UserRole.hr else "cancel_hr_subject"
+    apply_transition(db, record, action, current_user, before=_before)
     db.commit()
     db.refresh(record)
     return _to_read(db, record)
@@ -1084,7 +1138,12 @@ def extend_submission_window(
     evaluation_id: int,
     payload: SubmissionExtension,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    # معاونت و مدیرعامل هم راه دارند — ولی فقط روی پروندهٔ سپرشدهٔ خودِ واحدِ
+    # منابع انسانی، و `ensure_may_administer` همان‌جا تنگش می‌کند. بی این،
+    # پروندهٔ بازِ عضوِ HR با صندلیِ خالی هیچ راهِ خروجی نداشت.
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
     """تمدیدِ مهلتِ ثبت برای همین یک پرونده.
 
@@ -1099,7 +1158,7 @@ def extend_submission_window(
     record = _get_record_or_404_for_update(db, evaluation_id)
     # همان قاعدهٔ همیشگی: منابع انسانی دربارهٔ پروندهٔ خودش — و پروندهٔ واحدِ
     # خودش — تصمیم نمی‌گیرد.
-    ensure_hr_may_handle(record, current_user)
+    ensure_may_administer(record, current_user)
 
     if record.status not in _EXTENDABLE_STATUSES:
         raise HTTPException(
@@ -1196,7 +1255,7 @@ def hr_claim(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"این پرونده از قبل در اختیار «{record.hr_username}» است؛ "
+                f"این پرونده از قبل در اختیار «{record.hr_display_name or record.hr_username}» است؛ "
                 "برای جابه‌جایی از «واگذاری» استفاده کنید."
             ),
         )
@@ -1410,7 +1469,12 @@ def reassign_stage_owner(
     evaluation_id: int,
     payload: StageOwnerReassign,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    # معاونت و مدیرعامل هم راه دارند — ولی فقط روی پروندهٔ سپرشدهٔ خودِ واحدِ
+    # منابع انسانی، و `ensure_may_administer` همان‌جا تنگش می‌کند. بی این،
+    # پروندهٔ بازِ عضوِ HR با صندلیِ خالی هیچ راهِ خروجی نداشت.
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
     """جایگزینی مسئول یک مرحله روی پروندهٔ باز — بدون از دست رفتن امتیازها.
 
@@ -1421,7 +1485,7 @@ def reassign_stage_owner(
     # این‌جا گارد اصلاً نبود — و بازتخصیص، اثرگذارترین ابزارِ بیرون از زنجیره است:
     # عوض‌کردنِ مسئولِ یک مرحله یعنی انتخابِ داورِ آن مرحله. منابع انسانی نباید
     # آن را روی پروندهٔ خودش یا پروندهٔ در جریانِ واحدِ خودش داشته باشد.
-    ensure_hr_may_handle(record, current_user)
+    ensure_may_administer(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(

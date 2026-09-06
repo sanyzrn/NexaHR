@@ -137,6 +137,18 @@ class Settings(BaseSettings):
     # پنجره‌ای که در آن یک اعلانِ تکراری (همان کلید) دوباره ساخته نمی‌شود
     notification_dedup_days: int = 7
 
+    # آمارِ مرحله‌ها روی چند روزِ گذشته حساب شود.
+    #
+    # پیش از این هیچ حدی نداشت: `stage_stats` کلِ جدولِ پرونده‌ها و کلِ گذارهای
+    # `status_changed` را — با هر دو ستونِ JSONB — در پایتون بار می‌کرد. یعنی
+    # هزینهٔ یک صفحهٔ داشبورد با کلِ تاریخِ سازمان رشد می‌کرد و هیچ‌وقت
+    # نمی‌ایستاد.
+    #
+    # سه سال عمداً سخاوتمندانه است: برای سازمانی در این اندازه یعنی «همه‌چیز»،
+    # پس عددهای امروز عوض نمی‌شوند — ولی رشد دیگر بی‌سقف نیست. برای بازهٔ
+    # دقیق‌تر، خودِ endpoint فیلترِ `period_id` دارد.
+    stage_stats_window_days: int = 1095
+
     # --- تحویل بیرونی اعلان‌ها (P1-03) ----------------------------------------
     # همه‌چیز پیش‌فرض خاموش است و باید بماند: اولین باری که کانالی روشن شود، کل
     # سازمان پیام می‌گیرد. این باید یک تصمیم آگاهانه باشد، نه اثر جانبی استقرار.
@@ -187,10 +199,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _forbid_insecure_secret_in_production(self) -> "Settings":
-        if self.environment == "production" and self.jwt_secret_key == _INSECURE_DEFAULT_JWT_SECRET:
+        # هم مقدارِ پیش‌فرض رد می‌شود و هم کلیدِ *کوتاه*.
+        #
+        # سنجشِ برابری به‌تنهایی کافی نبود: `JWT_SECRET_KEY=hr2026` از آن رد
+        # می‌شد و امضای توکن‌ها را به یک رشتهٔ شش‌نویسه‌ای می‌سپرد — یعنی
+        # حدس‌زدنی. ۳۲ نویسه همان چیزی است که خودِ راهنمای استقرار پیشنهاد
+        # می‌کند (`secrets.token_urlsafe(32)`).
+        if self.environment == "production" and (
+            self.jwt_secret_key == _INSECURE_DEFAULT_JWT_SECRET
+            or len(self.jwt_secret_key.strip()) < 32
+        ):
             raise RuntimeError(
-                "JWT_SECRET_KEY هنوز مقدار پیش‌فرض دمو است. پیش از اجرا در محیط production "
-                "یک مقدار تصادفی و طولانی برای JWT_SECRET_KEY در .env تنظیم کنید."
+                "JWT_SECRET_KEY برای محیط production امن نیست: یا هنوز مقدار پیش‌فرض دموست "
+                "یا کوتاه‌تر از ۳۲ نویسه است. یک مقدار تصادفی و طولانی تنظیم کنید — "
+                'مثلاً با: python -c "import secrets; print(secrets.token_urlsafe(32))"'
             )
         return self
 

@@ -100,6 +100,22 @@ def require_own_personnel(current_user: CurrentUser = Depends(get_current_user))
     (`subject_personnel_id == current_user.personnel_id`) و پروندهٔ دیگران ۴۰۴
     می‌گیرد. این‌جا فقط گلوگاهِ «اصلاً پروندهٔ پرسنلی داری؟» است.
     """
+    # مدیرِ سامانه استثناست، و همان استثنایی است که P0-03 گذاشت: نقشِ `support`
+    # برای *نگه‌داریِ سامانه* است و در زنجیرهٔ ارزیابی جایی ندارد، پس نباید
+    # نمرهٔ کسی را ببیند — از جمله وقتی حسابش به یک پروندهٔ پرسنلی وصل باشد.
+    #
+    # این در جای دیگری از کد رعایت شده (صفِ بررسی و داشبورد پشتِ نقش‌اند)، ولی
+    # این‌جا نبود: تنها شرط «پروندهٔ پرسنلی داری؟» بود. اگر روزی حسابِ مدیرِ
+    # سامانه به پرسنلی وصل شود — که رابط حالا اجازه‌اش را می‌دهد — همین در
+    # برایش باز می‌شد.
+    if current_user.role is UserRole.support:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "حساب «پشتیبانی فنی» در زنجیرهٔ ارزیابی نقشی ندارد، پس بخش "
+                "کارنامه و خودارزیابی شخصی برای آن فعال نیست."
+            ),
+        )
     if current_user.personnel_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -14,14 +14,18 @@ from app.models.self_assessment import SelfAssessmentScore
 from app.models.user import User
 from app.services.evaluation import applied_bonus
 from app.services.scoring_scheme import rules_for_record
-from app.services.workflow import SEAT_LABEL, scorer_field
+from app.services.workflow import SEAT_LABEL, document_signatories, scorer_field
 
+# ۶: افزودن `evaluator.display_name` — نامِ ارزیاب، نه شناسهٔ ورودش.
+# ۵: افزودن `signatories` — بلوکِ امضا از صندلی‌های واقعیِ پرونده، نه از
+#    رشتهٔ نمایشیِ نقشِ ارزیاب. قالب برای snapshot های نسخهٔ ≤۴ همان بلوکِ
+#    قدیمی را می‌سازد، تا سندِ بایگانی‌شده همان چیزی بماند که آن روز چاپ شد.
 # ۴: افزودن `self_assessment` — برگهٔ مقایسهٔ «خود فرد / مسئول مستقیم» داخل سند.
 # ۳: افزودن `single_decider` — نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند.
 # ۲: افزودن امتیاز ویژه (`bonus_points` / `bonus_reason` / `base_weighted_pct`).
 # افزودنی است، پس قالب PDF هر دو نسخه را رندر می‌کند: در snapshot نسخهٔ ۱ این
 # کلیدها نیستند و بخشِ مربوطه اصلاً چاپ نمی‌شود.
-SNAPSHOT_VERSION = 4
+SNAPSHOT_VERSION = 6
 
 
 def _evaluator_seat(record: EvaluationRecord) -> tuple[int | None, str]:
@@ -82,11 +86,20 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         },
         "evaluator": {
             "username": evaluator.username if evaluator else None,
+            # نامِ آدم، نه شناسهٔ ورودش. سند تا امروز کنارِ نامِ کاملِ
+            # ارزیابی‌شونده، ارزیاب را «sup1» معرفی می‌کرد — روی مدرکی که هش
+            # می‌شود و QR تأیید دارد. `username` هم می‌ماند: قالبِ نسخه‌های
+            # قدیمی به آن تکیه دارد و برای پیگیریِ فنی هم به کار می‌آید.
+            "display_name": evaluator.display_name if evaluator else None,
             "role_label": evaluator_label,
         },
         # اگر نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی یک نفر بوده‌اند، سند باید همین
         # را بگوید. دو تأیید در لاگ، بدون این جمله، دو بررسی مستقل به‌نظر می‌رسد.
         "single_decider": record.single_decider,
+        # امضاکنندگانِ واقعی. عمداً در snapshot می‌نشیند و نه در قالب: بلوکِ
+        # امضا بخشی از همان سندی است که هش می‌شود، پس باید شکلِ زنجیره را در
+        # لحظهٔ نهایی‌شدن مهر کند — نه شکلِ امروزِ سازمان را.
+        "signatories": document_signatories(record),
         # برگهٔ مقایسه — دیدگاه خودِ فرد کنار نمرهٔ ارزیاب، در همان سندی که
         # قطعی می‌شود. `None` یعنی خودارزیابی ثبت نشده، که کاملاً مجاز است؛
         # قالب در آن حالت اصلاً این بخش را چاپ نمی‌کند.

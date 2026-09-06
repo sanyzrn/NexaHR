@@ -143,8 +143,16 @@ def test_the_ceo_scores_and_the_case_reaches_hr(client, db_session):
     assert record.final_weighted_pct is not None, "نتیجه باید سرِ ثبت حساب شود"
 
 
-def test_hr_review_then_the_ceo_signature_ends_the_chain(client, db_session):
-    """پس از منابع انسانی، تأییدِ مدیرعامل تأییدِ نهایی است — مرحلهٔ معاونتی نیست."""
+def test_hr_review_is_itself_the_final_approval(client, db_session, monkeypatch):
+    """تأییدِ منابع انسانی، خودِ تأییدِ نهایی است — و مدیرعامل دوباره امضا نمی‌کند.
+
+    این ادعا عوض شد و عمداً. پیش از این پرونده پس از بررسیِ HR به میزِ خودِ
+    مدیرعامل برمی‌گشت تا کاری را تأیید کند که خودش کرده بود؛ مجاز بود، ولی
+    تفکیکِ وظایف نبود. حالا کسی که نمره داده امضاکنندهٔ نهایی نیست.
+    """
+    monkeypatch.setattr(
+        "app.api.routers.evaluations.archive_final_pdf_detached", lambda _id: None
+    )
     hr, ceo, personnel = _ceo_only(db_session)
     record_id = _open_and_score(client, db_session, ceo, personnel)
     client.post(f"/api/evaluations/{record_id}/submit", headers=auth_header(ceo))
@@ -153,13 +161,27 @@ def test_hr_review_then_the_ceo_signature_ends_the_chain(client, db_session):
         f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr)
     )
     assert approved.status_code == 200, approved.text
-    assert approved.json()["status"] == "deputy_approved"
+    assert approved.json()["status"] == "finalized"
+    # و چون دو نفرِ متفاوت نمره داده و امضا کرده‌اند، سند دیگر جملهٔ افشا ندارد.
+    assert approved.json()["single_decider"] is False
 
-    final = client.post(
+    record = db_session.get(EvaluationRecord, record_id)
+    db_session.refresh(record)
+    assert record.final_snapshot is not None, "سند باید همان‌جا ساخته شود"
+    assert record.verify_token, "توکنِ صفحهٔ تأیید باید ساخته شود"
+    assert record.hr_user_id == hr.id, "امضاکنندهٔ نهایی باید ثبت شده باشد"
+
+
+def test_the_ceo_cannot_finalize_a_case_they_scored(client, db_session):
+    """درِ قبلی بسته شده: تأییدِ نهایی دیگر از آنِ نمره‌دهنده نیست."""
+    hr, ceo, personnel = _ceo_only(db_session)
+    record_id = _open_and_score(client, db_session, ceo, personnel)
+    client.post(f"/api/evaluations/{record_id}/submit", headers=auth_header(ceo))
+
+    refused = client.post(
         f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
     )
-    assert final.status_code == 200, final.text
-    assert final.json()["status"] == "finalized"
+    assert refused.status_code == 403, refused.text
 
 
 def test_nobody_else_can_score_or_submit_this_case(client, db_session):
@@ -177,17 +199,16 @@ def test_nobody_else_can_score_or_submit_this_case(client, db_session):
         assert refused.status_code in (403, 404), (actor.username, refused.text)
 
 
-def test_a_ceo_return_goes_back_to_scoring_not_to_the_hr_queue(client, db_session):
-    """برگشت به «صفِ منابع انسانی» بی‌معناست: چیزی که باید عوض شود نمرهٔ خودِ اوست.
+def test_the_ceo_can_pull_their_own_case_back_before_hr_signs(client, db_session):
+    """تا پیش از امضای منابع انسانی، مدیرعامل می‌تواند نمرهٔ خودش را پس بگیرد.
 
-    بی این گذار، پرونده به `submitted` برمی‌گشت — یعنی همان جایی که منابع
-    انسانی از آن تأییدش کرده بود، و مدیرعامل باید منتظرِ تأییدِ دومِ او می‌ماند
-    تا بتواند نمره‌اش را عوض کند.
+    ادعای قبلی «برگشت از `hr_approved`» بود؛ در این زنجیره دیگر چنین وضعیتی
+    وجود ندارد، چون بررسیِ HR خودش پرونده را می‌بندد. پنجرهٔ اصلاح، فاصلهٔ بینِ
+    ثبت و امضاست.
     """
     hr, ceo, personnel = _ceo_only(db_session)
     record_id = _open_and_score(client, db_session, ceo, personnel)
     client.post(f"/api/evaluations/{record_id}/submit", headers=auth_header(ceo))
-    client.post(f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr))
 
     returned = client.post(
         f"/api/evaluations/{record_id}/return",

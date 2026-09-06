@@ -8,6 +8,7 @@ import { EvaluationList } from "../../components/EvaluationList";
 import { RoleOverviewCards } from "../../components/RoleOverviewCards";
 import { PageHeader } from "../../ui/Card";
 import { Table } from "../../ui/Table";
+import { sortRows, useTableSort } from "../../ui/useTableSort";
 import { isOpenStatus, type Personnel } from "../../types";
 
 export function CeoHomePage() {
@@ -26,7 +27,12 @@ export function CeoHomePage() {
     limit: 1000,
     offset: 0,
   });
-  const directReports = (data?.items ?? []).filter((p) => p.scored_by === "ceo");
+  const sorting = useTableSort();
+  const directReports = sortRows(
+    (data?.items ?? []).filter((p) => p.scored_by === "ceo"),
+    sorting.sort,
+    [(p) => p.full_name, (p) => p.org_unit]
+  );
 
   // برای غیرفعال‌کردن «شروع ارزیابی جدید» وقتی ارزیابی باز از قبل هست
   const { data: myEvaluations } = useEvaluations({ limit: 200, offset: 0 });
@@ -93,12 +99,14 @@ export function CeoHomePage() {
             افراد مستقیم شما (بدون مسئول واحد و بدون معاونت)
           </h2>
           <p className="mb-3 text-xs text-gray-500">
-            نمره‌دهی این پرونده‌ها با شماست. پس از ثبت، پرونده برای بازبینی به منابع
-            انسانی می‌رود و تأیید نهاییِ شما پایانِ زنجیره است.
+            نمره‌دهی این پرونده‌ها با شماست. پس از ثبت، پرونده به منابع انسانی می‌رود
+            و تأیید آن‌ها پایانِ زنجیره است — کسی که نمره داده، امضاکنندهٔ نهایی نیست.
           </p>
           <Table
             bordered={false}
             headers={["نام", "واحد", ""]}
+            {...sorting}
+            sortableColumns={[0, 1]}
             rowKeys={directReports.map((p) => p.id)}
             rows={directReports.map((p) => [
               <button

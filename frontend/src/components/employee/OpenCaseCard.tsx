@@ -115,6 +115,13 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
   );
 }
 
+//: دو بخشِ فرم، به همان ترتیب و با همان نامی که فرمِ ارزیاب دارد.
+const SECTIONS = [
+  { key: "general", label: "شاخص‌های عمومی" },
+  { key: "specialized", label: "شاخص‌های تخصصی" },
+] as const;
+
+
 function SelfAssessmentForm({
   evaluationId,
   indicatorIds,
@@ -126,7 +133,7 @@ function SelfAssessmentForm({
   onDone: (result: SelfAssessment) => void;
   onCancel: () => void;
 }) {
-  const { data: allIndicators = [] } = useIndicators({ includeInactive: true });
+  const { data: allIndicators = [] } = useIndicators({ includeInactive: true }, true);
   const { showSuccess, showError } = useToast();
   const confirm = useConfirm();
   const queryClient = useQueryClient();
@@ -155,7 +162,13 @@ function SelfAssessmentForm({
 
   const [busy, setBusy] = useState(false);
 
-  const allScored = indicators.length > 0 && indicators.every((i) => scores[i.id]);
+  // فهرست از دو منبع ساخته می‌شود: شناسه‌ها از خودِ پرونده (تازه) و متن‌ها از
+  // `/indicators` (کش‌شده). اگر منابع انسانی همین حالا شاخصی اضافه کند، شناسه
+  // هست و متن نیست — و شاخص *بی‌صدا* از فرم می‌افتاد. حالا دیده می‌شود و ثبت
+  // بسته می‌ماند تا فهرست تازه شود (سرور هم مستقلاً همین را رد می‌کند).
+  const listIsStale = indicators.length !== indicatorIds.length;
+  const allScored =
+    !listIsStale && indicators.length > 0 && indicators.every((i) => scores[i.id]);
 
   async function submit() {
     // ثبت یک‌طرفه است. «ثبت نهایی» را می‌شود سرسری خواند؛ یک پرسش صریح،
@@ -204,38 +217,57 @@ function SelfAssessmentForm({
     <div className="mt-4 space-y-4 border-t border-gray-100 pt-4">
       <p className="text-sm font-semibold text-gray-800">خودارزیابی</p>
 
-      <div className="space-y-3">
-        {indicators.map((indicator) => (
-          <div key={indicator.id} className="rounded-xl border border-gray-100 bg-gray-50/50 p-3">
-            <p className="text-sm text-gray-800">{indicator.description}</p>
-            <p className="mt-0.5 text-xs text-gray-500">{indicator.category}</p>
+      {listIsStale && (
+        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          فهرست شاخص‌ها به‌تازگی تغییر کرده و هنوز کامل بارگذاری نشده است. لطفاً صفحه
+          را تازه کنید تا همهٔ شاخص‌ها را ببینید.
+        </p>
+      )}
 
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              {SCORE_OPTIONS.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setScores({ ...scores, [indicator.id]: value })}
-                  aria-pressed={scores[indicator.id] === value}
-                  className={`h-9 w-9 rounded-lg border text-sm font-medium transition-colors ${
-                    scores[indicator.id] === value
-                      ? "border-pulse-500 bg-pulse-600 text-white"
-                      : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
-                  }`}
-                >
-                  {value.toLocaleString("fa-IR")}
-                </button>
-              ))}
-              <input
-                className="ms-2 min-w-40 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-900"
-                placeholder="توضیح یا دستاورد شما (اختیاری)"
-                value={notes[indicator.id] ?? ""}
-                onChange={(e) => setNotes({ ...notes, [indicator.id]: e.target.value })}
-              />
-            </div>
+      {/* دو بخشِ جدا، مثل فرمِ ارزیاب.
+          فهرستِ تختِ قبلی همان بیست شاخص را پشتِ هم می‌ریخت، در حالی که
+          «عمومی» و «تخصصی» دو پرسشِ متفاوت‌اند و وزنشان هم فرق دارد — و
+          ارزیاب همین‌ها را در دو بلوکِ عنوان‌دار می‌بیند. یک مجموعه، دو نما،
+          و نمای بدتر مالِ کارمند بود. */}
+      {SECTIONS.map(({ key, label }) => {
+        const rows = indicators.filter((i) => i.section === key);
+        if (rows.length === 0) return null;
+        return (
+          <div key={key} className="space-y-3">
+            <h4 className="text-sm font-bold text-gray-900">{label}</h4>
+            {rows.map((indicator) => (
+              <div key={indicator.id} className="rounded-xl border border-gray-100 bg-gray-50/50 p-3">
+                <p className="text-sm text-gray-800">{indicator.description}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{indicator.category}</p>
+
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {SCORE_OPTIONS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setScores({ ...scores, [indicator.id]: value })}
+                      aria-pressed={scores[indicator.id] === value}
+                      className={`h-9 w-9 rounded-lg border text-sm font-medium transition-colors ${
+                        scores[indicator.id] === value
+                          ? "border-pulse-500 bg-pulse-600 text-white"
+                          : "border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      {value.toLocaleString("fa-IR")}
+                    </button>
+                  ))}
+                  <input
+                    className="ms-2 min-w-40 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-900"
+                    placeholder="توضیح یا دستاورد شما (اختیاری)"
+                    value={notes[indicator.id] ?? ""}
+                    onChange={(e) => setNotes({ ...notes, [indicator.id]: e.target.value })}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })}
 
       <label className="block text-sm">
         <span className="mb-1.5 block font-medium text-gray-700">

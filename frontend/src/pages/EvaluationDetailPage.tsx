@@ -223,6 +223,14 @@ export function EvaluationDetailPage() {
     scorerUserId === user.id &&
     rankOf(user.role) >= rankOf(scorerRole);
 
+  // قرینهٔ `models/chain.hr_finalizes`: زنجیره‌ای که نه مسئولِ واحد دارد و نه
+  // معاونت، پس تأییدِ منابع انسانی خودش تأییدِ نهایی است. پروندهٔ خودِ واحدِ HR
+  // استثناست — مرحلهٔ HR ندارد و به این دکمه هم نمی‌رسد.
+  const hrClosesTheCase =
+    evaluation.unit_supervisor_user_id === null &&
+    evaluation.deputy_user_id === null &&
+    !evaluation.hr_review_skipped;
+
   const canHrApprove = user.role === "hr" && evaluation.status === "submitted";
   const canDeputyApprove =
     user.role === "deputy" &&
@@ -549,12 +557,18 @@ export function EvaluationDetailPage() {
       <div className="flex justify-end gap-2">
         {canHrApprove && (
           <ActionButton
-            label="تأیید (منابع انسانی)"
+            // در زنجیرهٔ «مستقیمِ مدیرعامل» همین دکمه پرونده را *می‌بندد*، پس
+            // نباید مثل یک تأییدِ میانی به‌نظر برسد: کاری که برگشت‌پذیر نیست
+            // باید پیش از کلیک همان‌طور دیده شود.
+            label={hrClosesTheCase ? "تأیید نهایی (منابع انسانی)" : "تأیید (منابع انسانی)"}
             busy={busy}
             onClick={async () => {
               const ok = await confirm({
-                title: "تأیید این ارزیابی؟",
-                description: "پرونده به مرحله بررسی معاونت منتقل می‌شود.",
+                title: hrClosesTheCase ? "تأیید نهایی این ارزیابی؟" : "تأیید این ارزیابی؟",
+                danger: hrClosesTheCase,
+                description: hrClosesTheCase
+                  ? "این پرونده مرحلهٔ دیگری ندارد: با این تأیید نهایی می‌شود، سند رسمی ساخته می‌شود و دیگر قابل تغییر نیست."
+                  : "پرونده به مرحله بررسی معاونت منتقل می‌شود.",
               });
               if (!ok) return;
               setBusy(true);
@@ -562,7 +576,7 @@ export function EvaluationDetailPage() {
               try {
                 await apiClient.post(`/evaluations/${evaluation.id}/hr-approve`);
                 await load();
-                showSuccess("ارزیابی تأیید شد");
+                showSuccess(hrClosesTheCase ? "ارزیابی نهایی شد" : "ارزیابی تأیید شد");
               } catch (err) {
                 const message = extractErrorMessage(err);
                 setError(message);

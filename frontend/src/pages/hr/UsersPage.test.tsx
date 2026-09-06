@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -54,9 +54,18 @@ function renderPage() {
 }
 
 describe("UsersPage edit modal", () => {
+  const getMock = vi.mocked(apiClient.get);
+  const patchMock = vi.mocked(apiClient.patch);
+  const postMock = vi.mocked(apiClient.post);
+
+  beforeEach(() => {
+    getMock.mockReset();
+    patchMock.mockReset();
+    postMock.mockReset();
+    postMock.mockResolvedValue({ data: {} } as never);
+  });
+
   it("opens the edit modal for an existing user and submits a role + password change", async () => {
-    const getMock = vi.mocked(apiClient.get);
-    const patchMock = vi.mocked(apiClient.patch);
     getMock.mockImplementation(async (url: string) => {
       if (url === "/users") {
         return {
@@ -93,19 +102,97 @@ describe("UsersPage edit modal", () => {
     await userEvent.click(screen.getByRole("button", { name: "ویرایش" }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("ویرایش کاربر: sup1")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText("ویرایش کاربر: مسئول واحد فروش، آقای رضایی")
+    ).toBeInTheDocument();
 
     await userEvent.selectOptions(within(dialog).getByLabelText("نقش"), "hr");
     await userEvent.type(within(dialog).getByLabelText(/تعیین رمز جدید/), "NewPassword123");
     await userEvent.click(within(dialog).getByRole("button", { name: "ذخیره" }));
 
+    // فقط چیزی که عوض شده. `full_name` دست‌نخورده مانده و `personnel_id` هم
+    // از اول تهی بوده، پس هیچ‌کدام در بدنه نیستند.
     await waitFor(() =>
       expect(patchMock).toHaveBeenCalledWith("/users/1", {
         role: "hr",
-        full_name: "مسئول واحد فروش، آقای رضایی",
-        personnel_id: null,
         password: "NewPassword123",
       })
     );
+  });
+
+  it("ویرایشِ حسابِ غیرِ کارمند، اتصالِ پرسنلی‌اش را پاک نمی‌کند", async () => {
+    // این دقیقاً همان اشکالی است که بی‌صدا رخ می‌داد: بازنشانیِ رمزِ یک مسئولِ
+    // واحد، اتصالِ پرسنلی‌اش را می‌بُرید و کارنامه و خودارزیابی و اعلانِ نتیجهٔ
+    // خودش را با هم می‌برد.
+    getMock.mockImplementation(async (url: string) => {
+      if (url === "/users") {
+        return {
+          data: {
+            total: 1,
+            items: [
+              {
+                id: 7,
+                username: "sup2",
+                full_name: null,
+                display_name: "زهرا محمدی",
+                role: "unit_supervisor",
+                is_active: true,
+                personnel_id: 42,
+                created_at: "",
+              },
+            ],
+          },
+        };
+      }
+      if (url === "/personnel") {
+        return {
+          data: {
+            total: 1,
+            items: [{ id: 42, full_name: "زهرا محمدی", personnel_code: "P-42" }],
+          },
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    });
+    patchMock.mockResolvedValue({ data: {} });
+
+    renderPage();
+    await screen.findByText("sup2");
+    await userEvent.click(screen.getByRole("button", { name: "ویرایش" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText(/تعیین رمز جدید/), "NewPassword123");
+    await userEvent.click(within(dialog).getByRole("button", { name: "ذخیره" }));
+
+    await waitFor(() => expect(patchMock).toHaveBeenCalled());
+    expect(patchMock).toHaveBeenCalledWith("/users/7", { password: "NewPassword123" });
+  });
+
+  it("ساختِ حساب، اتصالِ پرسنلی را برای هر نقشی می‌فرستد", async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === "/users") return { data: { total: 0, items: [] } };
+      if (url === "/personnel") {
+        return {
+          data: {
+            total: 1,
+            items: [{ id: 42, full_name: "زهرا محمدی", personnel_code: "P-42" }],
+          },
+        };
+      }
+      throw new Error(`unexpected GET ${url}`);
+    });
+
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: /ساخت کاربر/ }));
+
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.type(within(dialog).getByLabelText("نام کاربری"), "sup3");
+    await userEvent.type(within(dialog).getByLabelText("رمز عبور"), "NewPassword123");
+    await userEvent.selectOptions(within(dialog).getByLabelText("نقش"), "unit_supervisor");
+    await userEvent.selectOptions(within(dialog).getByLabelText(/پرسنل متناظر/), "42");
+    await userEvent.click(within(dialog).getByRole("button", { name: "ساخت کاربر" }));
+
+    await waitFor(() => expect(postMock).toHaveBeenCalled());
+    expect(postMock.mock.calls[0]?.[1]).toMatchObject({ personnel_id: 42 });
   });
 });

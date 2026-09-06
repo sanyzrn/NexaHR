@@ -36,6 +36,25 @@ def to_jalali(value: str | datetime | None) -> str:
     return jalali.strftime("%Y/%m/%d ساعت %H:%M").translate(_PERSIAN_DIGITS)
 
 
+def fa_digits(value) -> str:
+    """ارقامِ لاتینِ یک مقدار را فارسی می‌کند — برای عددهای *متنِ* سند.
+
+    تاریخ‌ها از اول این کار را می‌کردند (`to_jalali`) و بقیهٔ عددها نه، پس یک
+    سند دو جور رقم داشت: «۱۴۰۴/۰۶/۱۵» بالای صفحه و «82.5٪» وسطش. روی مدرکی
+    که امضا و بایگانی می‌شود.
+
+    نقطهٔ اعشار هم به جداکنندهٔ فارسی (U+066B) تبدیل می‌شود، چون «۸۲.۵» با نقطهٔ
+    لاتین در متنِ راست‌به‌چپ جای درستی نمی‌نشیند.
+
+    شناسه‌ها عمداً از این فیلتر رد نمی‌شوند: کدِ پرونده و کدِ پرسنلی و نامِ
+    کاربری *برچسب*‌اند نه عدد، و باید همان‌طور که در سامانه جست‌وجو می‌شوند
+    چاپ شوند. حالا هم مشکلی ندارند، چون نیمهٔ لاتینِ فونت کنارش نشسته.
+    """
+    if value is None:
+        return "—"
+    return str(value).translate(_PERSIAN_DIGITS).replace(".", "٫")
+
+
 def qr_data_uri(payload: str) -> str:
     """QR را به‌صورت data URI (PNG base64) برمی‌گرداند تا مستقیماً در قالب تعبیه شود
     (بدون درخواست شبکه/فایل خارجی)."""
@@ -53,6 +72,7 @@ _env = Environment(
     autoescape=select_autoescape(["html"]),
 )
 _env.filters["jalali"] = to_jalali
+_env.filters["fa"] = fa_digits
 
 _TEMPLATES_URI_PREFIX = _TEMPLATES_DIR.as_uri() + "/"
 

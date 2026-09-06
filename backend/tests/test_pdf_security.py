@@ -144,8 +144,13 @@ def test_jalali_filter_converts_iso_dates(monkeypatch):
     assert to_jalali("نامعتبر") == "نامعتبر"
 
 
-def test_signature_block_matches_evaluation_path():
-    """مسیر «مدیر» امضای مسئول واحد/HR ندارد؛ مسیر عادی هر چهار امضا را دارد."""
+def test_the_legacy_signature_block_still_renders():
+    """شاخهٔ *قدیمیِ* بلوکِ امضا — برای snapshot های نسخهٔ ≤۴ که `signatories` ندارند.
+
+    این شاخه از `role_label` تصمیم می‌گیرد و در چهار شکل از پنج شکلِ زنجیره
+    غلط است؛ عمداً نگه داشته شده تا سندِ بایگانی‌شده همان چیزی بماند که آن روز
+    چاپ شد. قاعدهٔ درست و پنج شکلش در `test_document_signatures.py` است.
+    """
     snapshot = _snapshot_with("متن")
     snapshot["evaluator"]["role_label"] = "معاونت"
     html = _env.get_template("evaluation_summary.html").render(snapshot=snapshot)

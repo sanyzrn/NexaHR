@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, require_role_or_capability
 from app.core.clock import today_local
 from app.core.security import hash_password
+from app.core.sorting import persian_text
 from app.db.session import get_db
 from app.models.enums import Capability, CommentStage, PersonnelStatus, UserRole
 from app.models.evaluation import EvaluationComment, EvaluationRecord
@@ -88,9 +89,26 @@ def _apply_personnel_filters(
     return query
 
 
+#: ستون‌هایی که *متن* نیستند و نباید از collationِ فارسی رد شوند.
+_NON_TEXT_SORTS = frozenset({"contract_end_date", "created_at"})
+
+
 def _personnel_order_by(sort_by: str, sort_dir: str):
+    """ترتیبِ فهرست، با دو اصلاح نسبت به `ORDER BY` ساده.
+
+    یک: ستون‌های متنی از `persian_text` رد می‌شوند — وگرنه ترتیب، ترتیبِ بایت
+    است و «آ» و «ا» و دو شکلِ `ی`/`ک` که در دادهٔ واردشده از اکسل قاطی‌اند،
+    فهرست را برای خواننده بی‌نظم می‌کنند.
+
+    دو: `Personnel.id` همیشه آخرِ صف است. بی آن، ردیف‌هایی با مقدارِ یکسان
+    (سه نفر در «واحد فروش») ترتیبِ تضمین‌شده‌ای ندارند و Postgres می‌تواند بین
+    دو درخواستِ صفحه‌بندی جابه‌جایشان کند — یعنی صفحهٔ ۲ ردیفی را دوباره نشان
+    بدهد و یکی را بیندازد. با یک کلیدِ یکتا در انتها، ترتیب قطعی می‌شود.
+    """
     column = _PERSONNEL_SORT_COLUMNS.get(sort_by, Personnel.full_name)
-    return column.desc() if sort_dir == "desc" else column.asc()
+    if sort_by not in _NON_TEXT_SORTS:
+        column = persian_text(column)
+    return [column.desc() if sort_dir == "desc" else column.asc(), Personnel.id.asc()]
 
 _ACCESS_COLUMN_BY_ROLE = {
     UserRole.unit_supervisor: EvaluationAccess.unit_supervisor_user_id,
@@ -215,7 +233,7 @@ def list_personnel(
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     items = list(
         db.scalars(
-            query.order_by(_personnel_order_by(sort_by, sort_dir)).limit(limit).offset(offset)
+            query.order_by(*_personnel_order_by(sort_by, sort_dir)).limit(limit).offset(offset)
         )
     )
     return PersonnelPage(total=total, items=_with_accounts(db, items))
@@ -299,7 +317,7 @@ def export_personnel_excel(
         site=site,
         is_manager=is_manager,
     )
-    rows = list(db.scalars(query.order_by(_personnel_order_by(sort_by, sort_dir))))
+    rows = list(db.scalars(query.order_by(*_personnel_order_by(sort_by, sort_dir))))
     # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
     #
     # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
@@ -560,7 +578,10 @@ def _close_out_departure(db: Session, personnel: Personnel, actor: CurrentUser) 
             old_value={"status": open_evaluation.status.value},
             new_value={"separation_reason": reason},
         )
-        apply_transition(db, open_evaluation, "cancel", actor)
+        # `cancel_on_separation` و نه `cancel`: پروندهٔ بازِ عضوِ واحدِ منابع
+        # انسانی سپر دارد، و با گذارِ عادی کلِ اقدامِ خروج ۴۰۳ می‌گرفت — یعنی
+        # آن فرد اصلاً قابلِ خارج‌کردن نبود.
+        apply_transition(db, open_evaluation, "cancel_on_separation", actor)
 
     account = db.scalar(select(User).where(User.personnel_id == personnel.id))
     if account is not None and account.is_active:

@@ -19,6 +19,7 @@ import { Button } from "../../ui/Button";
 import { FilterSelect, PageHeader, TableSkeleton } from "../../ui/Card";
 import { Modal } from "../../ui/Modal";
 import { Table } from "../../ui/Table";
+import { useTableSort } from "../../ui/useTableSort";
 import { JalaliDatePicker } from "../../ui/JalaliDatePicker";
 import { SEPARATION_REASON_LABELS, type AppUser, type Personnel, type SeparationReason } from "../../types";
 import { SearchInput } from "../../ui/SearchInput";
@@ -177,7 +178,7 @@ function AccessFields({
           <option value="">بدون مسئول واحد</option>
           {supervisors.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.username}
+              {u.display_name || u.username}
             </option>
           ))}
         </select>
@@ -209,7 +210,7 @@ function AccessFields({
           <option value="">بدون معاونت — مستقیم زیر نظر مدیرعامل</option>
           {deputies.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.username}
+              {u.display_name || u.username}
             </option>
           ))}
         </select>
@@ -227,7 +228,7 @@ function AccessFields({
           <option value="">— انتخاب کنید —</option>
           {ceos.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.username}
+              {u.display_name || u.username}
             </option>
           ))}
         </select>
@@ -337,12 +338,18 @@ export function PersonnelPage({ showAccountsTab = true }: { showAccountsTab?: bo
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const debouncedSearch = useDebouncedValue(search);
 
+  const sorting = useTableSort();
   const listParams = {
     q: debouncedSearch,
     status: statusFilter || undefined,
     org_unit: orgUnitFilter || undefined,
     site: siteFilter || undefined,
     is_manager: managerFilter === "" ? undefined : managerFilter === "true",
+    // ستون‌های جدول به ترتیب: نام، عنوان شغلی، واحد.
+    sort_by: sorting.sort
+      ? (["full_name", "job_title", "org_unit"] as const)[sorting.sort.column]
+      : undefined,
+    sort_dir: sorting.sort?.direction,
   } as const;
 
   const { data, error: loadError, isPending } = usePersonnelList({
@@ -663,6 +670,9 @@ export function PersonnelPage({ showAccountsTab = true }: { showAccountsTab?: bo
             <Table
               bordered={false}
               headers={["نام", "عنوان شغلی", "واحد", "وضعیت", "خودارزیابی", ""]}
+              sort={sorting.sort}
+              sortableColumns={[0, 1, 2]}
+              onSort={(column) => { sorting.onSort(column); setPage(0); }}
               rowKeys={data.items.map((p) => p.id)}
               rows={data.items.map((p) => [
                 <button

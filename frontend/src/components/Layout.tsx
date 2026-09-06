@@ -34,9 +34,25 @@ export function Layout() {
   const drawerRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
+  const mainRef = useRef<HTMLElement>(null);
+
   // کشوی موبایل با تغییر مسیر بسته می‌شود. بدون این، کاربر روی یک لینک می‌زند،
   // صفحه عوض می‌شود و کشو باز جلوی همان صفحه می‌ماند.
   useEffect(() => setDrawerOpen(false), [location.pathname]);
+
+  // و صفحهٔ تازه از بالا شروع می‌شود.
+  //
+  // ناوبری در این برنامه SPA است، پس مرورگر خودش اسکرول را برنمی‌گرداند: کسی
+  // که تهِ فهرستِ بلندِ پرسنل است و روی «گزارش‌ها» می‌زند، صفحهٔ تازه را از
+  // وسط می‌بیند — و در بدترین حالت فکر می‌کند صفحه خالی است، چون عنوان و
+  // نوارِ ابزارش بالای دیدش مانده.
+  //
+  // هم `main` و هم خودِ پنجره: در دسکتاپ ستونِ محتوا اسکرولِ خودش را دارد و
+  // در موبایل کلِ صفحه.
+  useEffect(() => {
+    if (mainRef.current) mainRef.current.scrollTop = 0;
+    window.scrollTo({ top: 0 });
+  }, [location.pathname]);
 
   // کشو یک لایهٔ روی‌هم است، پس همان قراردادِ مودال را دارد: قفلِ اسکرول،
   // Escape، *و* قفلِ فوکوس.
@@ -78,7 +94,7 @@ export function Layout() {
        پنجره نمی‌چسبند. فاصله را همین ظرف می‌دهد تا هر سه یک اندازه عقب
        بنشینند و گردیِ گوشه‌هایشان دیده شود. */
     <CopilotSessionProvider>
-    <div className="flex min-h-screen gap-3 bg-cream-50 px-3 pb-3 lg:gap-4 lg:px-4 lg:pb-4">
+    <div className="flex min-h-screen gap-3 bg-cream-50 px-3 pb-3 lg:h-dvh lg:min-h-0 lg:gap-4 lg:overflow-hidden lg:p-10 xl:p-12">
       {/* پرش به محتوای اصلی: کاربر کیبورد/screen reader مجبور نیست هر بار کل
           ناوبری را Tab بزند تا به محتوای صفحه برسد */}
       <a
@@ -88,12 +104,13 @@ export function Layout() {
         پرش به محتوای اصلی
       </a>
 
-      {/* ستون ثابت — از lg به بالا. `sticky` و نه `fixed` تا نیازی به جبرانِ
-          دستیِ حاشیهٔ محتوا نباشد.
-          ارتفاع = ارتفاع پنجره منهای فاصلهٔ بالا و پایین، تا پاصفحهٔ ستون هم
-          از کفِ پنجره جدا بماند. */}
+      {/* ستونِ ثابت — از lg به بالا، هم‌قدِ خودِ قاب.
+          پیش از این `sticky` با ارتفاعِ محاسبه‌شده بود و ستون `pt` جداگانه
+          داشت، پس بالایش با بالای هدر و پایینش با پایینِ پاصفحه یک اندازه
+          فاصله نداشت — دو ستونِ کنارِ هم که هیچ‌کدام با دیگری تراز نبود.
+          حالا هر دو فرزندِ یک قابِ `h-dvh`اند و لبه‌هایشان خودبه‌خود می‌خوابند. */}
       <aside
-        className={`sticky top-3 hidden h-[calc(100vh-1.5rem)] shrink-0 pt-3 transition-[width] duration-200 lg:top-4 lg:h-[calc(100vh-2rem)] lg:block lg:pt-4 ${
+        className={`hidden shrink-0 transition-[width] duration-200 lg:block lg:h-full ${
           collapsed ? "w-16" : "w-60"
         }`}
       >
@@ -141,14 +158,14 @@ export function Layout() {
         )}
       </AnimatePresence>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* نوار بالا فقط چیزهای «همیشه در دسترس» را دارد: کجا هستم، اعلان‌ها،
             حساب من. ناوبری از این‌جا رفته، پس نوار می‌تواند نازک بماند.
 
             نوار هم شناور است، ولی محتوایی که هنگام اسکرول زیرش رد می‌شود نباید
             از فاصلهٔ بالای آن پیدا باشد. پس خودِ نوار گرد و جداست و یک لایهٔ
             هم‌رنگِ صفحه پشتش تا لبهٔ بالا کشیده می‌شود. */}
-        <div className="sticky top-0 z-30 shrink-0 bg-cream-50 pt-3 lg:pt-4">
+        <div className="sticky top-0 z-30 shrink-0 bg-cream-50 pt-3 lg:pt-0">
           <header className="flex h-14 items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 shadow-sm sm:px-6">
             <button
               type="button"
@@ -178,9 +195,13 @@ export function Layout() {
         </div>
 
         <main
+          ref={mainRef}
           id="main-content"
           tabIndex={-1}
-          className="w-full flex-1 py-4 sm:py-6"
+          /* در دسکتاپ *ستونِ محتوا* اسکرول می‌شود و نه کلِ صفحه، پس منو و
+             نوارِ بالا سرِ جایشان می‌مانند. `overscroll-contain` جلوی «محتوا
+             تمام شد، حالا کلِ صفحه تکان می‌خورد» را می‌گیرد. */
+          className="w-full flex-1 py-4 sm:py-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain"
         >
           {/* ErrorBoundary با key مسیر دوباره mount می‌شود تا خطای یک صفحه با رفتن به
               صفحهٔ دیگر خودبه‌خود پاک شود، نه اینکه کاربر برای همیشه در حالت خطا بماند */}
