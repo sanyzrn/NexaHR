@@ -1,21 +1,29 @@
-# NexaHR multi-angle review prompt
+# NexaHR multi-angle review prompt — v2
 
-Give each agent **one** angle. Paste the whole block below and fill only the
-`Your angle:` line from the list at the end.
+Give each agent **one** angle. Paste the whole block below and fill the
+`Your angle:` and `Mode:` lines from the lists at the end.
+
+**What changed from v1:** counts and facts refreshed to the post-audit tree; a
+`Mode:` line so an angle can be asked for improvement proposals and not only
+defects; and a new `ALREADY FIXED` section — the single most important
+addition, because two audit rounds have closed ~60 findings and without that
+list you will pay to have them re-reported.
 
 ---
 
 ```
 Repo: https://github.com/sanyzrn/NexaHR
-Branch: main
+Branch: main  (cut your own branch off it — several agents on one branch
+tangle the history)
 Your angle: .....
+Mode: .....      (either `defects` or `defects + elevation` — see MODE below)
 
 NexaHR is an HR performance-evaluation system for a single Iranian
 organization. Persian-first, RTL, no paid third-party services.
 
-  backend/    FastAPI + SQLAlchemy 2 + PostgreSQL 16, Alembic (58 migrations),
-              ~27k lines. Async only where it must be.
-  frontend/   React 19 + TypeScript + Vite + Tailwind 4, ~28k lines.
+  backend/    FastAPI + SQLAlchemy 2 + PostgreSQL 16, Alembic (57 migrations),
+              ~27.8k lines. Async only where it must be.
+  frontend/   React 19 + TypeScript + Vite + Tailwind 4, ~29k lines.
   tools/      The dev-environment launcher (pure stdlib, has its own tests).
   e2e/        A headless end-to-end scenario with a mock OpenAI-compatible
               server (e2e/mock_llm.py). No real model key needed.
@@ -31,6 +39,29 @@ after explicit confirmation, execute writes through the same API.
 Do a real review. A summary of the README is worthless to me. So is a
 restatement of the doc-comments — see rule 2, it is the most important one.
 
+MODE
+
+`Mode: defects` — hunt bugs only. Rule 5 applies with no exceptions: if you
+cannot say how something fails, drop it. This is the right mode for anything
+that guards money, access, or the legal document.
+
+`Mode: defects + elevation` — do the defect hunt exactly as above AND add a
+fifth output section proposing improvements. Elevation proposals live under a
+different standard from findings, and both standards are strict:
+
+  * A proposal names the user-visible outcome first ("HR cannot answer 'why
+    is this case stuck' without opening it"), then the change, then the cost
+    in files touched. A proposal that leads with a technology is rejected.
+  * It must fit this product: one Iranian organization, Persian-first, no
+    paid third-party service, single-instance PostgreSQL deployment. "Add
+    Elasticsearch" is not a proposal here.
+  * Say what it would break. Anything touching `snapshot.py`, the score math,
+    or the approval chain must state the migration and the effect on already
+    finalized records — those are signed employment documents.
+  * Rank by (value to a real HR user) / (files touched). Cap at 6.
+  * Never dress a proposal as a finding to raise its severity. Findings are
+    things that are wrong; proposals are things that are absent.
+
 RULES
 
 1. RUN IT.
@@ -38,10 +69,11 @@ RULES
      pip install -r requirements-dev.txt
      createdb nexahr_test   # or: psql -c "CREATE DATABASE nexahr_test OWNER nexahr;"
      cd .. && scripts/ci-local.sh
-   `scripts/ci-local.sh` runs exactly what CI runs, all four jobs: backend
-   (ruff + ~1035 pytest), launcher (ruff + 89 pytest), frontend (oxlint +
-   270 vitest + tsc/build), and the e2e API scenario. `--check-drift` proves
-   the script has not diverged from .github/workflows/ci.yml.
+   `scripts/ci-local.sh all` runs exactly what CI runs, all ten commands:
+   backend (ruff + 1131 pytest), launcher (ruff + 89 pytest), frontend
+   (oxlint + 285 vitest + tsc/build), `alembic upgrade head`, and the e2e API
+   scenario. `--check-drift` proves the script has not diverged from
+   .github/workflows/ci.yml.
    PostgreSQL is required — there is no SQLite fallback; tests use real
    partial indexes, triggers and advisory locks.
    Report anything you could not run and why. A finding you never executed
@@ -97,6 +129,19 @@ RULES
      * The DB partial unique index `uq_open_evaluation_per_personnel` and the
        Python-side "one open evaluation per person" assumption. Note the index
        covers only *open* records — a person accumulates finalized ones.
+     * `models/chain.py` (`SEAT_ROLE`/`SEAT_LABEL`/`SEAT_ORDER`,
+       `scorer_field`, `hr_finalizes`) and `services/workflow.TRANSITIONS`.
+       chain.py exists only to break an import cycle; workflow re-exports it.
+       A chain shape that chain.py admits and TRANSITIONS has no path for is a
+       stuck record.
+     * `services/audit_events.EVENT_LABELS` (81 entries) and the frontend
+       `AUDIT_EVENT_LABELS`. These are locked together by
+       `tests/test_audit_event_labels.py` three ways — verify the lock still
+       covers every event actually written, not just every key declared.
+     * The snapshot version constant, the writer, and every reader. Version 6
+       is current (`signatories` at 5, `evaluator.display_name` at 6).
+       A reader that assumes the newest shape will misread a v4 document that
+       is already signed and archived.
    Find pairs I have not listed, and check them.
 
 5. EVERY FINDING NEEDS: file:line + what breaks + a concrete path to reach it
@@ -130,12 +175,71 @@ ALREADY DECIDED — do not re-report these as findings
   If you believe one of these is wrong anyway, argue it as a *design*
   objection in the Verdict — not as a bug.
 
-OUTPUT (exactly these four sections, nothing else)
+ALREADY FIXED — do not re-report; if you find one, it is a REGRESSION
+
+Two audit rounds closed roughly sixty findings. Every item below was a real
+bug, was fixed, and has a test. If your reading of the code says one of these
+is still broken, that is a *regression* and is the most valuable thing you can
+hand me — but say so explicitly, with the file:line that proves it, and do not
+file it as a new finding.
+
+  Guards that existed on one path only
+  * `require_module` is now wired; module switches gate real writes. The
+    in-body `ensure_module_enabled` form is deliberate (rule 3).
+  * `add_comment` now calls the HR handling guard, so an `hr_review` comment
+    cannot be written by an HR user who cannot read the case.
+  * `resolve_objection` and the copilot's scheme/indicator/role-overview
+    tools now pass the same module and capability gates as the UI path.
+  * `revoke_all_for_user` gets a real session in all three copilot tools.
+  * Being the *subject* of an evaluation is now separate from having the
+    `employee` role — every role has a personal report card.
+
+  Score, document, and time
+  * Bonus points are clamped by the scheme cap AND by `100 - base_pct`, and
+    the *applied* value (not the raw one) is what reaches the hashed document.
+  * `snapshot` builds `signatories` from the case's real seats, so a case
+    without a deputy no longer prints an empty signature line.
+  * `single_decider` recognises CEO-direct, so one person does not sign twice.
+  * The official PDF has an explicit `Vazirmatn Latin` family; Latin glyphs
+    no longer fall through to DejaVu mid-word (worst case was Jalali dates:
+    digits from one font, the slash from another).
+  * `core/clock.py` owns the UTC/local boundary. `ORG_TIMEZONE` defaults to
+    Asia/Tehran and every day-boundary filter goes through `local_day_start`.
+
+  Chain shapes
+  * CEO-direct (no supervisor, no deputy) has a complete path: HR performs
+    the final approval when neither middle seat is filled and HR review is
+    not skipped (`hr_finalizes`).
+  * An HR-unit member's own case skips the HR stage (`hr_review_skipped`),
+    and the deadlock that created — including HR being unable to separate a
+    member of its own unit at all — is fixed via `cancel_on_separation` and
+    `bypasses_hr_unit_shield`.
+  * Role change and deactivation are blocked while the account holds an open
+    case; separation notifies HR with the list of orphaned seats.
+
+  Privacy, concurrency, cost
+  * Cohort suppression counts distinct people (`privacy.cohort_size`), not
+    records.
+  * `login_guard.record_failure` uses `on_conflict_do_update` + `FOR UPDATE`;
+    concurrent failures can no longer under-count toward the lockout.
+  * `stage_stats` is capped by `stage_stats_window_days`.
+  * The Excel export builds the workbook before `commit` and eager-loads its
+    relations.
+  * Persian sorting uses `fa-x-icu` with ی/ك normalization, server-side for
+    paginated lists and client-side for fully-loaded tables.
+
+  If you want the full list with file:line, read `docs/review-findings.md`,
+  `docs/nafashr-port-candidates.md` and `docs/nafashr-reported-bugs-check.md`
+  in the repo. Read them *after* forming your own view, not before — they will
+  anchor you.
+
+OUTPUT (exactly these sections, nothing else)
 
 ## Verdict — 3 lines
 ## Findings — severity | file:line | what breaks | how to reach it | fix
 ## Verified correct
 ## Could not check, and why
+## Proposals — only in `Mode: defects + elevation`, max 6, ranked
 ```
 
 ---
@@ -223,8 +327,8 @@ Paste one verbatim into `Your angle:`.
 > re-render behaviour on the heavy pages.
 
 **11 — test quality (mandatory — highest value here)**
-> the test suite itself — 97 backend files (~1035 tests), 45 frontend files
-> (270), 89 launcher tests. Find tests that *cannot fail*: assertions on
+> the test suite itself — 109 backend files (1131 tests), 47 frontend files
+> (285), 89 launcher tests. Find tests that *cannot fail*: assertions on
 > mocks instead of behaviour, `assert response.status_code == 200` with no
 > assertion on the body, tests that lock in a bug rather than catch it (one
 > did exactly this with a UTC timestamp in the legal PDF), tests that pass
@@ -238,6 +342,24 @@ Paste one verbatim into `Your angle:`.
 
 ---
 
+## Which mode for which angle
+
+`defects` only — the areas where a wrong answer reaches a person's file, and
+where a proposal would be a distraction:
+
+> 2 workflow · 3 scoring & document · 6 database · 7 concurrency ·
+> 11 test quality
+
+`defects + elevation` — the areas where the honest answer is "it works, and it
+is thin":
+
+> 1 authz · 5 privacy · 8 Persian/RTL/time · 9 frontend · 10 performance
+
+Angle **4 (AI copilot)** does not use this file. It has its own prompt:
+`docs/review-prompt-ai-elevate.md`. The generic frame caps findings at 10 and
+forbids "consider…", which is right for a chain guard and wrong for a
+subsystem whose main problem is that it is *shallow*, not that it is broken.
+
 ## How to dispatch
 
 **Do not send all eleven at once.** Eleven parallel agents produce eleven
@@ -245,28 +367,35 @@ reports, three of which carry the same finding, and you verify it three
 times. Suggested order:
 
 **Wave 1 (four agents, mostly non-overlapping):**
-11 test quality · 2 workflow state machine · 4 AI copilot · 8 Persian/RTL/time
+11 test quality (`defects`) · 2 workflow (`defects`) ·
+4 AI copilot (its own prompt) · 8 Persian/RTL/time (`defects + elevation`)
 
 These are four largely separate areas with the highest chance of *new*
 findings. Test quality goes first on purpose: if the suite is blind somewhere,
 every other angle needs to know where it cannot lean on green.
 
 **Wave 2 (after reading wave 1):**
-1 authz · 5 privacy · 6 database · 7 concurrency
+1 authz (`+ elevation`) · 5 privacy (`+ elevation`) · 6 database (`defects`) ·
+7 concurrency (`defects`)
 
 These overlap with each other and with wave 1 (authz and privacy are nearly
-the same boundary). Add wave 1's confirmed findings to the `ALREADY DECIDED`
-list in their prompt so they are not reported twice.
+the same boundary). Add wave 1's confirmed findings to `ALREADY DECIDED` or
+`ALREADY FIXED` in their prompt so they are not reported twice.
 
 **Wave 3 (optional):**
-3 scoring & document · 9 frontend · 10 performance
+3 scoring & document (`defects`) · 9 frontend (`+ elevation`) ·
+10 performance (`+ elevation`)
 
 Angle 3 needs the deepest domain knowledge; if you only have one strong agent
 left, give it to 3, not to 10.
 
-**Two things that raise report quality:**
+**Three things that raise report quality:**
 
 * Tell them to work from `main` and cut their own branch — several agents on
   one branch will tangle the history.
-* Every finding you confirm, add to `ALREADY DECIDED` before the next wave.
-  That list is the only thing preventing duplicate reports.
+* Every finding you confirm, add to `ALREADY FIXED` before the next wave.
+  That list is the only thing preventing duplicate reports, and after two
+  audit rounds it is now doing most of the work.
+* Ask for the mutation, not the opinion: "show me the one-line change to the
+  source that your finding predicts, and the test that fails." An agent that
+  cannot produce it usually has not read the code that runs.
