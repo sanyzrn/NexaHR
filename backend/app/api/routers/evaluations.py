@@ -73,6 +73,7 @@ from app.services.self_evaluation import (
     ensure_chain_stages_are_not_redundant,
     ensure_evaluators_are_not_the_subject,
     ensure_hr_may_handle,
+    ensure_may_administer,
     subject_belongs_to_hr,
 )
 from app.services.snapshot import build_final_snapshot
@@ -1042,7 +1043,12 @@ def cancel_evaluation(
     evaluation_id: int,
     payload: CancelRequest,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    # معاونت و مدیرعامل هم راه دارند — ولی فقط روی پروندهٔ سپرشدهٔ خودِ واحدِ
+    # منابع انسانی، و `ensure_may_administer` همان‌جا تنگش می‌کند. بی این،
+    # پروندهٔ بازِ عضوِ HR با صندلیِ خالی هیچ راهِ خروجی نداشت.
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
     """لغو پروندهٔ باز با دلیل اجباری — تنها راه خروج از پروندهٔ گیرکرده.
 
@@ -1052,7 +1058,7 @@ def cancel_evaluation(
     """
     record = _get_record_or_404_for_update(db, evaluation_id)
     # اقدام HR روی پروندهٔ خودش یا هم‌تیمی‌اش (همان دلیل بالا).
-    ensure_hr_may_handle(record, current_user)
+    ensure_may_administer(record, current_user)
 
     def _before() -> None:
         # دلیل هم به‌صورت کامنت در خود پرونده می‌ماند و هم در audit — تصمیم است، نه پاک‌کردن.
@@ -1073,7 +1079,10 @@ def cancel_evaluation(
             new_value={"reason": payload.reason},
         )
 
-    apply_transition(db, record, "cancel", current_user, before=_before)
+    # منابع انسانی مسیرِ خودش را دارد؛ معاونت و مدیرعامل فقط دوقلوی
+    # `cancel_hr_subject` را، که گاردش پروندهٔ سپرشده را می‌سنجد.
+    action = "cancel" if current_user.role is UserRole.hr else "cancel_hr_subject"
+    apply_transition(db, record, action, current_user, before=_before)
     db.commit()
     db.refresh(record)
     return _to_read(db, record)
@@ -1084,7 +1093,12 @@ def extend_submission_window(
     evaluation_id: int,
     payload: SubmissionExtension,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    # معاونت و مدیرعامل هم راه دارند — ولی فقط روی پروندهٔ سپرشدهٔ خودِ واحدِ
+    # منابع انسانی، و `ensure_may_administer` همان‌جا تنگش می‌کند. بی این،
+    # پروندهٔ بازِ عضوِ HR با صندلیِ خالی هیچ راهِ خروجی نداشت.
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
     """تمدیدِ مهلتِ ثبت برای همین یک پرونده.
 
@@ -1099,7 +1113,7 @@ def extend_submission_window(
     record = _get_record_or_404_for_update(db, evaluation_id)
     # همان قاعدهٔ همیشگی: منابع انسانی دربارهٔ پروندهٔ خودش — و پروندهٔ واحدِ
     # خودش — تصمیم نمی‌گیرد.
-    ensure_hr_may_handle(record, current_user)
+    ensure_may_administer(record, current_user)
 
     if record.status not in _EXTENDABLE_STATUSES:
         raise HTTPException(
@@ -1410,7 +1424,12 @@ def reassign_stage_owner(
     evaluation_id: int,
     payload: StageOwnerReassign,
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
+    # معاونت و مدیرعامل هم راه دارند — ولی فقط روی پروندهٔ سپرشدهٔ خودِ واحدِ
+    # منابع انسانی، و `ensure_may_administer` همان‌جا تنگش می‌کند. بی این،
+    # پروندهٔ بازِ عضوِ HR با صندلیِ خالی هیچ راهِ خروجی نداشت.
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.hr, UserRole.deputy, UserRole.ceo)
+    ),
 ) -> EvaluationRead:
     """جایگزینی مسئول یک مرحله روی پروندهٔ باز — بدون از دست رفتن امتیازها.
 
@@ -1421,7 +1440,7 @@ def reassign_stage_owner(
     # این‌جا گارد اصلاً نبود — و بازتخصیص، اثرگذارترین ابزارِ بیرون از زنجیره است:
     # عوض‌کردنِ مسئولِ یک مرحله یعنی انتخابِ داورِ آن مرحله. منابع انسانی نباید
     # آن را روی پروندهٔ خودش یا پروندهٔ در جریانِ واحدِ خودش داشته باشد.
-    ensure_hr_may_handle(record, current_user)
+    ensure_may_administer(record, current_user)
 
     if record.status not in OPEN_STATUSES:
         raise HTTPException(

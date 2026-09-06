@@ -560,7 +560,10 @@ def _close_out_departure(db: Session, personnel: Personnel, actor: CurrentUser) 
             old_value={"status": open_evaluation.status.value},
             new_value={"separation_reason": reason},
         )
-        apply_transition(db, open_evaluation, "cancel", actor)
+        # `cancel_on_separation` و نه `cancel`: پروندهٔ بازِ عضوِ واحدِ منابع
+        # انسانی سپر دارد، و با گذارِ عادی کلِ اقدامِ خروج ۴۰۳ می‌گرفت — یعنی
+        # آن فرد اصلاً قابلِ خارج‌کردن نبود.
+        apply_transition(db, open_evaluation, "cancel_on_separation", actor)
 
     account = db.scalar(select(User).where(User.personnel_id == personnel.id))
     if account is not None and account.is_active:

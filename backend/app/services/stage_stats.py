@@ -31,11 +31,12 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.audit_log import AuditLog
 from app.models.enums import EvaluationStatus, UserRole
 from app.models.evaluation import EvaluationRecord
@@ -143,9 +144,23 @@ def _stage_visits(
     return visits
 
 
-def stage_stats(db: Session) -> list[dict]:
-    """آمار هر مرحله + تفکیک به‌ازای هر مسئول."""
+def stage_stats(db: Session, *, period_id: int | None = None) -> list[dict]:
+    """آمار هر مرحله + تفکیک به‌ازای هر مسئول.
+
+    دو حد روی حجمِ کار، چون پیش از این هیچ‌کدام نبود و هزینهٔ *یک صفحهٔ داشبورد*
+    با کلِ تاریخِ سازمان رشد می‌کرد:
+
+    * `period_id` — بازهٔ دقیق، وقتی مدیر یک دورهٔ مشخص را می‌خواهد.
+    * `settings.stage_stats_window_days` — سقفِ همیشگی. پیش‌فرضش سه سال است،
+      یعنی برای سازمانی در این اندازه «همه‌چیز»؛ عددهای امروز عوض نمی‌شوند و
+      رشد دیگر بی‌سقف نیست.
+    """
     now = datetime.now(UTC)
+    window_start = now - timedelta(days=settings.stage_stats_window_days)
+
+    scope = [EvaluationRecord.created_at >= window_start]
+    if period_id is not None:
+        scope.append(EvaluationRecord.period_id == period_id)
 
     records = list(
         db.execute(
@@ -158,7 +173,7 @@ def stage_stats(db: Session) -> list[dict]:
                 EvaluationRecord.hr_user_id,
                 EvaluationRecord.deputy_user_id,
                 EvaluationRecord.ceo_user_id,
-            )
+            ).where(*scope)
         ).all()
     )
     if not records:
@@ -188,14 +203,34 @@ def stage_stats(db: Session) -> list[dict]:
         for row in records
     }
 
+    # دو تنگ‌کردنِ عمدی روی این کوئری، چون هر دو ستونِ JSONB را برای *هر* گذارِ
+    # تاریخِ سامانه می‌کشید بالا و بعد در پایتون یک کلید از هرکدام می‌خواند:
+    #
+    # * `->>` استخراج را به Postgres می‌سپارد، پس به‌جای دو سندِ JSON در هر
+    #   ردیف، دو رشتهٔ کوتاه از سیم رد می‌شود.
+    # * `IN (زیرپرس‌وجویِ همان دامنه)` گذارهای پرونده‌هایی را که اصلاً پردازش
+    #   نمی‌شوند نمی‌آورد. بی آن، تنگ‌کردنِ پنجره روی پرونده‌ها هیچ اثری روی
+    #   این نیمهٔ کار نداشت.
+    #
+    #   زیرپرس‌وجو و نه فهرستِ پایتونیِ شناسه‌ها: فهرست یعنی هزاران پارامتر
+    #   در متنِ کوئری، که خودش همان مشکلِ «حجمِ بی‌سقف» را از در دیگر
+    #   برمی‌گرداند. این‌طور Postgres خودش join می‌کند.
     transitions: dict[int, list[tuple[datetime, str, str]]] = defaultdict(list)
     for row in db.execute(
-        select(AuditLog.evaluation_record_id, AuditLog.created_at, AuditLog.old_value, AuditLog.new_value)
-        .where(AuditLog.event_type == "status_changed", AuditLog.evaluation_record_id.is_not(None))
+        select(
+            AuditLog.evaluation_record_id,
+            AuditLog.created_at,
+            AuditLog.old_value["status"].astext.label("from_status"),
+            AuditLog.new_value["status"].astext.label("to_status"),
+        )
+        .where(
+            AuditLog.event_type == "status_changed",
+            AuditLog.evaluation_record_id.in_(select(EvaluationRecord.id).where(*scope)),
+        )
         .order_by(AuditLog.created_at)
     ).all():
-        from_status = (row.old_value or {}).get("status", "")
-        to_status = (row.new_value or {}).get("status", "")
+        from_status = row.from_status or ""
+        to_status = row.to_status or ""
         # ساختِ پرونده هم یک ردیف `status_changed` می‌سازد، ولی بدون `old_value`:
         # «از هیچ به پیش‌نویس». آن یک *تولد* است، نه گذار — و شمردنش یعنی هر
         # پرونده یک ماندنِ صفرثانیه‌ای در پیش‌نویس اضافه می‌کرد که هم تعداد را

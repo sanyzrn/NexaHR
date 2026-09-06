@@ -197,8 +197,30 @@ def _active_hr_ids(db: Session) -> list[int]:
 _MAX_LISTED_SEATS = 10
 
 
+def _seat_list(seats) -> tuple[str, str]:
+    """(فهرستِ خوانا، پسوندِ «و N مورد دیگر») — همان قالب در هر دو اعلان."""
+    listed = "، ".join(f"{seat.code} ({seat.label})" for seat in seats[:_MAX_LISTED_SEATS])
+    hidden = len(seats) - _MAX_LISTED_SEATS
+    return listed, (f" و {hidden} مورد دیگر" if hidden > 0 else "")
+
+
+def _seat_fingerprint(seats) -> str:
+    """کلیدِ dedup به *مجموعهٔ* پرونده‌ها گره می‌خورد و نه فقط به فرد: اگر فردا
+    پروندهٔ تازه‌ای روی همان صندلیِ مرده باز شود، مجموعه عوض می‌شود و اعلانِ
+    تازه می‌آید. بی این، فقط شمارش در کلید بود و دو مجموعهٔ هم‌اندازه یکی
+    دیده می‌شدند.
+
+    و *هش* می‌شود و نه فهرست: `dedup_key` ستونی ۱۲۰ نویسه‌ای است و مدیرِ
+    دوازده‌زیرمجموعه‌ای از آن بیرون می‌زد — با `DataError` روی مسیرِ خروجِ
+    پرسنل، یعنی خودِ اقدام شکست می‌خورد. تستِ فهرستِ بلند همین را گرفت.
+    """
+    return hashlib.sha256(
+        ",".join(sorted({seat.code for seat in seats})).encode()
+    ).hexdigest()[:16]
+
+
 def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int:
-    """صندلی‌هایی که با رفتنِ یک نفر بی‌صاحب شدند را به منابع انسانی گزارش می‌کند.
+    """صندلی‌هایی که با رفتنِ یک نفر بی‌صاحب شدند را گزارش می‌کند.
 
     این مکملِ `scheduled.run_orphaned_case_sweep` است و تکرارش نیست. آن جارو
     فقط پرونده‌ای را می‌گیرد که صاحبِ *مرحلهٔ فعلی*‌اش مرده باشد — یعنی همین
@@ -211,9 +233,15 @@ def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int
       هم درست ردش می‌کند — تا روزی که پرونده *برگردد* و آن صندلی مرده باشد.
       آن روز کسی نمی‌داند چرا.
 
-    یک اعلانِ *تجمیعی* و نه یکی به‌ازای هر پرونده: مدیرِ سی‌نفره‌ای که می‌رود،
-    در ضربِ تعدادِ کارشناسانِ HR صد اعلان می‌ساخت و صندوقِ همه را بی‌مصرف
+    اعلان‌ها *تجمیعی*‌اند و نه یکی به‌ازای هر پرونده: مدیرِ سی‌نفره‌ای که
+    می‌رود، در ضربِ تعدادِ گیرنده‌ها صد اعلان می‌ساخت و صندوقِ همه را بی‌مصرف
     می‌کرد. پیگیریِ تک‌تکِ پرونده‌ها کارِ همان جاروی شبانه است.
+
+    و به *دو* گروه می‌رود، نه یکی. پروندهٔ سپرشدهٔ خودِ واحدِ منابع انسانی از
+    پنلِ HR قابلِ دست‌زدن نیست (`hr_panel_is_shielded`)، پس فرستادنِ «جایگزین
+    تعیین کن» به HR یعنی گفتنِ کاری که ۴۰۳ می‌دهد — همان نیمهٔ دومِ بن‌بستی که
+    `self_evaluation.ensure_may_administer` نیمهٔ اولش را باز کرد. آن صندلی‌ها
+    به معاونت و مدیرعاملِ همان پرونده می‌روند، که حالا اجازهٔ اقدام دارند.
 
     پروندهٔ *خودِ* این فرد در این فهرست نمی‌آید، چون
     `personnel._close_out_departure` پیش از این تماس لغوش کرده و دیگر باز
@@ -228,41 +256,85 @@ def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int
     if not seats:
         return 0
 
-    listed = "، ".join(f"{code} ({label})" for code, label in seats[:_MAX_LISTED_SEATS])
-    hidden = len(seats) - _MAX_LISTED_SEATS
-    more = f" و {hidden} مورد دیگر" if hidden > 0 else ""
-    message = (
-        f"«{person_label}» از سازمان خارج شد و در {len(seats)} پروندهٔ باز مسئولِ "
-        f"مرحله بود: {listed}{more}. برای هرکدام با «تغییر مسئول مرحله» جایگزین "
-        "تعیین کنید، وگرنه آن پرونده‌ها در همان مرحله می‌مانند."
-    )
-    # لینک به *همان* فهرست، نه به یک صفحهٔ عمومی. بی این، متنِ اعلان کدها را
-    # نام می‌برد و منابع انسانی باید یکی‌یکی در جست‌وجو می‌چسباندشان — و برای
-    # فهرستِ بلندتر از ده مورد، بقیه اصلاً نام برده نمی‌شدند و راهی برای
-    # پیداکردنشان نبود.
-    link = f"/hr/queue?seat_user_id={user_id}&tab=all"
-
-    # کلیدِ dedup به *مجموعهٔ* پرونده‌ها گره خورده و نه فقط به فرد: اگر فردا
-    # پروندهٔ تازه‌ای روی همان صندلیِ مرده باز شود، مجموعه عوض می‌شود و اعلانِ
-    # تازه می‌آید. بی این، فقط شمارش در کلید بود و دو مجموعهٔ هم‌اندازه یکی
-    # دیده می‌شدند.
-    #
-    # و *هش* می‌شود و نه فهرست: `dedup_key` ستونی ۱۲۰ نویسه‌ای است و مدیرِ
-    # دوازده‌زیرمجموعه‌ای از آن بیرون می‌زد — با `DataError` روی مسیرِ خروجِ
-    # پرسنل، یعنی خودِ اقدام شکست می‌خورد. تستِ فهرستِ بلند همین را گرفت.
-    fingerprint = hashlib.sha256(
-        ",".join(sorted({code for code, _ in seats})).encode()
-    ).hexdigest()[:16]
     created = 0
-    for hr_id in _active_hr_ids(db):
+    open_seats = [seat for seat in seats if not seat.shielded]
+    if open_seats:
+        listed, more = _seat_list(open_seats)
+        message = (
+            f"«{person_label}» از سازمان خارج شد و در {len(open_seats)} پروندهٔ باز "
+            f"مسئولِ مرحله بود: {listed}{more}. برای هرکدام با «تغییر مسئول مرحله» "
+            "جایگزین تعیین کنید، وگرنه آن پرونده‌ها در همان مرحله می‌مانند."
+        )
+        # لینک به *همان* فهرست، نه به یک صفحهٔ عمومی. بی این، متنِ اعلان کدها را
+        # نام می‌برد و منابع انسانی باید یکی‌یکی در جست‌وجو می‌چسباندشان — و برای
+        # فهرستِ بلندتر از ده مورد، بقیه اصلاً نام برده نمی‌شدند و راهی برای
+        # پیداکردنشان نبود.
+        link = f"/hr/queue?seat_user_id={user_id}&tab=all"
+        fingerprint = _seat_fingerprint(open_seats)
+        for hr_id in _active_hr_ids(db):
+            if notify_once(
+                db,
+                user_id=hr_id,
+                type_="seats_vacated",
+                message=message,
+                dedup_key=f"seats_vacated:{user_id}:{fingerprint}",
+                within_days=settings.notification_dedup_days,
+                link=link,
+            ):
+                created += 1
+
+    created += _notify_shielded_seats(
+        db, user_id=user_id, person_label=person_label,
+        seats=[seat for seat in seats if seat.shielded],
+    )
+    return created
+
+
+def _notify_shielded_seats(db: Session, *, user_id: int, person_label: str, seats) -> int:
+    """صندلی‌های خالی‌شده روی پروندهٔ سپرشدهٔ واحدِ HR → معاونت و مدیرعاملِ همان پرونده.
+
+    گیرنده از *خودِ پرونده* می‌آید و نه از نقش: معاونتی که در زنجیرهٔ این پرونده
+    نیست، اجازهٔ اقدام هم ندارد، پس اعلانش هم کارِ اضافه است.
+
+    لینک وقتی گذاشته می‌شود که فهرستِ آن گیرنده دقیقاً یک پرونده باشد — همان
+    حالتِ رایج. برای بیش از یکی، کدها در متن‌اند و لینکِ تکی گمراه‌کننده بود.
+    """
+    from app.core.config import settings
+    from app.models.user import User
+
+    if not seats:
+        return 0
+
+    by_recipient: dict[int, list] = {}
+    for seat in seats:
+        for recipient in (seat.deputy_user_id, seat.ceo_user_id):
+            if recipient is not None and recipient != user_id:
+                by_recipient.setdefault(recipient, []).append(seat)
+
+    active = set(
+        db.scalars(
+            select(User.id).where(User.id.in_(by_recipient), User.is_active.is_(True))
+        )
+    )
+    created = 0
+    for recipient, own_seats in by_recipient.items():
+        if recipient not in active:
+            continue
+        listed, more = _seat_list(own_seats)
+        record_ids = {seat.record_id for seat in own_seats}
+        message = (
+            f"«{person_label}» از سازمان خارج شد و در {len(own_seats)} پروندهٔ بازِ "
+            f"واحد منابع انسانی مسئولِ مرحله بود: {listed}{more}. این پرونده‌ها از "
+            "پنل منابع انسانی قابل رسیدگی نیستند، پس تعیینِ جایگزین یا لغو با شماست."
+        )
         if notify_once(
             db,
-            user_id=hr_id,
+            user_id=recipient,
             type_="seats_vacated",
             message=message,
-            dedup_key=f"seats_vacated:{user_id}:{fingerprint}",
+            dedup_key=f"seats_vacated:{user_id}:{_seat_fingerprint(own_seats)}",
             within_days=settings.notification_dedup_days,
-            link=link,
+            link=f"/evaluations/{next(iter(record_ids))}" if len(record_ids) == 1 else None,
         ):
             created += 1
     return created
@@ -336,20 +408,27 @@ def notify_for_workflow_action(db: Session, record: EvaluationRecord, action: st
         # در مسیر «مدیر» پرونده به صف منابع انسانی برمی‌گردد، نه به معاونت.
         recipients = _hr_queue_ids(db, record)
         message = f"پرونده {code} ({name}) توسط مدیرعامل برگشت داده شد؛ دلیل در کامنت‌های پرونده"
-    elif action == "cancel":
+    elif action.startswith("cancel"):
+        # هر سه دوقلوی لغو (`cancel`، `cancel_hr_subject`، `cancel_on_separation`)
+        # یک معنا دارند، پس یک اعلان. تطبیق با پیشوند عمدی است: با شرطِ برابریِ
+        # قبلی، هر دوقلوی تازه بی‌صدا اعلانش را از دست می‌داد.
+        #
         # همهٔ کسانی که روی این پرونده نقشی داشتند باید بدانند دیگر منتظرشان نیست.
         recipients = [
             user_id
             for user_id in (record.unit_supervisor_user_id, record.deputy_user_id, record.ceo_user_id)
             if user_id is not None
         ]
-        message = f"پرونده {code} ({name}) توسط منابع انسانی لغو شد؛ دلیل در کامنت‌های پرونده"
+        by = "منابع انسانی" if action == "cancel" else "مدیریت"
+        message = f"پرونده {code} ({name}) توسط {by} لغو شد؛ دلیل در کامنت‌های پرونده"
 
     if recipients and message:
         notify(
             db,
             recipients,
-            type_=f"workflow_{action}",
+            # خانوادهٔ لغو یک نوعِ اعلان دارد، وگرنه هر دوقلو یک نوعِ تازه
+            # می‌ساخت که هیچ فیلتری در رابط نمی‌شناسدش.
+            type_="workflow_cancel" if action.startswith("cancel") else f"workflow_{action}",
             message=message,
             evaluation_record_id=record.id,
             link=link,

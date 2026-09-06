@@ -10,6 +10,7 @@ per-IP است، پس یک حملهٔ توزیع‌شده روی یک حساب م
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -50,11 +51,48 @@ def record_failure(db: Session, username: str) -> datetime | None:
     now = _now()
     window_start = now - timedelta(minutes=settings.login_attempt_window_minutes)
 
-    row = db.get(LoginAttempt, username)
-    if row is None:
-        row = LoginAttempt(username=username, failed_count=0, first_failed_at=now, last_failed_at=now)
-        db.add(row)
-    elif (_as_aware(row.last_failed_at) or now) < window_start:
+    # «بخوان، جمع کن، بنویس» بی قفل، دو خرابیِ سنجیده‌شده داشت — هر دو با دو
+    # اتصالِ واقعی و درهم‌آمیزیِ اجباری بازتولید شدند:
+    #
+    # * دو شکستِ هم‌زمان روی ردیفِ موجود، هر دو `failed_count` یکسانی را
+    #   می‌خواندند و هر دو همان `n+1` را می‌نوشتند: شمارش می‌شد ۱ به‌جای ۲.
+    #   یعنی مهاجمی که درخواست‌ها را موازی می‌فرستد، سقفِ قفل را می‌کِشد بالا —
+    #   دقیقاً همان کاری که یک ابزارِ brute-force به‌طور پیش‌فرض می‌کند.
+    # * و وقتی ردیف *نبود*، دو INSERT هم‌زمان یعنی `UniqueViolation` که از
+    #   `record_failure` بیرون می‌زد و `auth._fail` هیچ گیرنده‌ای برایش ندارد:
+    #   ۵۰۰ روی خودِ endpointِ ورود.
+    #
+    # هر دو یک ریشه دارند و یک درمان: ردیف را *پیش از خواندن* اتمی بساز و قفل
+    # کن، بعد بخوان.
+    #
+    # `on_conflict_do_update` و نه `do_nothing`: با `DO NOTHING`، اگر ردیفِ
+    # متعارض را تراکنشی نوشته باشد که بعداً rollback می‌کند، insert دوباره
+    # تلاش نمی‌کند و ردیف اصلاً ساخته نمی‌شود. `DO UPDATE` در همان حالت تلاش
+    # را تکرار می‌کند و همیشه یک ردیفِ قفل‌شده تحویل می‌دهد.
+    #
+    # و SET عمداً بی‌اثر است (`username` روی خودش): هر مقدارِ دیگری —
+    # `last_failed_at` از همه وسوسه‌انگیزتر — پنجرهٔ بازنشانی را از بین می‌برد،
+    # چون شرطِ پایینِ همین تابع دقیقاً همان ستون را با `window_start` می‌سنجد.
+    insert = pg_insert(LoginAttempt).values(
+        username=username, failed_count=0, first_failed_at=now, last_failed_at=now
+    )
+    db.execute(
+        insert.on_conflict_do_update(
+            index_elements=["username"], set_={"username": insert.excluded.username}
+        )
+    )
+    # `populate_existing` لازم است و نه تزئینی: اگر همین session پیش‌تر این
+    # ردیف را دیده باشد (`locked_until` چند خط بالاتر همین کار را می‌کند)،
+    # بی آن، ORM نسخهٔ کهنهٔ داخلِ identity map را برمی‌گرداند و کلِ این قفل
+    # بی‌اثر می‌شود.
+    row = db.scalars(
+        select(LoginAttempt)
+        .where(LoginAttempt.username == username)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one()
+
+    if (_as_aware(row.last_failed_at) or now) < window_start:
         # پنجره تمام شده: یک تلاش ناموفق شش ساعت پیش نباید در قفلِ امروز نقش داشته باشد.
         row.failed_count = 0
         row.first_failed_at = now

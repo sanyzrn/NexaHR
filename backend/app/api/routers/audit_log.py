@@ -15,7 +15,8 @@ from app.models.personnel import Personnel
 from app.models.user import User
 from app.schemas.audit_log import AuditIntegrityRead, AuditLogPage, AuditLogRead
 from app.schemas.auth import CurrentUser
-from app.services.audit import verify_chain
+from app.services.audit import log_event, verify_chain
+from app.services.audit_events import EVENT_LABELS
 from app.services.authorization import capabilities_of
 from app.services.excel import build_audit_log_workbook
 
@@ -82,44 +83,6 @@ SYSTEM_EVENT_TYPES: frozenset[str] = frozenset(
         "ai_upload_staged",
     }
 )
-
-# برچسب فارسی رویدادها برای خروجی Excel — هم‌راستا با AUDIT_EVENT_LABELS فرانت‌اند.
-_EVENT_LABELS = {
-    "status_changed": "تغییر وضعیت",
-    "score_submitted": "ثبت امتیاز",
-    "scores_draft_saved": "ذخیره پیش‌نویس امتیاز",
-    "indicator_created": "افزودن شاخص",
-    "indicator_updated": "ویرایش شاخص",
-    "indicators_reordered": "تغییر ترتیب شاخص‌ها",
-    "indicator_deleted": "حذف شاخص",
-    "user_created": "ساخت کاربر",
-    "user_updated": "ویرایش کاربر",
-    "personnel_created": "افزودن پرسنل",
-    "personnel_updated": "ویرایش پرسنل",
-    "access_updated": "تنظیم دسترسی ارزیابی",
-    "access_supervisor_cleared_on_manager_title": "حذف خودکار مسئول واحد (تغییر عنوان به مدیر)",
-    "comment_added": "ثبت کامنت",
-    "comment_reply_added": "ثبت پاسخ به کامنت",
-    "period_created": "ایجاد دوره ارزیابی",
-    "period_closed": "بستن دوره ارزیابی",
-    "scheduled_jobs_run": "اجرای یادآوری‌های خودکار",
-    "evaluation_returned": "برگشت پرونده",
-    "evaluation_acknowledged": "رؤیت نتیجه توسط کارمند",
-    "improvement_plan_created": "ایجاد برنامه بهبود",
-    "improvement_plan_updated": "ویرایش برنامه بهبود",
-    "improvement_plan_completed": "تکمیل برنامه بهبود",
-    "improvement_plan_cancelled": "لغو برنامه بهبود",
-    "excel_exported": "خروجی Excel",
-    "personnel_excel_exported": "خروجی Excel پرسنل",
-    "users_excel_exported": "خروجی Excel کاربران",
-    "improvement_plans_excel_exported": "خروجی Excel برنامه‌های بهبود",
-    "audit_log_excel_exported": "خروجی Excel گزارش رویدادها",
-    "pdf_downloaded": "دریافت PDF",
-    "login_succeeded": "ورود موفق",
-    "login_failed": "ورود ناموفق",
-    "password_changed_self": "تغییر رمز توسط خود کاربر",
-}
-
 
 def _build_filters(
     event_type: str | None,
@@ -309,8 +272,17 @@ def export_audit_log_excel(
         (row, full_name or username, evaluation_code)
         for row, username, full_name, evaluation_code in rows
     ]
+    # هر خروجیِ دیگری خودش را ثبت می‌کند و این یکی نمی‌کرد — با اینکه برچسبش
+    # سال‌ها در هر دو نگاشت نشسته بود. و از همه بیشتر همین یکی ثبت لازم دارد:
+    # بردنِ *کلِ* گزارشِ رویدادها بیرون از سامانه، خودش رویدادی است.
+    #
+    # پیش از `Response` و با `commit` صریح، مثل `excel_exported`: ساختِ فایل
+    # نباید پس از commit بماند (همان الگوی R1).
+    log_event(db, actor_user_id=current_user.id, event_type="audit_log_excel_exported")
+    content = build_audit_log_workbook(entries, EVENT_LABELS)
+    db.commit()
     return Response(
-        content=build_audit_log_workbook(entries, _EVENT_LABELS),
+        content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="audit-log.xlsx"'},
     )

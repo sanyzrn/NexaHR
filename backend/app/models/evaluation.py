@@ -29,6 +29,7 @@ from app.core.text_limits import (
     SELF_ASSESSMENT_SUMMARY_MAX,
 )
 from app.db.base import Base
+from app.models.chain import scorer_field
 from app.models.enums import CommentStage, EvaluationStatus
 from app.models.personnel import Personnel  # noqa: TC001  (relationship target)
 from app.models.user import User  # noqa: TC001  (relationship target)
@@ -277,6 +278,13 @@ class EvaluationRecord(Base):
     )
 
     @property
+    def scorer_user_id(self) -> int | None:
+        """چه کسی به این پرونده نمرهٔ اول را داد — طبقِ شکلِ واقعیِ زنجیره."""
+        return getattr(
+            self, scorer_field(self.unit_supervisor_user_id, self.deputy_user_id)
+        )
+
+    @property
     def single_decider(self) -> bool:
         """نمره‌دهندهٔ اول و تأییدکنندهٔ نهایی، یک نفرند.
 
@@ -284,11 +292,14 @@ class EvaluationRecord(Base):
         حالت مجاز است، چون بالای سرش کسِ دیگری وجود ندارد. ولی مجاز بودن یعنی
         «قابل ثبت»، نه «قابل کتمان»: بدون این پرچم، لاگ دو تأیید نشان می‌داد و
         خواننده‌اش دو بررسی مستقل می‌فهمید. سند نهایی همین را چاپ می‌کند.
+
+        پیش از این `unit_supervisor_user_id == ceo_user_id` بود — بازنویسیِ
+        دستیِ `scorer_field`، و برای همان شکلی که این پرچم *برایش ساخته شده*
+        غلط: در زنجیرهٔ «مستقیمِ مدیرعامل» صندلیِ مسئولِ واحد اصلاً خالی است،
+        پس شرط `False` می‌داد و سند سکوت می‌کرد. حالا از خودِ قاعده می‌پرسد.
         """
-        return (
-            self.unit_supervisor_user_id is not None
-            and self.unit_supervisor_user_id == self.ceo_user_id
-        )
+        scorer_id = self.scorer_user_id
+        return scorer_id is not None and scorer_id == self.ceo_user_id
 
     @property
     def subject_full_name(self) -> str:

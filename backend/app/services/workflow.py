@@ -15,6 +15,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.metrics import workflow_transitions
+from app.models.chain import (  # noqa: F401  (بازصادرشده برای مصرف‌کننده‌های امروزی)
+    HR_LABEL,
+    SEAT_LABEL,
+    SEAT_ORDER,
+    SEAT_ROLE,
+    scorer_field,
+)
 from app.models.enums import EvaluationStatus, UserRole
 from app.models.evaluation import EvaluationRecord, EvaluationScore
 from app.schemas.auth import CurrentUser
@@ -63,6 +70,16 @@ class Transition:
     # مدیرعامل می‌تواند از `hr_approved` نهایی کند، ولی فقط وقتی معاونتی در
     # زنجیره نیست. بدون این شرط، همان گذار راهی می‌شد برای دورزدنِ تأیید معاونت.
     guard: "Callable[[EvaluationRecord], bool] | None" = None
+    # سپرِ «پروندهٔ واحدِ منابع انسانی» را کنار می‌گذارد — و *فقط* آن را؛
+    # قاعدهٔ «دربارهٔ خودت تصمیم نگیر» سرِ جایش می‌ماند.
+    #
+    # یک مصرف‌کننده دارد و باید همان یکی بماند: لغوِ خودکار در لحظهٔ خروج از
+    # سازمان. آن‌جا سپر نه محافظت که فلج بود — کارشناسِ منابع انسانی که
+    # پروندهٔ باز داشت، *اصلاً قابلِ خارج‌کردن نبود*: کلِ اقدامِ خروج ۴۰۳
+    # می‌گرفت، پس نه حسابش بسته می‌شد، نه نشستش باطل، نه پرونده‌اش لغو.
+    # سپر برای این است که HR روی ارزیابیِ در جریانِ هم‌تیمی‌اش *اثر نگذارد*؛
+    # لغو به‌خاطرِ رفتنِ آن آدم از سازمان، آن نیست.
+    bypasses_hr_unit_shield: bool = False
 
 
 def is_manager_path(record: EvaluationRecord) -> bool:
@@ -360,6 +377,40 @@ TRANSITIONS: dict[str, Transition] = {
         error_status=http_status.HTTP_400_BAD_REQUEST,
         error_detail="فقط پروندهٔ باز (نهایی‌نشده و لغونشده) قابل لغو است",
     ),
+    # لغوِ خودکارِ لحظهٔ خروج از سازمان. جدا از `cancel` است تا استثنای سپر
+    # فقط روی همین مسیر بنشیند و از مسیرِ دستیِ HR بیرون بماند.
+    "cancel_on_separation": Transition(
+        from_statuses=OPEN_STATUSES,
+        to_status=EvaluationStatus.cancelled,
+        allowed_role=UserRole.hr,
+        assignee_field=None,
+        bypasses_hr_unit_shield=True,
+        error_status=http_status.HTTP_400_BAD_REQUEST,
+        error_detail="فقط پروندهٔ باز (نهایی‌نشده و لغونشده) قابل لغو است",
+    ),
+    # دوقلوی `cancel` برای پروندهٔ خودِ واحدِ منابع انسانی — همان الگویی که
+    # `submit_hr_subject` و `deputy_return_hr_subject` دارند.
+    #
+    # لغو «تنها راه خروج از پروندهٔ گیرکرده» است، و برای پروندهٔ سپرشده هیچ‌کس
+    # آن راه را نداشت: HR از سپر رد نمی‌شود و معاونت و مدیرعامل از این جدول.
+    # نتیجه یک بن‌بستِ کامل بود که پرسنل را برای همیشه غیرقابل‌ارزیابی می‌کرد.
+    #
+    # `allowed_role=deputy` یعنی معاونت و مدیرعامل (`may_act_at` از رتبهٔ
+    # زنجیره بالا می‌رود) و نه منابع انسانی — که مسیر خودش را دارد. گاردِ
+    # `skips_hr_review` این در را فقط روی همان پرونده‌ها باز می‌کند، و
+    # `self_evaluation.ensure_may_administer` در روتر تنگ‌ترش می‌کند به
+    # معاونتِ *همین* زنجیره.
+    "cancel_hr_subject": Transition(
+        from_statuses=OPEN_STATUSES,
+        to_status=EvaluationStatus.cancelled,
+        allowed_role=UserRole.deputy,
+        assignee_field=None,
+        guard=skips_hr_review,
+        error_status=http_status.HTTP_400_BAD_REQUEST,
+        error_detail=(
+            "فقط پروندهٔ بازِ واحد منابع انسانی از این مسیر قابل لغو است"
+        ),
+    ),
 }
 
 
@@ -404,9 +455,15 @@ def apply_transition(
     # خودش را تأیید یا لغو کند. گاردی که فقط در یکی از دو مسیر باشد، گارد
     # نیست. تکرارِ فراخوانی در مسیر HTTP بی‌هزینه است: همان بررسیِ ساده.
     if spec.allowed_role is UserRole.hr:
-        from app.services.self_evaluation import ensure_hr_may_handle
+        from app.services.self_evaluation import (
+            ensure_hr_may_handle,
+            ensure_not_deciding_about_oneself,
+        )
 
-        ensure_hr_may_handle(record, current_user)
+        if spec.bypasses_hr_unit_shield:
+            ensure_not_deciding_about_oneself(record, current_user)
+        else:
+            ensure_hr_may_handle(record, current_user)
     # نهایی‌سازی بدون نتیجه ممنوع — گاردِ دومِ اصلاحِ C-1. پرونده‌ای که مسیر
     # سالمش رفته باشد در `submit` نتیجه‌اش محاسبه شده؛ `final_weighted_pct`
     # خالی یعنی این پرونده از مسیری آمده که نمره‌دهی نداشته (مثل باگِ قدیمیِ
@@ -532,47 +589,52 @@ def skips_deputy(record: EvaluationRecord) -> bool:
     return record.deputy_user_id is None
 
 
-#: نقشِ هر صندلیِ زنجیره، و نامش در متنِ فارسی. کلید، نامِ ستون است.
-SEAT_ROLE: dict[str, UserRole] = {
-    "unit_supervisor_user_id": UserRole.unit_supervisor,
-    "deputy_user_id": UserRole.deputy,
-    "ceo_user_id": UserRole.ceo,
-}
-SEAT_LABEL: dict[str, str] = {
-    "unit_supervisor_user_id": "مسئول واحد",
-    "deputy_user_id": "معاونت",
-    "ceo_user_id": "مدیرعامل",
-}
-
-
-def scorer_field(unit_supervisor_user_id: int | None, deputy_user_id: int | None) -> str:
-    """کدام ستون، نمره‌دهندهٔ اول را نگه می‌دارد.
-
-    زنجیره از *پایین* خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده
-    است: مسئول واحد، وگرنه معاونت (مسیر «مدیر»)، وگرنه خودِ مدیرعامل (کسی که
-    بالای سرش دیگر کسی نیست).
-
-    دو نکته که این تابع را لازم می‌کنند:
-
-    * هم روی *پرونده* کار می‌کند و هم روی *دسترسی* — چون هر دو همین دو ستون
-      را دارند. پیش از این هر مصرف‌کننده نسخهٔ خودش را داشت و دو تای‌شان با
-      `personnel.is_manager` تصمیم می‌گرفتند، پرچمی که قرار نیست شکلِ زنجیره
-      را بگوید.
-    * پاسخ هیچ‌وقت `None` نیست. مصرف‌کننده‌هایی که «مسئول واحد، وگرنه معاونت»
-      می‌نوشتند برای زنجیرهٔ مستقیمِ مدیرعامل `None` می‌گرفتند و بی‌صدا
-      می‌شکستند — یکی‌شان با NotNullViolation، وسط جاروی شبانه.
-    """
-    if unit_supervisor_user_id is not None:
-        return "unit_supervisor_user_id"
-    if deputy_user_id is not None:
-        return "deputy_user_id"
-    return "ceo_user_id"
+# صندلی‌های زنجیره و قاعدهٔ «نمره‌دهندهٔ اول کیست» در `models/chain.py` نشسته‌اند
+# و از اینجا دوباره صادر می‌شوند. جابه‌جایی برای شکستنِ یک حلقهٔ وارداتی بود:
+# `models.evaluation.single_decider` به همان قاعده نیاز داشت و چون این ماژول
+# خودش `models.evaluation` را وارد می‌کند، نمی‌توانست از اینجا بخواندش — پس
+# قاعده را دوباره نوشته بود و برای زنجیرهٔ «مستقیمِ مدیرعامل» غلط بود.
 
 
 def scorer_seat(record: EvaluationRecord) -> tuple[UserRole, int | None]:
     """(نقشِ مرحله، شناسهٔ نمره‌دهنده) برای این پرونده."""
     field = scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
     return SEAT_ROLE[field], getattr(record, field)
+
+
+def document_signatories(record: EvaluationRecord) -> list[dict]:
+    """چه کسانی پای این سند را امضا می‌کنند — از روی صندلی‌های *واقعیِ* پرونده.
+
+    قالبِ سند این فهرست را از یک رشتهٔ نمایشی می‌ساخت
+    (`evaluator.role_label == 'معاونت'`) و در چهار شکل از پنج شکلِ زنجیره
+    خروجیِ غلط می‌داد — روی مدرکی که هش می‌شود و QR تأیید دارد:
+
+    * مسیر «مدیر»: امضای منابع انسانی چاپ نمی‌شد، با اینکه HR پرونده را
+      بررسی کرده بود.
+    * مستقیمِ مدیرعامل: دو امضای *جعلی* چاپ می‌شد — «مسئول واحد» و «معاونت» —
+      برای دو صندلی که در آن پرونده اصلاً وجود ندارند.
+    * پروندهٔ خودِ واحدِ منابع انسانی: امضای منابع انسانی چاپ می‌شد، در حالی
+      که همان پرونده به‌عمد مرحلهٔ HR ندارد (`skips_hr_review`).
+
+    قاعده یکی است و از داده می‌آید: هر صندلیِ زنجیره که *کسی در آن نشسته*، به
+    ترتیبِ زنجیره؛ و منابع انسانی بلافاصله پس از نمره‌دهنده، مگر پرونده مرحلهٔ
+    HR نداشته باشد. ترتیب همان ترتیبِ زمانیِ کار است.
+
+    در `single_decider` مدیرعامل یک بار می‌آید، نه دو بار: او یک نفر است و یک
+    امضا دارد. اینکه دو نقش را داشته، جای دیگری از سند صریح گفته می‌شود.
+    """
+    scorer = scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
+    signatories: list[dict] = []
+    for field in SEAT_ORDER:
+        user_id = getattr(record, field)
+        if user_id is None:
+            continue
+        signatories.append({"seat": field, "label": SEAT_LABEL[field], "user_id": user_id})
+        if field == scorer and not skips_hr_review(record):
+            signatories.append(
+                {"seat": "hr_user_id", "label": HR_LABEL, "user_id": record.hr_user_id}
+            )
+    return signatories
 
 
 def owner_after_hr_review(record: EvaluationRecord) -> int:

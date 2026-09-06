@@ -1,3 +1,5 @@
+from typing import NamedTuple
+
 from fastapi import HTTPException
 from fastapi import status as http_status
 from sqlalchemy import or_, select, text
@@ -50,11 +52,27 @@ _SEATS_ON_RECORD: tuple[tuple[str, str], ...] = (
 )
 
 
-def occupied_seats_in_open_records(db: Session, user_id: int) -> list[tuple[str, str]]:
+class OccupiedSeat(NamedTuple):
+    """یک صندلیِ پرشده روی یک پروندهٔ باز.
+
+    فراتر از (کد، برچسب) می‌رود چون یک مصرف‌کننده باید بداند *چه کسی* می‌تواند
+    این صندلی را جایگزین کند: پروندهٔ سپرشدهٔ واحدِ منابع انسانی از پنلِ HR
+    قابلِ دست‌زدن نیست، پس اعلانش هم نباید به HR برود.
+    """
+
+    record_id: int
+    code: str
+    label: str
+    shielded: bool
+    deputy_user_id: int | None
+    ceo_user_id: int | None
+
+
+def occupied_seats_in_open_records(db: Session, user_id: int) -> list[OccupiedSeat]:
     """صندلی‌هایی از پرونده‌های *باز* که این کاربر رویشان نشسته.
 
-    خروجی: فهرستِ (کدِ پرونده، برچسبِ صندلی) — چیزی که پیام خطا باید نشان بدهد
-    تا منابع انسانی بداند کدام پرونده‌ها را باید اول جایگزین کند.
+    خروجی چیزی است که پیام خطا باید نشان بدهد تا منابع انسانی بداند کدام
+    پرونده‌ها را باید اول جایگزین کند.
 
     فقط پروندهٔ *باز*، عمداً: پروندهٔ نهایی‌شده یا لغوشده گذاری ندارد و صندلیِ
     رویش دیگر کاری نمی‌کند. و فقط پرونده و نه ردیفِ `evaluation_access`:
@@ -62,7 +80,7 @@ def occupied_seats_in_open_records(db: Session, user_id: int) -> list[tuple[str,
     تغییرِ نقش عملاً هیچ‌وقت ممکن نباشد.
     """
     from app.models.evaluation import EvaluationRecord
-    from app.services.workflow import IS_OPEN_RECORD
+    from app.services.workflow import IS_OPEN_RECORD, hr_panel_is_shielded
 
     seat_columns = [getattr(EvaluationRecord, field) for _, field in _SEATS_ON_RECORD]
     records = db.scalars(
@@ -71,7 +89,14 @@ def occupied_seats_in_open_records(db: Session, user_id: int) -> list[tuple[str,
         .order_by(EvaluationRecord.id)
     ).all()
     return [
-        (record.evaluation_code, label)
+        OccupiedSeat(
+            record_id=record.id,
+            code=record.evaluation_code,
+            label=label,
+            shielded=hr_panel_is_shielded(record),
+            deputy_user_id=record.deputy_user_id,
+            ceo_user_id=record.ceo_user_id,
+        )
         for record in records
         for label, field in _SEATS_ON_RECORD
         if getattr(record, field) == user_id
@@ -94,7 +119,7 @@ def ensure_no_open_chain_seat(db: Session, user_id: int, *, action: str) -> None
     seats = occupied_seats_in_open_records(db, user_id)
     if not seats:
         return
-    listed = "، ".join(f"{code} ({label})" for code, label in seats[:5])
+    listed = "، ".join(f"{seat.code} ({seat.label})" for seat in seats[:5])
     more = f" و {len(seats) - 5} مورد دیگر" if len(seats) > 5 else ""
     raise HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,

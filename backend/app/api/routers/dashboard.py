@@ -426,6 +426,7 @@ def period_trend(
 
 @router.get("/stage-stats", response_model=list[StageStat])
 def stage_statistics(
+    period_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> list[StageStat]:
@@ -434,8 +435,12 @@ def stage_statistics(
     جانشین «قیف گردش‌کار» که فقط یک عدد در هر مرحله می‌داد. آن عدد می‌گفت کجا
     شلوغ است ولی نه چرا: صفِ ده‌تایی که هر پرونده‌اش نیم روز می‌ماند سالم است، و
     صفِ دوتایی که هر کدام دو هفته مانده‌اند نیست.
+
+    `period_id` بازه را به یک دورهٔ ارزیابی تنگ می‌کند؛ بی آن، پنجرهٔ پیش‌فرضِ
+    `settings.stage_stats_window_days` اعمال می‌شود — تا هزینهٔ این صفحه با کلِ
+    تاریخِ سازمان رشد نکند.
     """
-    return [StageStat(**row) for row in stage_stats(db)]
+    return [StageStat(**row) for row in stage_stats(db, period_id=period_id)]
 
 
 @router.get("/expiring-contracts", response_model=list[ExpiringContract])

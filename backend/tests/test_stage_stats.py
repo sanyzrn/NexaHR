@@ -216,3 +216,94 @@ def test_the_owner_breakdown_counts_manager_and_ceo_paths(client, db_session):
     assert "—" not in named, f"صاحبِ نامعلوم در تفکیک: {draft['by_owner']}"
     assert (dep.full_name or dep.username) in named, "پروندهٔ مسیر «مدیر» از تفکیک افتاده بود"
     assert (ceo.full_name or ceo.username) in named, "پروندهٔ مستقیمِ مدیرعامل از تفکیک افتاده بود"
+
+
+# ── حدهای حجمِ کار ──────────────────────────────────────────────────────
+#
+# پیش از این هیچ‌کدام نبود: `stage_stats` کلِ جدولِ پرونده‌ها و کلِ گذارهای
+# `status_changed` را — با هر دو ستونِ JSONB — در پایتون بار می‌کرد، پس هزینهٔ
+# یک صفحهٔ داشبورد با کلِ تاریخِ سازمان رشد می‌کرد و هیچ‌وقت نمی‌ایستاد.
+
+
+def test_records_older_than_the_window_are_left_out(client, db_session, chain):
+    """پنجره واقعاً اعمال می‌شود — نه اینکه فقط در تنظیمات نشسته باشد."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.config import settings
+    from app.models.evaluation import EvaluationRecord
+
+    record_id = _case(client, db_session, chain, "کارمند قدیمی")
+    record = db_session.get(EvaluationRecord, record_id)
+    record.created_at = datetime.now(UTC) - timedelta(
+        days=settings.stage_stats_window_days + 30
+    )
+    db_session.commit()
+
+    assert all(row["total"] == 0 for row in stage_stats(db_session)), (
+        "پروندهٔ بیرون از پنجره نباید شمرده شود"
+    )
+
+
+def test_the_window_default_keeps_todays_records(client, db_session, chain):
+    """و پروندهٔ امروزی باید همچنان دیده شود — پنجره نباید چیزی را جا بگذارد."""
+    _case(client, db_session, chain, "کارمند امروزی")
+    assert sum(row["total"] for row in stage_stats(db_session)) > 0
+
+
+def test_period_id_narrows_the_scope(client, db_session, chain):
+    """فیلترِ دوره، بازهٔ دقیق را به مدیر می‌دهد."""
+    from datetime import date
+
+    from app.models.evaluation import EvaluationRecord
+    from app.models.evaluation_period import EvaluationPeriod
+
+    # دوره *پس از* ساختِ پرونده‌ها اضافه می‌شود: وگرنه ساختِ پرونده خودش به
+    # دورهٔ باز وصلش می‌کند و هر دو در یک دوره می‌افتند.
+    inside = _case(client, db_session, chain, "داخلِ دوره")
+    outside = _case(client, db_session, chain, "بیرونِ دوره")
+    period = EvaluationPeriod(
+        name="دورهٔ آزمون", starts_on=date(2026, 1, 1), ends_on=date(2026, 12, 31)
+    )
+    db_session.add(period)
+    db_session.flush()
+    db_session.get(EvaluationRecord, inside).period_id = period.id
+    db_session.commit()
+    assert db_session.get(EvaluationRecord, outside).period_id != period.id
+
+    assert sum(row["total"] for row in stage_stats(db_session, period_id=period.id)) == 1
+    assert sum(row["total"] for row in stage_stats(db_session)) == 2
+
+
+def test_the_transition_query_only_touches_the_selected_records(client, db_session, chain):
+    """گذارهای پرونده‌های بیرونِ دامنه اصلاً واکشی نمی‌شوند.
+
+    بی این، تنگ‌کردنِ پنجره روی پرونده‌ها هیچ اثری روی نیمهٔ گران‌ترِ کار
+    (پیمایشِ کلِ `audit_log`) نداشت.
+    """
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    _case(client, db_session, chain, "الف")
+    _case(client, db_session, chain, "ب")
+    db_session.commit()
+
+    seen: list[str] = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        seen.append(statement)
+
+    # روی *کلاسِ* Engine و نه یک نمونه: session تست از اتصالِ خودش می‌آید.
+    event.listen(Engine, "before_cursor_execute", _record)
+    try:
+        stage_stats(db_session)
+    finally:
+        event.remove(Engine, "before_cursor_execute", _record)
+
+    audit_queries = [q for q in seen if "audit_log" in q and "event_type" in q]
+    assert audit_queries, "کوئریِ گذارها اصلاً اجرا نشد؛ سنجش بی‌معناست"
+    for query in audit_queries:
+        assert "evaluation_record_id IN" in query.replace("\n", " "), (
+            "کوئریِ گذارها باید به همان پرونده‌های دامنه محدود باشد"
+        )
+        # و JSONB خام از سیم رد نشود: استخراج باید سمتِ Postgres باشد.
+        assert "->>" in query, "استخراجِ status باید در SQL انجام شود، نه در پایتون"
