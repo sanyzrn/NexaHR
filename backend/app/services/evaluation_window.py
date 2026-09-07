@@ -34,6 +34,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.clock import today_local
+from app.core.persian import fa_date
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_period import EvaluationPeriod
 
@@ -101,7 +102,7 @@ def ensure_open(db: Session, record: EvaluationRecord, activity: str) -> Window:
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=(
-            f"مهلت {activity} این دوره در {window.closes_on:%Y-%m-%d} به پایان رسیده است. "
+            f"مهلت {activity} این دوره در {fa_date(window.closes_on)} به پایان رسیده است. "
             "برای ثبتِ دیرهنگام، منابع انسانی می‌تواند مهلت این پرونده را تمدید کند."
         ),
     )

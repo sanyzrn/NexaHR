@@ -81,6 +81,52 @@ def upgrade() -> None:
     )
 
 
+def _refuse_if_history_would_be_lost(
+    table: str, column: str, label: str, singular: str, bind=None
+) -> None:
+    """اگر داده‌ای هست که این `downgrade` بی‌صدا بازنویسی‌اش می‌کند، بلند بشکن.
+
+    مسئله این نیست که جدول حذف می‌شود؛ مسئله *بازگشت* است. `downgrade` جدولِ
+    نسخه‌ها را می‌ریزد و `upgrade`ِ بعدی فقط v1 را می‌سازد و **همهٔ** پرونده‌های
+    بی‌نسخه را به آن مهر می‌زند. پس پرونده‌ای که واقعاً زیرِ v2 نمره گرفته،
+    پس از یک چرخهٔ رفت‌وبرگشت به v1 اشاره می‌کند.
+
+    و این دقیقاً همان چیزی است که وجودِ آن ستون برایش ساخته شده: «محاسبه همیشه
+    از نسخهٔ خودِ پرونده می‌خواند، نه از طرحِ فعال» — تا تغییرِ بعدیِ قواعد،
+    تاریخ را بازنویسی نکند. خودِ مایگریشن آن تضمین را می‌شکست، بی هیچ هشداری.
+
+    پروندهٔ باز با وزن‌های اشتباه دوباره محاسبه می‌شود؛ پروندهٔ نهایی‌شده
+    snapshotِ خودش را نگه می‌دارد ولی آستانه و توصیه‌اش عوض می‌شود.
+
+    راهِ درست، ریختنِ داده نیست: پیش از `downgrade` باید تصمیمِ صریح گرفته
+    شود. این تابع همان تصمیم را *لازم* می‌کند.
+    """
+    # `bind` پارامتر است تا تست بتواند همین منطق را روی اتصالِ خودش بسنجد؛
+    # اجرای واقعیِ `downgrade` هیچ‌وقت پاسش نمی‌دهد.
+    bind = bind if bind is not None else op.get_bind()
+    versions = bind.execute(
+        sa.text(f"SELECT count(*) FROM {table} WHERE version <> 1")
+    ).scalar_one()
+    stamped = bind.execute(
+        sa.text(
+            f"SELECT count(*) FROM evaluation_records er "
+            f"JOIN {table} t ON t.id = er.{column} WHERE t.version <> 1"
+        )
+    ).scalar_one()
+    if versions or stamped:
+        raise RuntimeError(
+            f"downgrade متوقف شد: {versions} {label}ِ غیرِ نسخهٔ ۱ وجود دارد و "
+            f"{stamped} پروندهٔ ارزیابی به آن‌ها مهر شده است. این downgrade "
+            f"جدولِ {label} را می‌ریزد و upgradeِ بعدی همهٔ پرونده‌ها را به "
+            f"نسخهٔ ۱ مهر می‌زند — یعنی {singular}ی که پرونده با آن نمره گرفته "
+            "بی‌صدا عوض می‌شود. اگر واقعاً همین را می‌خواهید، اول نسخه‌ها را "
+            "دستی بازنشانی کنید."
+        )
+
+
 def downgrade() -> None:
+    _refuse_if_history_would_be_lost(
+        "indicator_frameworks", "indicator_framework_id", "چارچوبِ شاخص", "چارچوب"
+    )
     op.drop_column("evaluation_records", "indicator_framework_id")
     op.drop_table("indicator_frameworks")

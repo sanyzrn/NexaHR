@@ -10,6 +10,7 @@ import {
   usePersonnelDetail,
 } from "../api/queries";
 import { useAuth } from "../auth/AuthContext";
+import { chainActions } from "./evaluationActions";
 import { useConfirm } from "../components/ConfirmDialog";
 import { PdfDownloadButton } from "../components/PdfDownloadButton";
 import { HrOwnerBar, HrRecoveryBox } from "../components/HrRecoveryBox";
@@ -33,14 +34,6 @@ import {
 
 /** پیشوندی که سرور موقع برگشت پرونده جلوی کامنت می‌گذارد (routers/evaluations.py). */
 const RETURN_COMMENT_PREFIX = "برگشت پرونده";
-
-/** جایگاه هر نقش در زنجیره — قرینهٔ `workflow._CHAIN_RANK`.
- *
- *  مافوق می‌تواند کارِ مرحلهٔ پایین‌تر را بکند (مدیرعاملی که برای چند نفر خودش
- *  نمره‌دهندهٔ اول است). نقشی که این‌جا نیست، در هیچ مرحله‌ای از زنجیره
- *  نمی‌نشیند — و `-1` یعنی هیچ مقایسه‌ای را نمی‌برد. */
-const RANK: Record<string, number> = { unit_supervisor: 1, deputy: 2, ceo: 3 };
-const rankOf = (role: string) => RANK[role] ?? -1;
 
 /** برچسبِ «نظر کلی» — به همان صندلی که نمره می‌دهد. */
 const SCORER_COMMENT_LABEL: Record<string, string> = {
@@ -201,60 +194,23 @@ export function EvaluationDetailPage() {
     );
   }
 
-  // نمره‌دهندهٔ *این* پرونده — قرینهٔ `evaluations._scorer_seat` در بک‌اند.
-  //
-  // زنجیره از پایین خالی می‌شود، پس اولین صندلیِ پرشده از پایین نمره‌دهنده است:
-  // مسئول واحد، یا معاونت (مسیر «مدیر»)، یا خودِ مدیرعامل (کسی که بالای سرش
-  // دیگر کسی نیست). هر سه از `draft` شروع می‌شوند و مرحلهٔ بررسی منابع انسانی
-  // را دارند — تفاوتشان فقط در *کیست*، نه در وضعیت.
-  const isManagerPath = evaluation.unit_supervisor_user_id === null;
-  const isCeoOnlyPath = isManagerPath && evaluation.deputy_user_id === null;
-  const scorerRole = isCeoOnlyPath ? "ceo" : isManagerPath ? "deputy" : "unit_supervisor";
-  const scorerUserId = isCeoOnlyPath
-    ? evaluation.ceo_user_id
-    : isManagerPath
-      ? evaluation.deputy_user_id
-      : evaluation.unit_supervisor_user_id;
-
-  // نقشِ بالاتر می‌تواند در مرحلهٔ پایین‌تر بنشیند (`may_act_at`)، ولی مالکیت را
-  // شناسهٔ همان صندلی تعیین می‌کند — همان دو شرطی که سرور هم می‌سنجد.
-  const isEditableScoring =
-    evaluation.status === "draft" &&
-    scorerUserId === user.id &&
-    rankOf(user.role) >= rankOf(scorerRole);
-
-  // قرینهٔ `models/chain.hr_finalizes`: زنجیره‌ای که نه مسئولِ واحد دارد و نه
-  // معاونت، پس تأییدِ منابع انسانی خودش تأییدِ نهایی است. پروندهٔ خودِ واحدِ HR
-  // استثناست — مرحلهٔ HR ندارد و به این دکمه هم نمی‌رسد.
-  const hrClosesTheCase =
-    evaluation.unit_supervisor_user_id === null &&
-    evaluation.deputy_user_id === null &&
-    !evaluation.hr_review_skipped;
-
-  const canHrApprove = user.role === "hr" && evaluation.status === "submitted";
-  const canDeputyApprove =
-    user.role === "deputy" &&
-    evaluation.status === "hr_approved" &&
-    evaluation.stage === "deputy_review" &&
-    evaluation.deputy_user_id === user.id &&
-    !isManagerPath;
-  const canCeoFinalize =
-    user.role === "ceo" &&
-    evaluation.status === "deputy_approved" &&
-    evaluation.stage === "ceo_final" &&
-    evaluation.ceo_user_id === user.id;
-
-  // HR روی هر پروندهٔ باز — نه فقط آن‌هایی که در مرحلهٔ خودش هستند. کل هدف این است
-  // که پرونده‌ای که مسئولِ مرحله‌اش دیگر در دسترس نیست هم قابل نجات باشد.
-  const canRecoverStuckCase =
-    user.role === "hr" &&
-    evaluation.status !== "finalized" &&
-    evaluation.status !== "cancelled";
-
-  const canComment =
-    (user.role === "hr" && evaluation.status === "submitted") ||
-    (user.role === "deputy" && evaluation.status === "hr_approved" && evaluation.deputy_user_id === user.id) ||
-    (user.role === "ceo" && evaluation.status === "deputy_approved" && evaluation.ceo_user_id === user.id);
+  // همهٔ «چه دکمه‌ای برای چه کسی» در یک تابعِ خالص نشسته
+  // (`evaluationActions.chainActions`) که قرینهٔ جدولِ گذارهای بک‌اند است و
+  // تستِ خودش را دارد. این‌جا فقط خوانده می‌شود.
+  const {
+    isManagerPath,
+    skipsDeputy,
+    scorerRole,
+    isEditableScoring,
+    hrClosesTheCase,
+    canHrApprove,
+    canDeputyApprove,
+    canCeoFinalize,
+    canCeoReturn,
+    canRecoverStuckCase,
+    canComment,
+    hrApprovalMovesTo,
+  } = chainActions(evaluation, user);
 
   // پاسخ threaded برای همهٔ نقش‌های زنجیرهٔ ارزیابی مجاز است (مثلاً پاسخ ارزیاب به
   // دلیل برگشت پرونده)؛ کارمند فقط بیننده است و پاسخ نمی‌دهد.
@@ -316,7 +272,10 @@ export function EvaluationDetailPage() {
           <div className="text-end text-sm">
             <p className="font-medium text-gray-800">{evaluation.evaluation_code}</p>
             <p className="flex flex-wrap items-center justify-end gap-1.5 text-gray-500">
-              <StatusBadge status={evaluation.status} />
+              <StatusBadge
+                status={evaluation.status}
+                deputySkipped={skipsDeputy || isManagerPath}
+              />
               {evaluation.stage && <> · {STAGE_LABELS[evaluation.stage]}</>}
               {evaluation.was_returned && (
                 <span
@@ -346,6 +305,7 @@ export function EvaluationDetailPage() {
           status={evaluation.status}
           returned={evaluation.was_returned}
           hrSkipped={evaluation.hr_review_skipped ?? false}
+          deputySkipped={skipsDeputy || isManagerPath}
           className="mt-4"
         />
 
@@ -525,7 +485,10 @@ export function EvaluationDetailPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      {(canHrApprove || canDeputyApprove || canCeoFinalize) && (
+      {/* برگشت، مجموعهٔ وضعیت‌های خودش را دارد و نه مجموعهٔ تأیید — به‌ویژه
+          برای مدیرعامل: در مسیرِ «مستقیمِ مدیرعامل» پنجرهٔ اصلیِ اصلاح روی
+          `submitted` است، جایی که هیچ دکمهٔ تأییدی وجود ندارد. */}
+      {(canHrApprove || canDeputyApprove || canCeoFinalize || canCeoReturn) && (
         <ReturnBox evaluationId={evaluation.id} onReturned={load} />
       )}
 
@@ -544,15 +507,23 @@ export function EvaluationDetailPage() {
       {/* اعتراض ثبت‌شدهٔ کارمند + پاسخ منابع انسانی */}
       <ObjectionPanel evaluation={evaluation} user={user} onChanged={load} />
 
-      {/* مسئولِ HR پرونده — تا وقتی کسی برنداشته، در صف مشترک است. */}
-      {canRecoverStuckCase && (
+      {/* مسئولِ HR پرونده — تا وقتی کسی برنداشته، در صف مشترک است.
+          فقط برای خودِ منابع انسانی: معاونت و مدیرعاملی که پروندهٔ سپرشده را
+          نجات می‌دهند، صفِ HR ندارند که از آن بردارند. */}
+      {canRecoverStuckCase && user.role === "hr" && (
         <HrOwnerBar evaluation={evaluation} currentUserId={user.id} onChanged={load} />
       )}
 
-      {/* ابزار نجات پروندهٔ گیرکرده — HR روی هر پروندهٔ باز، در هر مرحله‌ای که باشد.
+      {/* ابزار نجات پروندهٔ گیرکرده — روی هر پروندهٔ باز، در هر مرحله‌ای که باشد.
           برخلاف «برگشت» که پرونده را یک مرحله عقب می‌برد، این‌ها وقتی لازم‌اند که خود
           مسئولِ مرحله دیگر نمی‌تواند اقدام کند. */}
-      {canRecoverStuckCase && <HrRecoveryBox evaluation={evaluation} onChanged={load} />}
+      {canRecoverStuckCase && (
+        <HrRecoveryBox
+          evaluation={evaluation}
+          onChanged={load}
+          showHandover={user.role === "hr"}
+        />
+      )}
 
       <div className="flex justify-end gap-2">
         {canHrApprove && (
@@ -566,9 +537,12 @@ export function EvaluationDetailPage() {
               const ok = await confirm({
                 title: hrClosesTheCase ? "تأیید نهایی این ارزیابی؟" : "تأیید این ارزیابی؟",
                 danger: hrClosesTheCase,
-                description: hrClosesTheCase
-                  ? "این پرونده مرحلهٔ دیگری ندارد: با این تأیید نهایی می‌شود، سند رسمی ساخته می‌شود و دیگر قابل تغییر نیست."
-                  : "پرونده به مرحله بررسی معاونت منتقل می‌شود.",
+                description:
+                  hrApprovalMovesTo === "final"
+                    ? "این پرونده مرحلهٔ دیگری ندارد: با این تأیید نهایی می‌شود، سند رسمی ساخته می‌شود و دیگر قابل تغییر نیست."
+                    : hrApprovalMovesTo === "ceo"
+                      ? "پرونده به تأیید نهایی مدیرعامل منتقل می‌شود."
+                      : "پرونده به مرحله بررسی معاونت منتقل می‌شود.",
               });
               if (!ok) return;
               setBusy(true);

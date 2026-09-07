@@ -20,6 +20,7 @@ export function WorkflowStepper({
   status,
   returned = false,
   hrSkipped = false,
+  deputySkipped = false,
   className = "",
 }: {
   status: EvaluationStatus;
@@ -31,6 +32,22 @@ export function WorkflowStepper({
    * هیچ‌کس انجامش نداده. نوارِ مراحل تنها جایی است که کاربر مسیرِ پرونده را
    * می‌بیند؛ دروغِ آن، دروغِ کلِ سند است. */
   hrSkipped?: boolean;
+  /** این پرونده مرحلهٔ معاونتِ *جدا* ندارد.
+   *
+   * دو شکلِ زنجیره به این‌جا می‌رسند و هر دو تا امروز نوار را دروغ می‌گفتند:
+   *
+   * * زنجیرهٔ **بی‌معاونت** — صندلی معاونت خالی است، پس پرونده روی
+   *   `hr_approved` روی میزِ مدیرعامل می‌نشیند. `stage` (که از وضعیت مشتق
+   *   می‌شود) همان‌جا `deputy_review` است، پس نوار مرحلهٔ معاونت را
+   *   *مرحلهٔ فعلی* نشان می‌داد — برای صندلی‌ای که کسی در آن نیست.
+   * * مسیر **«مدیر»** — معاونت خودش نمره داده و ثبت کرده، پس آن مرحله مصرف
+   *   شده. آن‌جا `hr_approve_manager` پرونده را مستقیم به `deputy_approved`
+   *   می‌برد و نوار مرحلهٔ معاونت را *سبزِ انجام‌شده* نشان می‌داد — تأییدی
+   *   که هیچ‌وقت انجام نشد.
+   *
+   * مثل `hrSkipped` خط‌چین می‌شود: مرحله‌ای که طی نشد و طی هم نخواهد شد.
+   */
+  deputySkipped?: boolean;
   className?: string;
 }) {
   // پروندهٔ لغوشده در هیچ مرحله‌ای نیست؛ نوارِ نیمه‌پر برایش گمراه‌کننده است.
@@ -47,7 +64,9 @@ export function WorkflowStepper({
       aria-label="جایگاه پرونده در زنجیرهٔ تأیید"
     >
       {CHAIN.map((step, i) => {
-        const skipped = hrSkipped && step.key === "hr_review";
+        const skipped =
+          (hrSkipped && step.key === "hr_review") ||
+          (deputySkipped && step.key === "deputy_review");
         const done = !skipped && i < currentIndex;
         const current = i === currentIndex;
         return (
@@ -78,7 +97,13 @@ export function WorkflowStepper({
                       ? "text-gray-500"
                       : "text-gray-400"
               }`}
-              title={skipped ? "این پرونده مرحلهٔ منابع انسانی ندارد" : undefined}
+              title={
+                skipped
+                  ? step.key === "hr_review"
+                    ? "این پرونده مرحلهٔ منابع انسانی ندارد"
+                    : "این پرونده مرحلهٔ معاونتِ جدا ندارد"
+                  : undefined
+              }
             >
               {step.short}
             </span>

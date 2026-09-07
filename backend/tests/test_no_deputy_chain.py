@@ -8,6 +8,10 @@
 قرینهٔ مسیر «مدیر» است که از قبل وجود داشت: مرحله‌ای که کسی در آن نایستاده،
 نباید پرونده را نگه دارد.
 """
+from datetime import date, timedelta
+
+from sqlalchemy import select
+
 from app.models.enums import EvaluationStatus
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_access import EvaluationAccess
@@ -143,3 +147,163 @@ def test_hr_can_save_a_chain_without_a_deputy(client, db_session):
     )
     assert response.status_code == 200, response.text
     assert response.json()["deputy_user_id"] is None
+
+
+def test_the_ceo_can_send_it_back_instead_of_only_signing(client, db_session):
+    """روی این میز تا امروز فقط یک دکمه بود: امضا.
+
+    `ceo_finalize` از `hr_approved` مجاز بود (تستِ بالا)، ولی هیچ گذارِ
+    برگشتی از آن وضعیت وجود نداشت — نه `ceo_return` که فقط `deputy_approved`
+    را می‌پذیرد و نه چیزِ دیگری. یعنی مدیرعاملی که با نمره موافق نبود، تنها
+    راهش تلفن‌زدن به منابع انسانی بود.
+
+    مقصد `submitted` است: مرحلهٔ HR در این زنجیره وجود دارد و پرونده به صفِ
+    همان مرحله برمی‌گردد — قرینهٔ دقیقِ `ceo_return_manager`.
+    """
+    hr, supervisor, ceo, personnel = _chain_without_deputy(db_session)
+    record_id = _run_to_hr_approved(client, db_session, hr, supervisor, personnel)
+
+    returned = client.post(
+        f"/api/evaluations/{record_id}/return",
+        json={"reason": "شواهدِ شاخصِ سوم کافی نیست"},
+        headers=auth_header(ceo),
+    )
+    assert returned.status_code == 200, returned.text
+    assert returned.json()["status"] == EvaluationStatus.submitted.value
+
+    # و از آن‌جا مسیر دوباره باز است: HR تأیید می‌کند و مدیرعامل نهایی.
+    assert client.post(
+        f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr)
+    ).status_code == 200
+    assert client.post(
+        f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
+    ).status_code == 200
+
+
+def test_the_deputy_seat_is_not_a_return_target_that_nobody_sits_in(client, db_session):
+    """معاونتی که وجود ندارد، نباید مقصدِ برگشت باشد.
+
+    اگر `ceo_return` (که مقصدش `hr_approved` است) در این زنجیره اجرا می‌شد،
+    پرونده از `hr_approved` به `hr_approved` می‌رفت — یک برگشتِ بی‌حرکت.
+    """
+    hr, supervisor, ceo, personnel = _chain_without_deputy(db_session)
+    record_id = _run_to_hr_approved(client, db_session, hr, supervisor, personnel)
+
+    # معاونت در این زنجیره صندلی ندارد، پس تأییدش هم بی‌معناست.
+    deputy = make_user(db_session, "deputy", capabilities=[])
+    refused = client.post(
+        f"/api/evaluations/{record_id}/deputy-approve", headers=auth_header(deputy)
+    )
+    assert refused.status_code in (400, 403)
+
+
+def test_the_ceo_queue_shows_the_case_that_is_waiting_for_them(client, db_session):
+    """تبِ «در انتظار تأیید نهایی» تا امروز فقط `deputy_approved` را می‌گرفت.
+
+    یعنی پروندهٔ زنجیرهٔ بی‌معاونت — که روی `hr_approved` منتظرِ امضای همان
+    مدیرعامل است — در هیچ صفی دیده نمی‌شد. `IS_ON_CEO_DESK` قرینهٔ کوئریِ
+    گاردِ `ceo_finalize` است و این تست هر دو را کنارِ هم می‌سنجد.
+    """
+    hr, supervisor, ceo, personnel = _chain_without_deputy(db_session)
+    record_id = _run_to_hr_approved(client, db_session, hr, supervisor, personnel)
+
+    old_way = client.get(
+        "/api/evaluations?status=deputy_approved", headers=auth_header(ceo)
+    ).json()
+    assert old_way["total"] == 0
+
+    desk = client.get("/api/evaluations?on_ceo_desk=true", headers=auth_header(ceo)).json()
+    assert [item["id"] for item in desk["items"]] == [record_id]
+
+    # و همان پرونده واقعاً قابلِ نهایی‌کردن است — صف و گذار یک چیز می‌گویند.
+    assert client.post(
+        f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
+    ).status_code == 200
+    assert (
+        client.get("/api/evaluations?on_ceo_desk=true", headers=auth_header(ceo)).json()[
+            "total"
+        ]
+        == 0
+    )
+
+
+def test_extending_the_deadline_tells_the_person_who_must_submit(client, db_session):
+    """تمدیدِ مهلت باید به *نمره‌دهنده* خبر بدهد، هر که باشد.
+
+    فهرستِ گیرندگان `(unit_supervisor or deputy,)` بود. در زنجیرهٔ «مستقیمِ
+    مدیرعامل» هر دو `None`اند، پس فهرست تهی می‌شد: تمدید ۲۰۰ می‌گرفت، ستون
+    عوض می‌شد، و تنها کسی که باید پیش از مهلتِ تازه ثبت کند — خودِ مدیرعامل،
+    که نمره‌دهندهٔ اول است — هیچ‌وقت نمی‌فهمید مهلت عوض شده.
+
+    این تست هر دو جهت را می‌سنجد: زنجیرهٔ عادی که از قبل کار می‌کرد، و
+    زنجیرهٔ مستقیم که نمی‌کرد.
+    """
+    from app.models.enums import PeriodStatus
+    from app.models.evaluation_period import EvaluationPeriod
+    from app.models.notification import Notification
+
+    def _extend_and_count(scorer, seats: dict) -> tuple[int, list[int]]:
+        personnel = make_personnel(db_session)
+        access = EvaluationAccess(personnel_id=personnel.id, **seats)
+        db_session.add(access)
+        today = date.today()
+        period = EvaluationPeriod(
+            name=f"دورهٔ {personnel.id}",
+            starts_on=today - timedelta(days=30),
+            ends_on=today + timedelta(days=1),
+            status=PeriodStatus.closed,
+        )
+        db_session.add(period)
+        db_session.commit()
+
+        record_id = client.post(
+            "/api/evaluations",
+            json={"subject_personnel_id": personnel.id},
+            headers=auth_header(scorer),
+        ).json()["id"]
+        record = db_session.get(EvaluationRecord, record_id)
+        record.period_id = period.id
+        db_session.commit()
+
+        response = client.post(
+            f"/api/evaluations/{record_id}/extend-submission",
+            json={
+                "until": (today + timedelta(days=10)).isoformat(),
+                "reason": "غیبتِ موجه",
+            },
+            headers=auth_header(hr),
+        )
+        assert response.status_code == 200, response.text
+        targets = list(
+            db_session.scalars(
+                select(Notification.user_id).where(
+                    Notification.evaluation_record_id == record_id,
+                    Notification.type == "submission_window_extended",
+                )
+            )
+        )
+        return record_id, targets
+
+    hr = make_user(db_session, "hr")
+    supervisor = make_user(db_session, "unit_supervisor", capabilities=[])
+    ceo = make_user(db_session, "ceo", capabilities=[])
+    db_session.commit()
+
+    # جهتِ کنترل: زنجیرهٔ عادی — نمره‌دهنده مسئولِ واحد است.
+    _, ordinary = _extend_and_count(
+        supervisor,
+        {
+            "unit_supervisor_user_id": supervisor.id,
+            "deputy_user_id": None,
+            "ceo_user_id": ceo.id,
+        },
+    )
+    assert ordinary == [supervisor.id]
+
+    # و زنجیرهٔ «مستقیمِ مدیرعامل»: هر دو صندلیِ میانی خالی، نمره‌دهنده خودِ
+    # مدیرعامل. این‌جا فهرست تهی می‌ماند.
+    _, direct = _extend_and_count(
+        ceo,
+        {"unit_supervisor_user_id": None, "deputy_user_id": None, "ceo_user_id": ceo.id},
+    )
+    assert direct == [ceo.id], "نمره‌دهندهٔ زنجیرهٔ مستقیم خبر نگرفت"

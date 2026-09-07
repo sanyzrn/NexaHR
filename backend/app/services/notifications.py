@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.persian import fa_digits
 from app.models.enums import UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.notification import Notification
@@ -201,7 +202,7 @@ def _seat_list(seats) -> tuple[str, str]:
     """(فهرستِ خوانا، پسوندِ «و N مورد دیگر») — همان قالب در هر دو اعلان."""
     listed = "، ".join(f"{seat.code} ({seat.label})" for seat in seats[:_MAX_LISTED_SEATS])
     hidden = len(seats) - _MAX_LISTED_SEATS
-    return listed, (f" و {hidden} مورد دیگر" if hidden > 0 else "")
+    return listed, (f" و {fa_digits(hidden)} مورد دیگر" if hidden > 0 else "")
 
 
 def _seat_fingerprint(seats) -> str:
@@ -261,7 +262,7 @@ def notify_vacated_seats(db: Session, *, user_id: int, person_label: str) -> int
     if open_seats:
         listed, more = _seat_list(open_seats)
         message = (
-            f"«{person_label}» از سازمان خارج شد و در {len(open_seats)} پروندهٔ باز "
+            f"«{person_label}» از سازمان خارج شد و در {fa_digits(len(open_seats))} پروندهٔ باز "
             f"مسئولِ مرحله بود: {listed}{more}. برای هرکدام با «تغییر مسئول مرحله» "
             "جایگزین تعیین کنید، وگرنه آن پرونده‌ها در همان مرحله می‌مانند."
         )
@@ -323,7 +324,7 @@ def _notify_shielded_seats(db: Session, *, user_id: int, person_label: str, seat
         listed, more = _seat_list(own_seats)
         record_ids = {seat.record_id for seat in own_seats}
         message = (
-            f"«{person_label}» از سازمان خارج شد و در {len(own_seats)} پروندهٔ بازِ "
+            f"«{person_label}» از سازمان خارج شد و در {fa_digits(len(own_seats))} پروندهٔ بازِ "
             f"واحد منابع انسانی مسئولِ مرحله بود: {listed}{more}. این پرونده‌ها از "
             "پنل منابع انسانی قابل رسیدگی نیستند، پس تعیینِ جایگزین یا لغو با شماست."
         )

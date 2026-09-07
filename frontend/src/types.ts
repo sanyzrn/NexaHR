@@ -256,6 +256,9 @@ export interface MyOpenEvaluation {
   indicator_ids: number[];
   /** این پرونده مرحلهٔ بررسیِ منابع انسانی ندارد — موضوعش خودش HR است. */
   hr_review_skipped?: boolean;
+  /** این پرونده مرحلهٔ معاونتِ جدا ندارد: صندلی خالی است، یا معاونت خودش
+   *  نمره داده (مسیر «مدیر»). شکلِ زنجیره است و نه هویتِ صندلی‌ها. */
+  deputy_skipped?: boolean;
   /** آیا پنجرهٔ خودارزیابی هنوز باز است — سرور تصمیم می‌گیرد، نه فرانت.
    *
    * سه شرط را با هم می‌سنجد: نقش خودارزیابی داشته باشد، پرونده در مرحلهٔ ثبت
@@ -603,6 +606,23 @@ export const AUDIT_EVENT_LABELS: Record<string, string> = {
   report_excel_exported: "خروجی اکسل گزارش تحلیلی",
   pdf_downloaded: "دریافت PDF",
 };
+
+/** برچسبِ وضعیت، با در نظر گرفتنِ شکلِ زنجیره.
+ *
+ * `deputy_approved` در دو شکل از زنجیره ادعای دروغ می‌کند:
+ *
+ * * مسیر «مدیر» — معاونت *نمره داده*، تأیید نکرده؛ `hr_approve_manager`
+ *   پرونده را مستقیم به این وضعیت می‌برد چون مرحلهٔ معاونت مصرف شده.
+ * * «مستقیمِ مدیرعامل» — اصلاً معاونتی در زنجیره نیست.
+ *
+ * در هر دو، «تأییدشده توسط معاونت» تأییدی را گزارش می‌کند که هیچ‌وقت انجام
+ * نشد. وضعیت‌ها در این سامانه «الان روی میزِ کیست» را می‌گویند، پس برچسبِ
+ * درست هم همان است.
+ */
+export function statusLabel(status: EvaluationStatus, deputySkipped = false): string {
+  if (deputySkipped && status === "deputy_approved") return "در انتظار تأیید نهایی";
+  return STATUS_LABELS[status];
+}
 
 export const STATUS_LABELS: Record<EvaluationStatus, string> = {
   draft: "پیش‌نویس",

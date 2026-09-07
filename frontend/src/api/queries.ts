@@ -68,6 +68,10 @@ export interface EvaluationListParams {
   /** «پرونده‌هایی که این کاربر رویشان صندلی دارد» — فقط از راهِ لینکِ اعلانِ
    *  «صندلی بی‌صاحب» می‌آید و کنترلی در فرم ندارد. */
   seat_user_id?: number;
+  /** «منتظرِ امضای مدیرعامل» — دو وضعیت، و تعریفش سمتِ سرور است
+   *  (`IS_ON_CEO_DESK`، قرینهٔ گاردِ `ceo_finalize`). این‌جا فقط پرچم است، تا
+   *  قاعده دو نسخه نشود. */
+  on_ceo_desk?: boolean;
   limit: number;
   offset: number;
 }

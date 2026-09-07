@@ -283,6 +283,44 @@ def ensure_may_administer(record, current_user) -> None:
     )
 
 
+def ensure_personnel_has_one_account(
+    db: Session, personnel_id: int, *, exclude_user_id: int | None = None
+) -> None:
+    """یک آدم، یک حساب.
+
+    هیچ قیدی روی `users.personnel_id` نبود — نه در مدل، نه در مایگریشن، نه در
+    کد — پس چند حساب می‌توانستند به یک پرسنل وصل شوند. و هر کدامشان در *همهٔ*
+    مسیرهای `/api/me` همان فرد به‌حساب می‌آمد:
+
+    * نتیجهٔ نهایی‌اش را می‌دید،
+    * **خودارزیابیِ یک‌بارمصرفش را ثبت می‌کرد**،
+    * «نتیجه را دیدم» را به نامش ثبت می‌کرد — رکوردی رسمی،
+    * و پنجرهٔ اعتراضش را مصرف می‌کرد.
+
+    هر کدام یک‌بارمصرف‌اند، پس هر که زودتر اقدام می‌کرد، فرصتِ خودِ فرد را
+    برداشته بود. نه خطایی می‌داد و نه در جایی دیده می‌شد.
+
+    قید فقط روی حساب‌های *فعال* است: حسابِ غیرفعالِ کسی که رفته و برگشته
+    نباید مانعِ ساختِ حسابِ تازه‌اش شود، و همان حسابِ قدیمی هم به `/api/me`
+    نمی‌رسد (احراز هویت زودتر ردش می‌کند).
+    """
+    query = select(User).where(
+        User.personnel_id == personnel_id, User.is_active.is_(True)
+    )
+    if exclude_user_id is not None:
+        query = query.where(User.id != exclude_user_id)
+    other = db.scalar(query)
+    if other is not None:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"این پروندهٔ پرسنلی به حساب «{other.username}» متصل است. "
+                "هر فرد فقط یک حساب فعال دارد؛ ابتدا آن حساب را ویرایش یا "
+                "غیرفعال کنید."
+            ),
+        )
+
+
 def ensure_user_link_is_not_self_evaluation(db: Session, user: User, personnel_id: int) -> None:
     """هنگام لینک کردن یک کاربر به پرسنل: آن کاربر نباید از قبل ارزیابِ همان پرسنل باشد."""
     is_evaluator_on_access = db.scalar(

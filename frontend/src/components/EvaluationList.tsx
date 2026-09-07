@@ -25,6 +25,10 @@ export interface EvaluationListTab {
   label: string;
   /** بدون مقدار = بدون فیلتر وضعیت (همهٔ پرونده‌های در دسترس این کاربر) */
   status?: EvaluationStatus;
+  /** «منتظرِ امضای مدیرعامل» — دو وضعیت، چون زنجیرهٔ بی‌معاونت روی
+   *  `hr_approved` می‌ماند و همان‌جا نوبتِ اوست. سرور تعریفش را دارد
+   *  (`IS_ON_CEO_DESK`، قرینهٔ گاردِ `ceo_finalize`)، پس این‌جا فقط پرچم است. */
+  onCeoDesk?: boolean;
 }
 
 interface AdvancedFilters {
@@ -112,6 +116,7 @@ export function EvaluationList({
   const { data, error, isPending } = useEvaluations({
     q: debouncedSearch,
     status: activeTab.status,
+    on_ceo_desk: activeTab.onCeoDesk,
     ...filtersToParams(filters),
     seat_user_id: seatFilter,
     limit: pageSize,
@@ -361,7 +366,10 @@ export function EvaluationList({
               </span>,
               e.subject_full_name,
               <div key="status" className="flex flex-wrap items-center gap-1.5">
-                <StatusBadge status={e.status} />
+                <StatusBadge
+                  status={e.status}
+                  deputySkipped={e.deputy_user_id === null || e.unit_supervisor_user_id === null}
+                />
                 {e.was_returned && (
                   <span
                     className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"

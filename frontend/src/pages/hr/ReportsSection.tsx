@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localIsoDaysFromNow, localTodayIso } from "../../utils/dates";
 import {
   useIndicatorBreakdown,
   useIndicators,
@@ -254,9 +255,11 @@ export function ReportsSection() {
                   key={preset.days}
                   type="button"
                   onClick={() => {
-                    const d = new Date();
-                    d.setDate(d.getDate() + preset.days);
-                    patch({ contract_end_from: todayIso(), contract_end_to: d.toISOString().slice(0, 10) });
+
+                    patch({
+                      contract_end_from: localTodayIso(),
+                      contract_end_to: localIsoDaysFromNow(preset.days),
+                    });
                   }}
                   className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
                 >
@@ -265,7 +268,7 @@ export function ReportsSection() {
               ))}
               <button
                 type="button"
-                onClick={() => patch({ contract_end_from: undefined, contract_end_to: todayIso() })}
+                onClick={() => patch({ contract_end_from: undefined, contract_end_to: localTodayIso() })}
                 className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
               >
                 منقضی‌شده
@@ -425,6 +428,4 @@ export function ReportsSection() {
   );
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+

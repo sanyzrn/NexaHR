@@ -5,7 +5,7 @@
  * دیدنِ وضعیت (بدون هیچ نمره‌ای، چون نمرهٔ پیش‌نویس هنوز تصمیم نیست) و امکان ثبت
  * دیدگاه خودش پیش از آن‌که ارزیاب نمره را قطعی کند.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { apiClient, extractErrorMessage } from "../../api/client";
@@ -21,8 +21,28 @@ import type { MyOpenEvaluation, SelfAssessment } from "../../types";
 
 const SCORE_OPTIONS = [1, 2, 3, 4, 5];
 
-export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: number }) {
-  const [showForm, setShowForm] = useState(false);
+export function OpenCaseCard({
+  item,
+  index,
+  // دو ماژولِ جدا، دو نیمهٔ جدا از همین کارت. تا امروز هر دو نیمه به یک سوییچ
+  // بند بودند — سوییچی که پیش‌فرض خاموش است — پس نیمهٔ خودارزیابی هم با آن
+  // خاموش می‌ماند، در حالی که ماژولِ خودش روشن بود.
+  showStage = true,
+  showSelfAssessment = true,
+  // از لینکِ اعلانِ دعوت می‌آید (`/me?self-assessment={id}`): فرم همان‌جا باز
+  // می‌شود، نه اینکه کاربر دنبالِ دکمه بگردد.
+  autoOpenForm = false,
+}: {
+  item: MyOpenEvaluation;
+  index: number;
+  showStage?: boolean;
+  showSelfAssessment?: boolean;
+  autoOpenForm?: boolean;
+}) {
+  const [showForm, setShowForm] = useState(
+    autoOpenForm && item.self_assessment_open && !item.self_assessment_submitted_at
+  );
+  const formRef = useRef<HTMLDivElement>(null);
   const [submitted, setSubmitted] = useState<SelfAssessment | null>(
     item.self_assessment_submitted_at
       ? { submitted_at: item.self_assessment_submitted_at, note: null, scores: [] }
@@ -30,7 +50,18 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
   );
   // پنجره را سرور تعیین می‌کند. پیش از این همین‌جا فهرستِ وضعیت‌ها دستی کپی شده
   // بود و می‌توانست بی‌سروصدا از بک‌اند جدا بیفتد — که افتاده بود.
-  const canSelfAssess = item.self_assessment_open;
+  const canSelfAssess = showSelfAssessment && item.self_assessment_open;
+
+  // فرمی که خودبه‌خود باز شده باید *دیده* شود. کارتِ پروندهٔ باز می‌تواند
+  // پایین‌ترِ کارت‌های دیگر باشد و کاربری که از اعلان آمده، صفحه‌ای می‌بیند که
+  // به‌نظرش هیچ عوض نشده.
+  useEffect(() => {
+    if (showForm && autoOpenForm) {
+      formRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    // فقط یک‌بار، در همان mount که با لینک آمده‌ایم
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <motion.div
@@ -41,32 +72,47 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
       <Card
         title={`پروندهٔ در جریان — ${item.evaluation_code}`}
         actions={
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-            {item.stage_label}
-          </span>
+          showStage ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+              {item.stage_label}
+            </span>
+          ) : undefined
         }
       >
         {/* کارمند تا امروز فقط نام مرحله را می‌دید؛ اینکه «چند مرحله مانده»
-            هیچ‌جا نبود. جعبهٔ سیاه، حتی وقتی محتوایش درست است، جعبهٔ سیاه است. */}
-        <WorkflowStepper
-          status={item.status}
-          hrSkipped={item.hr_review_skipped ?? false}
-          className="mb-4"
-        />
+            هیچ‌جا نبود. جعبهٔ سیاه، حتی وقتی محتوایش درست است، جعبهٔ سیاه است.
 
-        <p className="text-sm text-gray-600">
-          ارزیابی شما از {formatDateTime(item.created_at)} آغاز شده و از{" "}
-          {formatDateTime(item.stage_entered_at)} در مرحلهٔ فعلی است.
-        </p>
-        <p className="mt-1 text-xs text-gray-400">
-          امتیازها تا پیش از تأیید نهایی قطعی نیستند و نمایش داده نمی‌شوند.
-        </p>
+            «کدام مرحله» دقیقاً همان چیزی است که ماژولِ نمایشِ نتیجه توصیفش
+            می‌کند، پس با آن می‌آید و می‌رود. نیمهٔ خودارزیابیِ پایین‌تر
+            ماژولِ خودش را دارد. */}
+        {showStage ? (
+          <>
+            <WorkflowStepper
+              status={item.status}
+              hrSkipped={item.hr_review_skipped ?? false}
+              deputySkipped={item.deputy_skipped ?? false}
+              className="mb-4"
+            />
+
+            <p className="text-sm text-gray-600">
+              ارزیابی شما از {formatDateTime(item.created_at)} آغاز شده و از{" "}
+              {formatDateTime(item.stage_entered_at)} در مرحلهٔ فعلی است.
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              امتیازها تا پیش از تأیید نهایی قطعی نیستند و نمایش داده نمی‌شوند.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-gray-600">
+            ارزیابی شما از {formatDateTime(item.created_at)} آغاز شده است.
+          </p>
+        )}
 
         {/* متنِ این بخش عمداً چیزی را وعده نمی‌دهد که دیگر درست نیست: تا پیش از
             این می‌گفت «برای ارزیاب ارسال شد»، در حالی که حالا مسئول مستقیم
             خودارزیابی را اصلاً نمی‌بیند — فقط خود فرد و منابع انسانی. */}
-        {submitted?.submitted_at ? (
+        {showSelfAssessment && (submitted?.submitted_at ? (
           <p className="mt-3 rounded-xl bg-green-50 px-3 py-2 text-sm text-green-800">
             خودارزیابی شما ثبت شد. فقط خودتان و منابع انسانی آن را می‌بینید.
           </p>
@@ -97,9 +143,10 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
             مهلت ثبت خودارزیابی این دوره ({formatDate(item.submission_deadline)}) گذشته است.
             اگر دلیل موجهی دارید، منابع انسانی می‌تواند مهلت را تمدید کند.
           </p>
-        ) : null}
+        ) : null)}
 
-        {showForm && !submitted?.submitted_at && (
+        {showSelfAssessment && showForm && !submitted?.submitted_at && (
+          <div ref={formRef}>
           <SelfAssessmentForm
             evaluationId={item.id}
             indicatorIds={item.indicator_ids}
@@ -109,6 +156,7 @@ export function OpenCaseCard({ item, index }: { item: MyOpenEvaluation; index: n
             }}
             onCancel={() => setShowForm(false)}
           />
+          </div>
         )}
       </Card>
     </motion.div>

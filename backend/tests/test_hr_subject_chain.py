@@ -698,3 +698,44 @@ def test_a_direct_report_of_the_ceo_still_passes_through_hr(client, db_session):
         f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
     )
     assert final.status_code == 200, final.text
+
+
+def test_a_shielded_case_without_a_deputy_can_still_go_back_to_the_scorer(
+    client, db_session
+):
+    """علیِ بی‌معاونت: پرونده روی `hr_approved` می‌نشیند و مقصدِ برگشتش «صفِ HR» نیست.
+
+    این زنجیره نه مرحلهٔ HR دارد (موضوعش خودِ HR است) و نه معاونت. پس مثلِ
+    `ceo_return_manager_hr_subject`، تنها پلهٔ عقب‌ترش خودِ نمره‌دهی است —
+    وگرنه پرونده به وضعیتی می‌رفت که هیچ‌کس در آن اقدامی نمی‌تواند بکند.
+    """
+    hr_unit = make_hr_unit(db_session)
+    ali_person = make_personnel(db_session, full_name="علی بی‌معاونت", org_unit=hr_unit)
+    hossein_person = make_personnel(
+        db_session, full_name="حسین سرپرست", org_unit=hr_unit, is_manager=True
+    )
+    make_user(db_session, "hr", personnel_id=ali_person.id)
+    hossein = make_user(db_session, "unit_supervisor", personnel_id=hossein_person.id)
+    ceo = make_user(db_session, "ceo", capabilities=[])
+    make_access(db_session, ali_person, hossein, None, ceo)
+    db_session.commit()
+
+    record_id = client.post(
+        "/api/evaluations",
+        json={"subject_personnel_id": ali_person.id},
+        headers=auth_header(hossein),
+    ).json()["id"]
+    _score_and_submit(client, db_session, record_id, hossein)
+
+    record = db_session.get(EvaluationRecord, record_id)
+    db_session.refresh(record)
+    assert record.hr_review_skipped is True
+    assert record.status is EvaluationStatus.hr_approved
+
+    returned = client.post(
+        f"/api/evaluations/{record_id}/return",
+        json={"reason": "شاخصِ دوم را دوباره ببینید"},
+        headers=auth_header(ceo),
+    )
+    assert returned.status_code == 200, returned.text
+    assert returned.json()["status"] == EvaluationStatus.draft.value

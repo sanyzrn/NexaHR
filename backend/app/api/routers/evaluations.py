@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_chain_stage, require_roles
 from app.core.clock import local_day_end, local_day_start
+from app.core.persian import fa_date
 from app.db.session import get_db
 from app.models.audit_log import AuditLog
 from app.models.enums import (
@@ -49,7 +50,11 @@ from app.schemas.evaluation import (
     SubmissionExtension,
 )
 from app.services.audit import log_event
-from app.services.authorization import ensure_module_enabled
+from app.services.authorization import (
+    ensure_module_enabled,
+    ensure_subject_may_read_own_result,
+    subject_may_read_own_result,
+)
 from app.services.documents import archive_final_pdf, archive_final_pdf_detached
 from app.services.evaluation import inactive_seat_labels, next_evaluation_code, validate_bonus
 from app.services.evaluation_window import ensure_open as ensure_submission_window_open
@@ -78,6 +83,7 @@ from app.services.self_evaluation import (
 )
 from app.services.snapshot import build_final_snapshot
 from app.services.workflow import (
+    IS_ON_CEO_DESK,
     IS_OPEN_RECORD,
     IS_SHIELDED_FROM_HR_PANEL,
     OPEN_STATUSES,
@@ -92,6 +98,7 @@ from app.services.workflow import (
     objection_resolver_field,
     scorer_field,
     scorer_seat,
+    skips_deputy,
     skips_hr_review,
 )
 
@@ -494,6 +501,7 @@ def _apply_evaluation_filters(
     subject_personnel_id: int | None = None,
     was_returned: bool | None = None,
     seat_user_id: int | None = None,
+    on_ceo_desk: bool | None = None,
 ):
     """فیلترهای ترکیب‌پذیر فهرست/خروجی ارزیابی‌ها — یک‌جا تا list و export.xlsx
     همیشه رفتار یکسان داشته باشند (خروجی همان چیزی است که HR فیلتر کرده)."""
@@ -559,6 +567,14 @@ def _apply_evaluation_filters(
                 EvaluationRecord.hr_user_id == seat_user_id,
             )
         )
+    if on_ceo_desk:
+        # «منتظرِ امضای مدیرعامل» — و نه فقط `status=deputy_approved`.
+        #
+        # صفِ او دو وضعیت دارد، چون زنجیرهٔ بی‌معاونت روی `hr_approved`
+        # می‌ماند و همان‌جا نوبتِ اوست. تعریفش این‌جا نوشته نمی‌شود:
+        # `IS_ON_CEO_DESK` کنارِ خودِ گذارِ `ceo_finalize` نشسته تا دو نسخه
+        # نشوند.
+        query = query.where(IS_ON_CEO_DESK)
     if was_returned is not None:
         # پرونده‌های «برگشتی» یعنی دست‌کم یک رویداد evaluation_returned در سابقهٔ همان
         # پرونده — همان قانونی که در پاسخ (was_returned روی هر آیتم) استفاده می‌شود،
@@ -576,12 +592,17 @@ def _apply_evaluation_filters(
     return query
 
 
-def scope_evaluations_for_role(query, user: CurrentUser):
+def scope_evaluations_for_role(query, user: CurrentUser, db: Session):
     """دامنهٔ دیدِ ارزیابی‌ها به‌صورت allowlist — یک‌جا برای فهرست و دستیار.
 
     قبلاً همین منطق داخل endpoint فهرست بود. دستیار هوشمند هم باید *دقیقاً*
     همان را ببیند، و دو نسخه‌کردنِ allowlist یعنی روزی یکی قاعده بگیرد و
     دیگری نگیرد. نقش ناشناخته هیچ — پیش‌فرضِ باز ممنوع.
+
+    `db` برای شاخهٔ کارمند لازم است و نه تشریفاتی: دیدنِ نتیجهٔ خودِ فرد یک
+    سوییچِ سازمانی دارد (`subject_may_read_own_result`) و آن سوییچ باید *این‌جا*
+    پرسیده شود، نه در هر مصرف‌کننده. سه مصرف‌کننده وجود دارد — فهرست، خروجیِ
+    Excel و دستیار — و تا امروز هیچ‌کدام نمی‌پرسید.
     """
     if user.role == UserRole.hr:
         # منابع انسانی همه را می‌بیند، *به‌جز پروندهٔ خودش*.
@@ -607,7 +628,8 @@ def scope_evaluations_for_role(query, user: CurrentUser):
         return query.where(EvaluationRecord.ceo_user_id == user.id)
     if user.role == UserRole.employee:
         # کارمند فقط ارزیابی‌های نهایی‌شده خودش را می‌بیند (رابط اصلی‌اش /api/me است)
-        if user.personnel_id is None:
+        # — و آن هم فقط اگر سازمان نمایشِ نتیجه به کارکنان را روشن کرده باشد.
+        if user.personnel_id is None or not subject_may_read_own_result(db):
             return query.where(sa_false())
         return query.where(
             EvaluationRecord.subject_personnel_id == user.personnel_id,
@@ -638,6 +660,7 @@ def list_evaluations(
     subject_personnel_id: int | None = None,
     was_returned: bool | None = None,
     seat_user_id: int | None = None,
+    on_ceo_desk: bool = False,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -649,7 +672,25 @@ def list_evaluations(
     # شاخه‌ها نبود همه‌چیز را می‌دید (داستانِ نقش support — P0-03). حالا منطق
     # در `scope_evaluations_for_role` است که دستیار هم از همان استفاده می‌کند؛
     # دو نسخه یعنی روزی یکی قاعده می‌گیرد و دیگری نمی‌گیرد.
-    query = scope_evaluations_for_role(query, current_user)
+    query = scope_evaluations_for_role(query, current_user, db)
+
+    # و شاخهٔ کارمند این‌جا تمام می‌شود، حتی با سوییچِ *روشن*.
+    #
+    # `MyEvaluationRead` عمداً کوچک‌تر از `EvaluationRead` است: بی
+    # `evaluator_comment`، بی نامِ کارشناسِ HR، بی شناسهٔ صندلی‌ها، بی وضعیتِ
+    # مرحله. یعنی سامانه *دو* نمای متفاوت برای یک داده دارد و کدامش به کارمند
+    # می‌رسد را تا امروز این تعیین می‌کرد که کارمند کدام آدرس را صدا بزند —
+    # و این‌جا نمای بزرگ‌تر می‌آمد.
+    #
+    # نگه‌داشتنِ هر دو نما و «کوچک‌کردنِ» یکی، همان دو-نسخه‌بودن است با یک لایه
+    # آرایش: فردا فیلدی به `EvaluationRead` اضافه می‌شود و کسی یادش نمی‌ماند
+    # این‌جا هم پاکش کند. پس یک نما می‌ماند و یک آدرس: `/api/me/evaluations`.
+    # هیچ صفحه‌ای در رابط، کارمند را به این endpoint نمی‌آورد.
+    #
+    # تهی و نه ۴۰۳: همان کاری که `/api/me/evaluations` با سوییچِ خاموش می‌کند،
+    # و همان کاری که این endpoint از قبل با کارمندِ بی‌پیوندِ پرسنلی می‌کرد.
+    if current_user.role == UserRole.employee:
+        return EvaluationPage(total=0, items=[])
 
     query = _apply_evaluation_filters(
         query,
@@ -663,6 +704,7 @@ def list_evaluations(
         subject_personnel_id=subject_personnel_id,
         was_returned=was_returned,
         seat_user_id=seat_user_id,
+        on_ceo_desk=on_ceo_desk,
     )
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -718,7 +760,7 @@ def export_evaluations_excel(
     جریانِ واحدش. گاردی که فقط روی صفحه باشد و روی «دریافت خروجی» نه، گارد نیست.
     """
     query = _apply_evaluation_filters(
-        scope_evaluations_for_role(select(EvaluationRecord), current_user),
+        scope_evaluations_for_role(select(EvaluationRecord), current_user, db),
         q=q,
         status_filter=status_filter,
         org_unit=org_unit,
@@ -1042,6 +1084,11 @@ def return_evaluation(
     elif action == "ceo_return" and is_manager_path(record):
         # در این مسیر مرحلهٔ معاونت مصرف شده؛ پرونده به صف منابع انسانی برمی‌گردد.
         action = "ceo_return_manager"
+    elif action == "ceo_return" and skips_deputy(record):
+        # زنجیرهٔ بی‌معاونت: مدیرعامل روی `hr_approved` می‌نشیند، نه
+        # `deputy_approved`. ترتیبِ این سه شرط مهم است — «مستقیمِ مدیرعامل»
+        # خودش هم بی‌معاونت است و باید زودتر گرفته شود.
+        action = "ceo_return_no_deputy"
 
     if action == "deputy_return" and is_manager_path(record):
         raise HTTPException(
@@ -1056,7 +1103,11 @@ def return_evaluation(
     # پروندهٔ بی‌مرحلهٔ HR: هر برگشتی که مقصدش «صفِ منابع انسانی» بود، یک پله
     # بیشتر عقب می‌رود. بی این، پرونده به وضعیتی می‌رفت که هیچ‌کس در آن اقدامی
     # نمی‌تواند بکند و برای همیشه همان‌جا می‌ماند.
-    if skips_hr_review(record) and action in ("deputy_return", "ceo_return_manager"):
+    if skips_hr_review(record) and action in (
+        "deputy_return",
+        "ceo_return_manager",
+        "ceo_return_no_deputy",
+    ):
         action += "_hr_subject"
 
     def _before() -> None:
@@ -1193,7 +1244,9 @@ def extend_submission_window(
             evaluation_record_id=record.id,
             commenter_user_id=current_user.id,
             stage=CommentStage.hr_review,
-            comment_text=f"تمدید مهلت ثبت تا {payload.until:%Y-%m-%d} — دلیل: {payload.reason}",
+            comment_text=(
+                f"تمدید مهلت ثبت تا {fa_date(payload.until)} — دلیل: {payload.reason}"
+            ),
         )
     )
     log_event(
@@ -1205,13 +1258,21 @@ def extend_submission_window(
         new_value={"until": payload.until.isoformat(), "reason": payload.reason},
     )
 
-    # به کسانی که باید ثبت کنند خبر می‌رود — وگرنه تمدید فقط یک ستون در دیتابیس
+    # به کسی که باید ثبت کند خبر می‌رود — وگرنه تمدید فقط یک ستون در دیتابیس
     # است و کسی که برایش تمدید شده هیچ‌وقت نمی‌فهمد.
-    targets = [
-        user_id
-        for user_id in (record.unit_supervisor_user_id or record.deputy_user_id,)
-        if user_id is not None
-    ]
+    #
+    # و «کسی که باید ثبت کند» از `scorer_field` می‌آید و نه از
+    # `unit_supervisor or deputy`. آن عبارت در زنجیرهٔ «مستقیمِ مدیرعامل» هر دو
+    # را `None` می‌دید، پس فهرست تهی می‌شد و تمدید بی‌صدا انجام می‌شد: تنها
+    # کسی که باید پیش از مهلتِ تازه ثبت کند — خودِ مدیرعامل، که نمره‌دهندهٔ
+    # اول است — هیچ‌وقت نمی‌فهمید مهلت عوض شده.
+    #
+    # همان قاعده‌ای که `scheduled._current_owner_ids` و
+    # `notify_for_workflow_action` استفاده می‌کنند.
+    scorer_id = getattr(
+        record, scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
+    )
+    targets = [scorer_id] if scorer_id is not None else []
     if targets:
         notify(
             db,
@@ -1219,7 +1280,7 @@ def extend_submission_window(
             type_="submission_window_extended",
             message=(
                 f"مهلت ثبت پروندهٔ {record.evaluation_code} تا "
-                f"{payload.until:%Y-%m-%d} تمدید شد"
+                f"{fa_date(payload.until)} تمدید شد"
             ),
             evaluation_record_id=record.id,
             link=f"/evaluations/{record.id}",
@@ -1578,7 +1639,20 @@ def evaluation_summary_pdf(
         current_user.personnel_id is not None
         and current_user.personnel_id == record.subject_personnel_id
     )
-    if not is_subject:
+    if is_subject:
+        # سندِ خودِ فرد، ولی همان سوییچی که فهرست و `/api/me` را می‌بندد این را
+        # هم می‌بندد. تا امروز نمی‌بست: این شاخه `_ensure_can_view` را رد
+        # می‌کرد و هیچ گاردِ دیگری هم نداشت، پس با سوییچِ خاموش کارمندی که
+        # شناسهٔ پرونده را می‌دانست کلِ سندِ رسمی را می‌گرفت — امتیازِ هر شاخص،
+        # شواهدِ ارزیاب و کامنت‌های همهٔ مراحل — در حالی که `/api/me` درست
+        # جواب می‌داد «چیزی نیست».
+        #
+        # قاعده به نقش کار ندارد — مثلِ خودِ `is_subject`. کارشناسِ منابع
+        # انسانی که *موضوعِ* پرونده است هم همان‌جا ایستاده که کارمند: او در
+        # این درخواست ارزیابی‌شده است، نه ارزیاب. دسترسیِ منابع انسانی به سندِ
+        # *دیگران* دست‌نخورده است و از شاخهٔ پایین می‌گذرد.
+        ensure_subject_may_read_own_result(db)
+    else:
         _ensure_can_view(record, current_user)
         # سایر نقش‌های زنجیره پرونده را می‌بینند ولی سند رسمی را دانلود نمی‌کنند.
         if current_user.role != UserRole.hr:

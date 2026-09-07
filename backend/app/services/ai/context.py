@@ -149,7 +149,7 @@ def build(db: Session, user: CurrentUser, caps: set[Capability], limit: int) -> 
         .limit(limit)
     )
     try:
-        ev_stmt = scope_evaluations_for_role(ev_stmt, user)
+        ev_stmt = scope_evaluations_for_role(ev_stmt, user, db)
     except HTTPException:
         # نقشی که در رابط هم به پرونده‌ها دسترسی ندارد (مثل `support`): بلوک
         # حذف می‌شود، نه اینکه بی‌دامنه بماند.

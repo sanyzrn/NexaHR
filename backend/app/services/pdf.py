@@ -9,12 +9,12 @@ import qrcode
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.core.clock import to_local
+from app.core.persian import PERSIAN_DIGITS as _PERSIAN_DIGITS
+from app.core.persian import fa_digits
 
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
-
-_PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 
 
 def to_jalali(value: str | datetime | None) -> str:
@@ -34,25 +34,6 @@ def to_jalali(value: str | datetime | None) -> str:
     # نهایی‌شدنِ ۱:۰۰ بامداد، *روزِ قبل* را چاپ می‌کرد (`core/clock.py`).
     jalali = jdatetime.datetime.fromgregorian(datetime=to_local(dt))
     return jalali.strftime("%Y/%m/%d ساعت %H:%M").translate(_PERSIAN_DIGITS)
-
-
-def fa_digits(value) -> str:
-    """ارقامِ لاتینِ یک مقدار را فارسی می‌کند — برای عددهای *متنِ* سند.
-
-    تاریخ‌ها از اول این کار را می‌کردند (`to_jalali`) و بقیهٔ عددها نه، پس یک
-    سند دو جور رقم داشت: «۱۴۰۴/۰۶/۱۵» بالای صفحه و «82.5٪» وسطش. روی مدرکی
-    که امضا و بایگانی می‌شود.
-
-    نقطهٔ اعشار هم به جداکنندهٔ فارسی (U+066B) تبدیل می‌شود، چون «۸۲.۵» با نقطهٔ
-    لاتین در متنِ راست‌به‌چپ جای درستی نمی‌نشیند.
-
-    شناسه‌ها عمداً از این فیلتر رد نمی‌شوند: کدِ پرونده و کدِ پرسنلی و نامِ
-    کاربری *برچسب*‌اند نه عدد، و باید همان‌طور که در سامانه جست‌وجو می‌شوند
-    چاپ شوند. حالا هم مشکلی ندارند، چون نیمهٔ لاتینِ فونت کنارش نشسته.
-    """
-    if value is None:
-        return "—"
-    return str(value).translate(_PERSIAN_DIGITS).replace(".", "٫")
 
 
 def qr_data_uri(payload: str) -> str:
