@@ -99,9 +99,15 @@ export function HrOwnerBar({
 export function HrRecoveryBox({
   evaluation,
   onChanged,
+  // «واگذاری به کارشناسِ دیگر» یعنی عوض‌کردنِ مسئولِ *مرحلهٔ HR*، و روی
+  // پروندهٔ سپرشدهٔ عضوِ واحدِ منابع انسانی آن مرحله وجود ندارد. معاونت و
+  // مدیرعامل که این جعبه را روی چنین پرونده‌ای می‌بینند، دو ابزارِ دیگر را
+  // لازم دارند و این یکی را نه.
+  showHandover = true,
 }: {
   evaluation: EvaluationDetail;
   onChanged: () => void;
+  showHandover?: boolean;
 }) {
   const [panel, setPanel] = useState<"none" | "reassign" | "handover" | "cancel">("none");
 
@@ -110,6 +116,7 @@ export function HrRecoveryBox({
       {panel === "none" && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <span className="text-sm font-medium text-gray-700">پروندهٔ گیرکرده؟</span>
+          {showHandover && (
           <button
             onClick={() => setPanel("handover")}
             className="flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-gray-900"
@@ -120,6 +127,7 @@ export function HrRecoveryBox({
             </svg>
             واگذاری مسئولیت منابع انسانی
           </button>
+          )}
           <button
             onClick={() => setPanel("reassign")}
             className="flex items-center gap-1.5 text-sm font-medium text-gray-700 hover:text-gray-900"

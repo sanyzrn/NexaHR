@@ -152,6 +152,21 @@ def hr_panel_is_shielded(record: EvaluationRecord) -> bool:
 
 
 IS_SHIELDED_FROM_HR_PANEL = EvaluationRecord.hr_review_skipped.is_(True) & IS_OPEN_RECORD
+
+
+#: «روی میزِ مدیرعامل» به‌صورت شرطِ کوئری — قرینهٔ دقیقِ گاردِ `ceo_finalize`.
+#:
+#: آن گذار دو وضعیت را می‌پذیرد و برای یکی‌شان شرط دارد:
+#:     from {deputy_approved, hr_approved}, guard: hr_approved ⇒ معاونتی نیست.
+#:
+#: صفِ مدیرعامل در رابط فقط `deputy_approved` را می‌گرفت، پس پروندهٔ زنجیرهٔ
+#: بی‌معاونت — که همان‌جا منتظرِ امضای اوست — در تبِ «در انتظار تأیید نهایی»
+#: دیده نمی‌شد. این ثابت و آن گارد باید با هم عوض شوند؛ تست
+#: `test_no_deputy_chain` هر دو را می‌سنجد.
+IS_ON_CEO_DESK = (EvaluationRecord.status == EvaluationStatus.deputy_approved) | (
+    (EvaluationRecord.status == EvaluationStatus.hr_approved)
+    & EvaluationRecord.deputy_user_id.is_(None)
+)
 """همان شرط، برای کوئری‌ها. جفتِ `hr_panel_is_shielded` است — مثل
 `IS_OPEN_RECORD` و `OPEN_STATUSES` — و باید با آن هم‌قدم بماند: یکی فهرست را
 فیلتر می‌کند و دیگری صفحهٔ جزئیات را می‌بندد، و ناهم‌ترازیِ این دو همان چیزی
@@ -398,6 +413,42 @@ TRANSITIONS: dict[str, Transition] = {
         allowed_role=UserRole.ceo,
         assignee_field="ceo_user_id",
         guard=is_ceo_only_path,
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
+    ),
+    # زنجیرهٔ بی‌معاونت (مسئولِ واحد هست، معاونت نیست): `ceo_finalize` از
+    # `hr_approved` مجاز است، ولی هیچ گذارِ *برگشتی* از آن وضعیت وجود نداشت.
+    # یعنی مدیرعامل روی همان میز فقط یک دکمه داشت: امضا. اگر با نمره موافق
+    # نبود، تنها راهش تلفن‌زدن به منابع انسانی بود.
+    #
+    # مقصد `submitted` است و نه `draft`: مرحلهٔ HR در این زنجیره وجود دارد و
+    # مصرف شده، پس پرونده به صفِ همان مرحله برمی‌گردد — قرینهٔ دقیقِ
+    # `ceo_return_manager`.
+    "ceo_return_no_deputy": Transition(
+        from_statuses=frozenset({EvaluationStatus.hr_approved}),
+        to_status=EvaluationStatus.submitted,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: (
+            skips_deputy(record)
+            and not is_manager_path(record)
+            and not skips_hr_review(record)
+        ),
+        error_status=http_status.HTTP_403_FORBIDDEN,
+        error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
+    ),
+    # همان، برای پروندهٔ عضوِ واحدِ منابع انسانی: مرحلهٔ HR وجود ندارد، پس
+    # پلهٔ عقب‌تر خودِ نمره‌دهی است.
+    "ceo_return_no_deputy_hr_subject": Transition(
+        from_statuses=frozenset({EvaluationStatus.hr_approved}),
+        to_status=EvaluationStatus.draft,
+        allowed_role=UserRole.ceo,
+        assignee_field="ceo_user_id",
+        guard=lambda record: (
+            skips_deputy(record)
+            and not is_manager_path(record)
+            and skips_hr_review(record)
+        ),
         error_status=http_status.HTTP_403_FORBIDDEN,
         error_detail="این ارزیابی در مرحله تأیید نهایی توسط شما نیست",
     ),
@@ -671,16 +722,42 @@ def document_signatories(record: EvaluationRecord) -> list[dict]:
     ترتیبِ زنجیره؛ و منابع انسانی بلافاصله پس از نمره‌دهنده، مگر پرونده مرحلهٔ
     HR نداشته باشد. ترتیب همان ترتیبِ زمانیِ کار است.
 
-    در `single_decider` مدیرعامل یک بار می‌آید، نه دو بار: او یک نفر است و یک
-    امضا دارد. اینکه دو نقش را داشته، جای دیگری از سند صریح گفته می‌شود.
+    یک نفر یک امضا دارد، حتی اگر دو صندلی را پر کرده باشد.
+
+    این دو حالتِ جدا است و تا امروز فقط اولی درست کار می‌کرد:
+
+    * **مستقیمِ مدیرعامل** — صندلی‌های مسئولِ واحد و معاونت `None`اند، پس
+      مدیرعامل خودبه‌خود یک بار می‌آمد. `single_decider` هم جای دیگری از سند
+      صریح گفته می‌شود.
+    * **مدیرعامل *نشسته در* صندلیِ مسئولِ واحد** — شکلی که `may_act_at` مجاز
+      می‌داند و `_REDUNDANT_PAIRS` رد نمی‌کند. این‌جا هر دو صندلی پر بودند و
+      حلقه دو ردیف می‌ساخت: «امضای مسئول واحد» و «امضای مدیرعامل»، برای یک
+      آدم. سندِ رسمیِ هش‌شده دو امضاکننده اعلام می‌کرد که دو نفر نبودند.
+
+    ردیف در *اولین* جایگاهش می‌ماند — ترتیبِ سند، ترتیبِ کارِ انجام‌شده است و
+    آن فرد اول در صندلیِ پایین‌تر اقدام کرده — ولی برچسبش هر دو صندلی را نام
+    می‌برد. پس نه امضایی جعل می‌شود و نه سِمَتی پنهان می‌ماند.
     """
     scorer = scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
     signatories: list[dict] = []
+    #: user_id → جایگاهِ ردیفش در `signatories`. صندلیِ HR کلید نمی‌گیرد چون
+    #: `hr_user_id` می‌تواند `None` باشد (صفِ برداشته‌نشده) و `None` را
+    #: نمی‌شود با کسی یکی شمرد.
+    row_of: dict[int, int] = {}
     for field in SEAT_ORDER:
         user_id = getattr(record, field)
         if user_id is None:
             continue
-        signatories.append({"seat": field, "label": SEAT_LABEL[field], "user_id": user_id})
+        seen_at = row_of.get(user_id)
+        if seen_at is None:
+            row_of[user_id] = len(signatories)
+            signatories.append(
+                {"seat": field, "label": SEAT_LABEL[field], "user_id": user_id}
+            )
+        else:
+            row = signatories[seen_at]
+            row["seat"] = f"{row['seat']}+{field}"
+            row["label"] = f"{row['label']} و {SEAT_LABEL[field]}"
         if field == scorer and not skips_hr_review(record):
             signatories.append(
                 {"seat": "hr_user_id", "label": HR_LABEL, "user_id": record.hr_user_id}

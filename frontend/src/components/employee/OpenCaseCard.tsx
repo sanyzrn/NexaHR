@@ -91,6 +91,7 @@ export function OpenCaseCard({
             <WorkflowStepper
               status={item.status}
               hrSkipped={item.hr_review_skipped ?? false}
+              deputySkipped={item.deputy_skipped ?? false}
               className="mb-4"
             />
 

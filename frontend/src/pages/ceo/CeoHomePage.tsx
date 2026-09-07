@@ -136,7 +136,11 @@ export function CeoHomePage() {
         title="پرونده‌های ارزیابی"
         tabs={[
           { key: "scoring", label: "در انتظار نمره‌دهی من", status: "draft" },
-          { key: "pending", label: "در انتظار تأیید نهایی", status: "deputy_approved" },
+          // دو وضعیت و نه یکی: زنجیرهٔ بی‌معاونت روی `hr_approved` می‌ماند و
+          // همان‌جا نوبتِ امضای مدیرعامل است. تا امروز این تب فقط
+          // `deputy_approved` را می‌گرفت، پس آن پرونده‌ها — که هیچ صفِ دیگری
+          // هم نداشتند — در هیچ فهرستی دیده نمی‌شدند.
+          { key: "pending", label: "در انتظار تأیید نهایی", onCeoDesk: true },
           { key: "finalized", label: "نهایی‌شده", status: "finalized" },
           { key: "all", label: "همهٔ پرونده‌های من" },
         ]}

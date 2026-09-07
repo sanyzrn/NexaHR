@@ -143,3 +143,81 @@ def test_hr_can_save_a_chain_without_a_deputy(client, db_session):
     )
     assert response.status_code == 200, response.text
     assert response.json()["deputy_user_id"] is None
+
+
+def test_the_ceo_can_send_it_back_instead_of_only_signing(client, db_session):
+    """روی این میز تا امروز فقط یک دکمه بود: امضا.
+
+    `ceo_finalize` از `hr_approved` مجاز بود (تستِ بالا)، ولی هیچ گذارِ
+    برگشتی از آن وضعیت وجود نداشت — نه `ceo_return` که فقط `deputy_approved`
+    را می‌پذیرد و نه چیزِ دیگری. یعنی مدیرعاملی که با نمره موافق نبود، تنها
+    راهش تلفن‌زدن به منابع انسانی بود.
+
+    مقصد `submitted` است: مرحلهٔ HR در این زنجیره وجود دارد و پرونده به صفِ
+    همان مرحله برمی‌گردد — قرینهٔ دقیقِ `ceo_return_manager`.
+    """
+    hr, supervisor, ceo, personnel = _chain_without_deputy(db_session)
+    record_id = _run_to_hr_approved(client, db_session, hr, supervisor, personnel)
+
+    returned = client.post(
+        f"/api/evaluations/{record_id}/return",
+        json={"reason": "شواهدِ شاخصِ سوم کافی نیست"},
+        headers=auth_header(ceo),
+    )
+    assert returned.status_code == 200, returned.text
+    assert returned.json()["status"] == EvaluationStatus.submitted.value
+
+    # و از آن‌جا مسیر دوباره باز است: HR تأیید می‌کند و مدیرعامل نهایی.
+    assert client.post(
+        f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr)
+    ).status_code == 200
+    assert client.post(
+        f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
+    ).status_code == 200
+
+
+def test_the_deputy_seat_is_not_a_return_target_that_nobody_sits_in(client, db_session):
+    """معاونتی که وجود ندارد، نباید مقصدِ برگشت باشد.
+
+    اگر `ceo_return` (که مقصدش `hr_approved` است) در این زنجیره اجرا می‌شد،
+    پرونده از `hr_approved` به `hr_approved` می‌رفت — یک برگشتِ بی‌حرکت.
+    """
+    hr, supervisor, ceo, personnel = _chain_without_deputy(db_session)
+    record_id = _run_to_hr_approved(client, db_session, hr, supervisor, personnel)
+
+    # معاونت در این زنجیره صندلی ندارد، پس تأییدش هم بی‌معناست.
+    deputy = make_user(db_session, "deputy", capabilities=[])
+    refused = client.post(
+        f"/api/evaluations/{record_id}/deputy-approve", headers=auth_header(deputy)
+    )
+    assert refused.status_code in (400, 403)
+
+
+def test_the_ceo_queue_shows_the_case_that_is_waiting_for_them(client, db_session):
+    """تبِ «در انتظار تأیید نهایی» تا امروز فقط `deputy_approved` را می‌گرفت.
+
+    یعنی پروندهٔ زنجیرهٔ بی‌معاونت — که روی `hr_approved` منتظرِ امضای همان
+    مدیرعامل است — در هیچ صفی دیده نمی‌شد. `IS_ON_CEO_DESK` قرینهٔ کوئریِ
+    گاردِ `ceo_finalize` است و این تست هر دو را کنارِ هم می‌سنجد.
+    """
+    hr, supervisor, ceo, personnel = _chain_without_deputy(db_session)
+    record_id = _run_to_hr_approved(client, db_session, hr, supervisor, personnel)
+
+    old_way = client.get(
+        "/api/evaluations?status=deputy_approved", headers=auth_header(ceo)
+    ).json()
+    assert old_way["total"] == 0
+
+    desk = client.get("/api/evaluations?on_ceo_desk=true", headers=auth_header(ceo)).json()
+    assert [item["id"] for item in desk["items"]] == [record_id]
+
+    # و همان پرونده واقعاً قابلِ نهایی‌کردن است — صف و گذار یک چیز می‌گویند.
+    assert client.post(
+        f"/api/evaluations/{record_id}/ceo-finalize", headers=auth_header(ceo)
+    ).status_code == 200
+    assert (
+        client.get("/api/evaluations?on_ceo_desk=true", headers=auth_header(ceo)).json()[
+            "total"
+        ]
+        == 0
+    )

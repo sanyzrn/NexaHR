@@ -1,4 +1,4 @@
-import { STATUS_LABELS, type EvaluationStatus } from "../types";
+import { statusLabel, type EvaluationStatus } from "../types";
 
 const STYLE_BY_STATUS: Record<EvaluationStatus, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -21,7 +21,16 @@ const DOT_BY_STATUS: Record<EvaluationStatus, string> = {
   cancelled: "bg-gray-400",
 };
 
-export function StatusBadge({ status }: { status: EvaluationStatus }) {
+export function StatusBadge({
+  status,
+  /** این پرونده مرحلهٔ معاونتِ جدا ندارد — برچسب نباید تأییدی را گزارش کند
+   *  که انجام نشده. جایی که پرونده در دست نیست (مثلِ کارتِ آمارِ مرحله‌ها)
+   *  پیش‌فرضِ `false` می‌ماند و رفتار عوض نمی‌شود. */
+  deputySkipped = false,
+}: {
+  status: EvaluationStatus;
+  deputySkipped?: boolean;
+}) {
   // برای وضعیت نهایی‌شده، نقطه به‌آرامی پالس می‌زند تا حس «موفقیت» بدهد
   const pulse = status === "finalized";
   return (
@@ -33,7 +42,7 @@ export function StatusBadge({ status }: { status: EvaluationStatus }) {
         className={`h-1.5 w-1.5 rounded-full ${DOT_BY_STATUS[status]}`}
         style={pulse ? { animation: "var(--animate-pulse-slow)" } : undefined}
       />
-      {STATUS_LABELS[status]}
+      {statusLabel(status, deputySkipped)}
     </span>
   );
 }

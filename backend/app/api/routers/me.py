@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_own_personnel
 from app.core.config import settings
+from app.core.persian import fa_digits
 from app.db.session import get_db
 from app.models.enums import EvaluationStatus, ImprovementPlanStatus, UserRole
 from app.models.evaluation import EvaluationRecord
@@ -49,7 +50,12 @@ from app.services.indicator_framework import indicator_ids_for_record
 from app.services.notifications import notify
 from app.services.self_assessment import OPEN_STATUSES as SELF_ASSESSMENT_OPEN_STATUSES
 from app.services.self_assessment import may_self_assess
-from app.services.workflow import IS_OPEN_RECORD, objection_resolver_field
+from app.services.workflow import (
+    IS_OPEN_RECORD,
+    is_manager_path,
+    objection_resolver_field,
+    skips_deputy,
+)
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
@@ -138,6 +144,10 @@ def my_open_evaluation(
                         and window.is_open
                         and record.self_assessment_submitted_at is None
                     ),
+                    # شکلِ زنجیره، تا نوارِ مراحلِ همین کارت دروغ نگوید:
+                    # صندلیِ خالیِ معاونت را «مرحلهٔ فعلی» و معاونتی که خودش
+                    # نمره داده را «انجام‌شده» نشان می‌داد.
+                    "deputy_skipped": skips_deputy(record) or is_manager_path(record),
                     "submission_deadline": window.closes_on,
                     "submission_deadline_extended": window.extended,
                 }
@@ -389,7 +399,7 @@ def file_objection(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"مهلت اعتراض ({settings.objection_window_days} روز پس از مشاهدهٔ نتیجه) "
+                f"مهلت اعتراض ({fa_digits(settings.objection_window_days)} روز پس از مشاهدهٔ نتیجه) "
                 "به پایان رسیده است"
             ),
         )

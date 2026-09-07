@@ -171,7 +171,10 @@ export function EmployeeProfileModal({
                 >
                   <span className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-gray-700">{e.evaluation_code}</span>
-                    <StatusBadge status={e.status} />
+                    <StatusBadge
+                      status={e.status}
+                      deputySkipped={e.deputy_user_id === null || e.unit_supervisor_user_id === null}
+                    />
                     <span className="text-xs text-gray-400">{formatDate(e.created_at)}</span>
                   </span>
                   <Button variant="link" onClick={() => openEvaluation(e.id)}>

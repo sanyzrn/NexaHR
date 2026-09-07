@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import today_local
 from app.core.config import settings
+from app.core.persian import fa_digits
 from app.models.enums import (
     EvaluationStatus,
     ImprovementPlanStatus,
@@ -67,7 +68,11 @@ def run_contract_expiry_sweep(db: Session) -> int:
     today = today_local()
     for personnel_id, full_name, end_date in expiring:
         days = (end_date - today).days
-        when = f"{days} روز دیگر" if days >= 0 else f"{abs(days)} روز پیش (منقضی‌شده)"
+        when = (
+            f"{fa_digits(days)} روز دیگر"
+            if days >= 0
+            else f"{fa_digits(abs(days))} روز پیش (منقضی‌شده)"
+        )
         message = (
             f"قرارداد «{full_name}» {when} به پایان می‌رسد و هنوز ارزیابی‌ای برایش آغاز نشده است"
         )
@@ -133,7 +138,7 @@ def run_sla_sweep(db: Session) -> int:
     for record in stalled:
         message = (
             f"پرونده {record.evaluation_code} ({record.subject.full_name}) بیش از "
-            f"{settings.sla_reminder_days} روز است در همین مرحله منتظر اقدام شماست"
+            f"{fa_digits(settings.sla_reminder_days)} روز است در همین مرحله منتظر اقدام شماست"
         )
         for owner_id in _current_owner_ids(db, record):
             if notify_once(
@@ -211,7 +216,11 @@ def run_improvement_review_sweep(db: Session) -> int:
     today = today_local()
     for plan in due_plans:
         days = (plan.review_date - today).days
-        when = f"{days} روز دیگر" if days >= 0 else f"{abs(days)} روز پیش (گذشته)"
+        when = (
+            f"{fa_digits(days)} روز دیگر"
+            if days >= 0
+            else f"{fa_digits(abs(days))} روز پیش (گذشته)"
+        )
         message = (
             f"تاریخ بازنگری برنامه بهبود «{plan.title}» "
             f"({plan.personnel.full_name}) {when} است"

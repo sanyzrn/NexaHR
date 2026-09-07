@@ -14,6 +14,7 @@
 from datetime import date, timedelta
 
 from app.core.clock import today_local
+from app.core.persian import fa_date
 from app.models.enums import Capability, PeriodStatus
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_period import EvaluationPeriod
@@ -152,7 +153,11 @@ def test_self_assessment_is_refused_after_the_period_ended(client, db_session):
     detail = response.json()["detail"]
     # پیام باید *تاریخ* را بگوید: «مهلت گذشته» بی‌تاریخ، به کاربر نمی‌گوید چقدر
     # دیر کرده یا اصلاً مهلت کِی بوده.
-    assert str(case["period"].ends_on.year) in detail
+    #
+    # و شمسی، با ارقامِ فارسی. این ادعا پیش از این `ends_on.year` را می‌سنجید
+    # — یعنی «۲۰۲۶» را در یک جملهٔ فارسی *انتظار* داشت و همان اشکال را قفل
+    # کرده بود.
+    assert fa_date(case["period"].ends_on) in detail
     assert "تمدید" in detail
 
 

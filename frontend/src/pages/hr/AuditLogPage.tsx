@@ -13,7 +13,7 @@ import { Card, TableSkeleton } from "../../ui/Card";
 import { JalaliDatePicker } from "../../ui/JalaliDatePicker";
 import { Table } from "../../ui/Table";
 import { EASE_SOFT } from "../../ui/motion";
-import { formatDateTime } from "../../utils/dates";
+import { formatDateTime, localIsoDaysFromNow, localTodayIso } from "../../utils/dates";
 import { AUDIT_EVENT_LABELS, ROLE_LABELS } from "../../types";
 import { AuditDetails } from "../../components/AuditDetails";
 import { PersonPicker } from "../../components/PersonPicker";
@@ -50,9 +50,7 @@ const EMPTY_FILTERS: Filters = {
   contractEndTo: "",
 };
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+
 
 /** گزارش رویدادها با فیلترهای ترکیب‌پذیر: نوع رویداد، بازهٔ تاریخ، انجام‌دهنده،
  * پرسنل مشخص و واحد سازمانی — تا HR بتواند سابقهٔ یک واحد، یک نفر یا یک کاربر خاص
@@ -261,9 +259,11 @@ export function AuditLogPage() {
                       key={preset.days}
                       type="button"
                       onClick={() => {
-                        const d = new Date();
-                        d.setDate(d.getDate() + preset.days);
-                        patch({ contractEndFrom: todayIso(), contractEndTo: d.toISOString().slice(0, 10) });
+
+                        patch({
+                      contractEndFrom: localTodayIso(),
+                      contractEndTo: localIsoDaysFromNow(preset.days),
+                    });
                       }}
                       className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
                     >
@@ -272,7 +272,7 @@ export function AuditLogPage() {
                   ))}
                   <button
                     type="button"
-                    onClick={() => patch({ contractEndFrom: "", contractEndTo: todayIso() })}
+                    onClick={() => patch({ contractEndFrom: "", contractEndTo: localTodayIso() })}
                     className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
                   >
                     منقضی‌شده

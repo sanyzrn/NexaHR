@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_chain_stage, require_roles
 from app.core.clock import local_day_end, local_day_start
+from app.core.persian import fa_date
 from app.db.session import get_db
 from app.models.audit_log import AuditLog
 from app.models.enums import (
@@ -82,6 +83,7 @@ from app.services.self_evaluation import (
 )
 from app.services.snapshot import build_final_snapshot
 from app.services.workflow import (
+    IS_ON_CEO_DESK,
     IS_OPEN_RECORD,
     IS_SHIELDED_FROM_HR_PANEL,
     OPEN_STATUSES,
@@ -96,6 +98,7 @@ from app.services.workflow import (
     objection_resolver_field,
     scorer_field,
     scorer_seat,
+    skips_deputy,
     skips_hr_review,
 )
 
@@ -498,6 +501,7 @@ def _apply_evaluation_filters(
     subject_personnel_id: int | None = None,
     was_returned: bool | None = None,
     seat_user_id: int | None = None,
+    on_ceo_desk: bool | None = None,
 ):
     """فیلترهای ترکیب‌پذیر فهرست/خروجی ارزیابی‌ها — یک‌جا تا list و export.xlsx
     همیشه رفتار یکسان داشته باشند (خروجی همان چیزی است که HR فیلتر کرده)."""
@@ -563,6 +567,14 @@ def _apply_evaluation_filters(
                 EvaluationRecord.hr_user_id == seat_user_id,
             )
         )
+    if on_ceo_desk:
+        # «منتظرِ امضای مدیرعامل» — و نه فقط `status=deputy_approved`.
+        #
+        # صفِ او دو وضعیت دارد، چون زنجیرهٔ بی‌معاونت روی `hr_approved`
+        # می‌ماند و همان‌جا نوبتِ اوست. تعریفش این‌جا نوشته نمی‌شود:
+        # `IS_ON_CEO_DESK` کنارِ خودِ گذارِ `ceo_finalize` نشسته تا دو نسخه
+        # نشوند.
+        query = query.where(IS_ON_CEO_DESK)
     if was_returned is not None:
         # پرونده‌های «برگشتی» یعنی دست‌کم یک رویداد evaluation_returned در سابقهٔ همان
         # پرونده — همان قانونی که در پاسخ (was_returned روی هر آیتم) استفاده می‌شود،
@@ -648,6 +660,7 @@ def list_evaluations(
     subject_personnel_id: int | None = None,
     was_returned: bool | None = None,
     seat_user_id: int | None = None,
+    on_ceo_desk: bool = False,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -691,6 +704,7 @@ def list_evaluations(
         subject_personnel_id=subject_personnel_id,
         was_returned=was_returned,
         seat_user_id=seat_user_id,
+        on_ceo_desk=on_ceo_desk,
     )
 
     total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -1070,6 +1084,11 @@ def return_evaluation(
     elif action == "ceo_return" and is_manager_path(record):
         # در این مسیر مرحلهٔ معاونت مصرف شده؛ پرونده به صف منابع انسانی برمی‌گردد.
         action = "ceo_return_manager"
+    elif action == "ceo_return" and skips_deputy(record):
+        # زنجیرهٔ بی‌معاونت: مدیرعامل روی `hr_approved` می‌نشیند، نه
+        # `deputy_approved`. ترتیبِ این سه شرط مهم است — «مستقیمِ مدیرعامل»
+        # خودش هم بی‌معاونت است و باید زودتر گرفته شود.
+        action = "ceo_return_no_deputy"
 
     if action == "deputy_return" and is_manager_path(record):
         raise HTTPException(
@@ -1084,7 +1103,11 @@ def return_evaluation(
     # پروندهٔ بی‌مرحلهٔ HR: هر برگشتی که مقصدش «صفِ منابع انسانی» بود، یک پله
     # بیشتر عقب می‌رود. بی این، پرونده به وضعیتی می‌رفت که هیچ‌کس در آن اقدامی
     # نمی‌تواند بکند و برای همیشه همان‌جا می‌ماند.
-    if skips_hr_review(record) and action in ("deputy_return", "ceo_return_manager"):
+    if skips_hr_review(record) and action in (
+        "deputy_return",
+        "ceo_return_manager",
+        "ceo_return_no_deputy",
+    ):
         action += "_hr_subject"
 
     def _before() -> None:
@@ -1221,7 +1244,9 @@ def extend_submission_window(
             evaluation_record_id=record.id,
             commenter_user_id=current_user.id,
             stage=CommentStage.hr_review,
-            comment_text=f"تمدید مهلت ثبت تا {payload.until:%Y-%m-%d} — دلیل: {payload.reason}",
+            comment_text=(
+                f"تمدید مهلت ثبت تا {fa_date(payload.until)} — دلیل: {payload.reason}"
+            ),
         )
     )
     log_event(
@@ -1247,7 +1272,7 @@ def extend_submission_window(
             type_="submission_window_extended",
             message=(
                 f"مهلت ثبت پروندهٔ {record.evaluation_code} تا "
-                f"{payload.until:%Y-%m-%d} تمدید شد"
+                f"{fa_date(payload.until)} تمدید شد"
             ),
             evaluation_record_id=record.id,
             link=f"/evaluations/{record.id}",
