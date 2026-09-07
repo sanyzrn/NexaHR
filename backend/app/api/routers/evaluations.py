@@ -1258,13 +1258,21 @@ def extend_submission_window(
         new_value={"until": payload.until.isoformat(), "reason": payload.reason},
     )
 
-    # به کسانی که باید ثبت کنند خبر می‌رود — وگرنه تمدید فقط یک ستون در دیتابیس
+    # به کسی که باید ثبت کند خبر می‌رود — وگرنه تمدید فقط یک ستون در دیتابیس
     # است و کسی که برایش تمدید شده هیچ‌وقت نمی‌فهمد.
-    targets = [
-        user_id
-        for user_id in (record.unit_supervisor_user_id or record.deputy_user_id,)
-        if user_id is not None
-    ]
+    #
+    # و «کسی که باید ثبت کند» از `scorer_field` می‌آید و نه از
+    # `unit_supervisor or deputy`. آن عبارت در زنجیرهٔ «مستقیمِ مدیرعامل» هر دو
+    # را `None` می‌دید، پس فهرست تهی می‌شد و تمدید بی‌صدا انجام می‌شد: تنها
+    # کسی که باید پیش از مهلتِ تازه ثبت کند — خودِ مدیرعامل، که نمره‌دهندهٔ
+    # اول است — هیچ‌وقت نمی‌فهمید مهلت عوض شده.
+    #
+    # همان قاعده‌ای که `scheduled._current_owner_ids` و
+    # `notify_for_workflow_action` استفاده می‌کنند.
+    scorer_id = getattr(
+        record, scorer_field(record.unit_supervisor_user_id, record.deputy_user_id)
+    )
+    targets = [scorer_id] if scorer_id is not None else []
     if targets:
         notify(
             db,

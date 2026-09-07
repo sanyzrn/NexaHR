@@ -8,6 +8,10 @@
 قرینهٔ مسیر «مدیر» است که از قبل وجود داشت: مرحله‌ای که کسی در آن نایستاده،
 نباید پرونده را نگه دارد.
 """
+from datetime import date, timedelta
+
+from sqlalchemy import select
+
 from app.models.enums import EvaluationStatus
 from app.models.evaluation import EvaluationRecord
 from app.models.evaluation_access import EvaluationAccess
@@ -221,3 +225,85 @@ def test_the_ceo_queue_shows_the_case_that_is_waiting_for_them(client, db_sessio
         ]
         == 0
     )
+
+
+def test_extending_the_deadline_tells_the_person_who_must_submit(client, db_session):
+    """تمدیدِ مهلت باید به *نمره‌دهنده* خبر بدهد، هر که باشد.
+
+    فهرستِ گیرندگان `(unit_supervisor or deputy,)` بود. در زنجیرهٔ «مستقیمِ
+    مدیرعامل» هر دو `None`اند، پس فهرست تهی می‌شد: تمدید ۲۰۰ می‌گرفت، ستون
+    عوض می‌شد، و تنها کسی که باید پیش از مهلتِ تازه ثبت کند — خودِ مدیرعامل،
+    که نمره‌دهندهٔ اول است — هیچ‌وقت نمی‌فهمید مهلت عوض شده.
+
+    این تست هر دو جهت را می‌سنجد: زنجیرهٔ عادی که از قبل کار می‌کرد، و
+    زنجیرهٔ مستقیم که نمی‌کرد.
+    """
+    from app.models.enums import PeriodStatus
+    from app.models.evaluation_period import EvaluationPeriod
+    from app.models.notification import Notification
+
+    def _extend_and_count(scorer, seats: dict) -> tuple[int, list[int]]:
+        personnel = make_personnel(db_session)
+        access = EvaluationAccess(personnel_id=personnel.id, **seats)
+        db_session.add(access)
+        today = date.today()
+        period = EvaluationPeriod(
+            name=f"دورهٔ {personnel.id}",
+            starts_on=today - timedelta(days=30),
+            ends_on=today + timedelta(days=1),
+            status=PeriodStatus.closed,
+        )
+        db_session.add(period)
+        db_session.commit()
+
+        record_id = client.post(
+            "/api/evaluations",
+            json={"subject_personnel_id": personnel.id},
+            headers=auth_header(scorer),
+        ).json()["id"]
+        record = db_session.get(EvaluationRecord, record_id)
+        record.period_id = period.id
+        db_session.commit()
+
+        response = client.post(
+            f"/api/evaluations/{record_id}/extend-submission",
+            json={
+                "until": (today + timedelta(days=10)).isoformat(),
+                "reason": "غیبتِ موجه",
+            },
+            headers=auth_header(hr),
+        )
+        assert response.status_code == 200, response.text
+        targets = list(
+            db_session.scalars(
+                select(Notification.user_id).where(
+                    Notification.evaluation_record_id == record_id,
+                    Notification.type == "submission_window_extended",
+                )
+            )
+        )
+        return record_id, targets
+
+    hr = make_user(db_session, "hr")
+    supervisor = make_user(db_session, "unit_supervisor", capabilities=[])
+    ceo = make_user(db_session, "ceo", capabilities=[])
+    db_session.commit()
+
+    # جهتِ کنترل: زنجیرهٔ عادی — نمره‌دهنده مسئولِ واحد است.
+    _, ordinary = _extend_and_count(
+        supervisor,
+        {
+            "unit_supervisor_user_id": supervisor.id,
+            "deputy_user_id": None,
+            "ceo_user_id": ceo.id,
+        },
+    )
+    assert ordinary == [supervisor.id]
+
+    # و زنجیرهٔ «مستقیمِ مدیرعامل»: هر دو صندلیِ میانی خالی، نمره‌دهنده خودِ
+    # مدیرعامل. این‌جا فهرست تهی می‌ماند.
+    _, direct = _extend_and_count(
+        ceo,
+        {"unit_supervisor_user_id": None, "deputy_user_id": None, "ceo_user_id": ceo.id},
+    )
+    assert direct == [ceo.id], "نمره‌دهندهٔ زنجیرهٔ مستقیم خبر نگرفت"

@@ -186,14 +186,8 @@ def test_the_background_helper_swallows_a_missing_record():
     archive_final_pdf_detached(10**9)  # شناسه‌ای که وجود ندارد
 
 
-def test_the_background_helper_swallows_a_render_failure(monkeypatch):
-    """و اگر رندر بترکد هم همین‌طور — پروندهٔ نهایی‌شده نباید اثری از آن ببیند.
-    جارو بعداً دوباره تلاش می‌کند."""
-    from app.services import documents
-
-    monkeypatch.setattr(
-        documents,
-        "render_evaluation_summary_pdf",
-        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
-    documents.archive_final_pdf_detached(10**9)
+# شکستِ رندر در `tests/test_document_archival_failures.py` سنجیده می‌شود و نه
+# این‌جا. نسخهٔ قبلیِ همین تست پوچ بود: رندر را به استثنا وادار می‌کرد ولی بعد
+# `archive_final_pdf_detached(10**9)` را صدا می‌زد — شناسه‌ای که وجود ندارد، پس
+# تابع در همان `record is None` برمی‌گشت و هیچ‌وقت به رندر نمی‌رسید. آن فایل به
+# پروندهٔ commit‌شده نیاز داشت، پس جایش این‌جا نبود.

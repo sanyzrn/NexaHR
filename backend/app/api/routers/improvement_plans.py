@@ -48,8 +48,34 @@ from app.services.self_evaluation import ensure_hr_may_handle
 router = APIRouter(prefix="/api/improvement-plans", tags=["improvement-plans"])
 
 
-def _get_plan_or_404(db: Session, plan_id: int) -> ImprovementPlan:
-    plan = db.get(ImprovementPlan, plan_id)
+def _get_plan_or_404(
+    db: Session, plan_id: int, *, for_update: bool = False
+) -> ImprovementPlan:
+    """برنامهٔ بهبود، یا ۴۰۴.
+
+    `for_update` برای مسیرهای *نوشتن* است و همان قفلِ ردیفی را می‌گیرد که
+    گردش‌کارِ ارزیابی از ابتدا داشت (`evaluations._get_record_or_404_for_update`
+    و `me._my_record_or_404`). بی آن، «بخوان، بسنج، بنویس» اتمی نبود:
+
+    * دو کلیکِ هم‌زمانِ «تکمیل» و «لغو» (یا یک کلیک و یک تلاشِ دوباره پس از
+      تایم‌اوت) هر دو `status == open` می‌دیدند و هر دو رد می‌شدند. وضعیتِ
+      نهایی به این بند بود که کدام commit دوم شد، و **دو رویدادِ ممیزی** ثبت
+      می‌شد برای دو گذارِ متناقض — روی سندی که قرار است بگوید چه شد.
+    * و افزودن/ویرایشِ هدف روی برنامه‌ای که همان لحظه بسته شد: گاردِ
+      `_ensure_plan_open` می‌گذاشت، چون وضعیتِ *قبلِ* بسته‌شدن را خوانده بود.
+      «برنامهٔ تکمیل‌شده یک سند بسته است» — با اهدافی که بعد از بسته‌شدنش
+      اضافه شده‌اند.
+
+    مسیرهای *خواندن* قفل نمی‌گیرند؛ آن‌جا هزینه‌اش بی‌جهت است.
+    """
+    if for_update:
+        plan = db.scalar(
+            select(ImprovementPlan)
+            .where(ImprovementPlan.id == plan_id)
+            .with_for_update(of=ImprovementPlan)
+        )
+    else:
+        plan = db.get(ImprovementPlan, plan_id)
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="برنامه بهبود یافت نشد")
     return plan
@@ -389,7 +415,7 @@ def complete_plan(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> ImprovementPlan:
-    plan = _get_plan_or_404(db, plan_id)
+    plan = _get_plan_or_404(db, plan_id, for_update=True)
     if plan.status != ImprovementPlanStatus.open:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="این برنامه دیگر باز نیست"
@@ -414,7 +440,7 @@ def cancel_plan(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> ImprovementPlan:
-    plan = _get_plan_or_404(db, plan_id)
+    plan = _get_plan_or_404(db, plan_id, for_update=True)
     if plan.status != ImprovementPlanStatus.open:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="این برنامه دیگر باز نیست"
@@ -440,7 +466,7 @@ def add_goal(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> ImprovementPlanGoal:
-    plan = _get_plan_or_404(db, plan_id)
+    plan = _get_plan_or_404(db, plan_id, for_update=True)
     _ensure_plan_open(plan)
     next_order = (
         db.scalar(
@@ -478,7 +504,7 @@ def update_goal(
     goal = db.get(ImprovementPlanGoal, goal_id)
     if goal is None or goal.plan_id != plan_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="هدف یافت نشد")
-    plan = _get_plan_or_404(db, plan_id)
+    plan = _get_plan_or_404(db, plan_id, for_update=True)
     _ensure_can_view(plan, current_user)
     _ensure_plan_open(plan)
     updates = payload.model_dump(exclude_unset=True)
@@ -516,7 +542,7 @@ def delete_goal(
     goal = db.get(ImprovementPlanGoal, goal_id)
     if goal is None or goal.plan_id != plan_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="هدف یافت نشد")
-    plan = _get_plan_or_404(db, plan_id)
+    plan = _get_plan_or_404(db, plan_id, for_update=True)
     _ensure_plan_open(plan)
     # مقدار پیشین پیش از حذف ثبت می‌شود، وگرنه از هدفِ حذف‌شده هیچ نمی‌ماند
     log_event(
