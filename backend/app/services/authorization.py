@@ -101,6 +101,50 @@ def is_module_enabled(db: Session, key: str) -> bool:
     return not unmet_requirements(db, key)
 
 
+#: ماژولی که «کارمند نتیجهٔ خودش را می‌بیند» را کنترل می‌کند.
+SUBJECT_RESULT_MODULE = "employee_evaluation_visibility"
+
+
+def subject_may_read_own_result(db: Session) -> bool:
+    """آیا سوژهٔ پرونده حق دارد نتیجهٔ خودش را *از سرور* بخواند؟
+
+    این سوییچ عمداً خواندنِ سمتِ سرور را می‌بندد و نه فقط رابط را — تصمیمی که
+    گرفته و ثبت شده. ولی «سمتِ سرور» یک مسیر نیست، چند مسیر است، و تا امروز
+    فقط یکی‌شان می‌پرسید:
+
+    * `/api/me/evaluations` می‌پرسید و درست جواب می‌داد (تهی).
+    * `GET /api/evaluations` نمی‌پرسید: کارمند پروندهٔ نهایی‌شدهٔ خودش را با
+      اسکیمای *سمتِ زنجیره* می‌گرفت — با `evaluator_comment`، نامِ کارشناسِ
+      HR و شناسهٔ هر سه صندلی.
+    * `GET /api/evaluations/{id}/summary.pdf` هم نمی‌پرسید: شاخهٔ `is_subject`
+      کلِ سندِ رسمیِ هش‌شده را می‌داد — امتیازِ هر شاخص، شواهدِ ارزیاب، و
+      کامنت‌های همهٔ مراحل.
+
+    یعنی سوییچی که خاموش بود، فقط *دو تا* از سه در را بسته بود. و شناسهٔ پرونده
+    هم از همان فهرست به‌دست می‌آمد، پس در سومی خودبه‌خود باز می‌شد.
+
+    این تابع همان یک قاعده است، با یک نام، تا مسیرِ تازه‌ای که فردا اضافه شود
+    مجبور باشد صریح بگوید که پرسیده یا نپرسیده.
+
+    وابستگی‌های ماژول هم از راهِ `is_module_enabled` اعمال می‌شوند، پس
+    «اعتراض» و «ثبت رؤیت» که والدشان همین ماژول است خودبه‌خود پوشیده‌اند.
+    """
+    return is_module_enabled(db, SUBJECT_RESULT_MODULE)
+
+
+def ensure_subject_may_read_own_result(db: Session) -> None:
+    """قرینهٔ گارددارِ `subject_may_read_own_result`، برای مسیرهایی که پاسخِ
+    تهی معنا ندارد (دانلودِ سند)."""
+    if not subject_may_read_own_result(db):
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=(
+                "نمایش نتیجهٔ ارزیابی برای کارکنان در این سازمان فعال نیست. "
+                "برای دریافت سند به منابع انسانی مراجعه کنید."
+            ),
+        )
+
+
 def ensure_module_enabled(db: Session, key: str) -> None:
     """گاردِ ماژولِ خاموش — یک تابعِ ساده، عمداً نه یک `Depends`.
 

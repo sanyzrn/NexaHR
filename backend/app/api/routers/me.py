@@ -38,7 +38,11 @@ from app.schemas.evaluation import (
 )
 from app.schemas.improvement_plan import ImprovementPlanDetail
 from app.services.audit import log_event
-from app.services.authorization import ensure_module_enabled, is_module_enabled
+from app.services.authorization import (
+    SUBJECT_RESULT_MODULE,
+    ensure_module_enabled,
+    subject_may_read_own_result,
+)
 from app.services.evaluation_window import ensure_open as ensure_submission_window_open
 from app.services.evaluation_window import window_for
 from app.services.indicator_framework import indicator_ids_for_record
@@ -63,7 +67,10 @@ router = APIRouter(prefix="/api/me", tags=["me"])
 #: پاسخ «صفحهٔ تهی» است و نه ۴۰۳: خاموش‌بودنِ سوییچ خطای کاربر نیست، و دادهٔ
 #: موجود هم پاک نمی‌شود — منابع انسانی و زنجیره همه‌چیز را در
 #: `/api/evaluations` می‌بینند. تنها *نمای خودِ فرد* بسته است.
-_VISIBILITY_MODULE = "employee_evaluation_visibility"
+#: نگه داشته شده چون چند جای این فایل به نامِ ماژول ارجاع می‌دهند؛ قاعده‌اش
+#: در `authorization.subject_may_read_own_result` است تا مسیرهای بیرونِ این
+#: فایل (فهرستِ ارزیابی‌ها و سندِ PDF) همان یکی را بپرسند.
+_VISIBILITY_MODULE = SUBJECT_RESULT_MODULE
 
 
 @router.get("/evaluations", response_model=MyEvaluationPage)
@@ -71,7 +78,7 @@ def my_evaluations(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_own_personnel),
 ) -> MyEvaluationPage:
-    if current_user.personnel_id is None or not is_module_enabled(db, _VISIBILITY_MODULE):
+    if current_user.personnel_id is None or not subject_may_read_own_result(db):
         return MyEvaluationPage(total=0, items=[])
     query = select(EvaluationRecord).where(
         EvaluationRecord.subject_personnel_id == current_user.personnel_id,

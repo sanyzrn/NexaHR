@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { apiClient, extractErrorMessage } from "../../api/client";
 import { useMyEvaluations, useMyImprovementPlans, useMyOpenEvaluations } from "../../api/queries";
+import { useSearchParams } from "react-router-dom";
 import { usePermissions } from "../../auth/PermissionsContext";
 import { OpenCaseCard } from "../../components/employee/OpenCaseCard";
 import { useConfirm } from "../../components/ConfirmDialog";
@@ -324,9 +325,28 @@ export function MyEvaluationsPanel() {
   const showAcknowledgement =
     showEvaluationDetails && moduleEnabled("employee_result_acknowledgement");
   const showObjections = showEvaluationDetails && moduleEnabled("objections");
+
+  // خودارزیابی ماژولِ *خودش* را دارد و آن ماژول پیش‌فرض **روشن** است — در حالی
+  // که «نمایش نتیجه» پیش‌فرض خاموش است. تا امروز کارتِ پروندهٔ باز (که تنها
+  // دری است به فرمِ خودارزیابی) به آن ماژولِ خاموش گره خورده بود، پس در
+  // پیکربندیِ پیش‌فرض کلِ قابلیتِ خودارزیابی *دسترس‌ناپذیر* بود: منابع انسانی
+  // دعوت می‌فرستاد، کارمند روی لینک می‌زد، به همین صفحه می‌رسید و چیزی
+  // نمی‌دید؛ مهلت بی‌صدا تمام می‌شد.
+  //
+  // سرور از ابتدا همین تفکیک را داشت: `/me/evaluations/open` بی‌قید سرو
+  // می‌شود و فقط *ثبت* به ماژولِ `self_assessment` گره است. این‌جا حالا همان
+  // را می‌گوید.
+  const showSelfAssessment = !permissionsLoading && moduleEnabled("self_assessment");
+  const showOpenCases = showEvaluationDetails || showSelfAssessment;
+
   const { data, isPending, error } = useMyEvaluations(showEvaluationDetails);
   const { data: plans = [], error: plansError } = useMyImprovementPlans();
-  const { data: openCases = [] } = useMyOpenEvaluations(showEvaluationDetails);
+  const { data: openCases = [] } = useMyOpenEvaluations(showOpenCases);
+
+  // لینکِ اعلانِ دعوت `/me?self-assessment={id}` است و تا امروز هیچ‌کس
+  // نمی‌خواندش: کارمند به صفحه می‌رسید و باید خودش کارت را پیدا و باز می‌کرد.
+  const [searchParams] = useSearchParams();
+  const invitedCaseId = searchParams.get("self-assessment");
 
   return (
     <div className="space-y-4">
@@ -334,8 +354,15 @@ export function MyEvaluationsPanel() {
 
       {/* پروندهٔ در جریان بالاتر از نتایج گذشته می‌آید: مهم‌ترین چیزی که فرد
           همین حالا باید بداند، این است که تصمیمی دربارهٔ او در راه است. */}
-      {showEvaluationDetails && openCases.map((item, i) => (
-        <OpenCaseCard key={item.id} item={item} index={i} />
+      {showOpenCases && openCases.map((item, i) => (
+        <OpenCaseCard
+          key={item.id}
+          item={item}
+          index={i}
+          showStage={showEvaluationDetails}
+          showSelfAssessment={showSelfAssessment}
+          autoOpenForm={invitedCaseId === String(item.id)}
+        />
       ))}
 
       {plansError != null && (
@@ -349,7 +376,11 @@ export function MyEvaluationsPanel() {
       {/* همهٔ بخش‌های این صفحه به ماژول‌های اختیاری گره خورده‌اند؛ وقتی هیچ‌کدام
           روشن نیست و برنامهٔ بهبودی هم وجود ندارد، صفحهٔ کاملاً خالی چیزی شبیه
           خرابیِ سامانه خوانده می‌شود — یک جملهٔ آرام بهتر از سکوت است. */}
-      {!permissionsLoading && !showEvaluationDetails && plans.length === 0 && plansError == null && (
+      {!permissionsLoading &&
+        !showEvaluationDetails &&
+        !(showSelfAssessment && openCases.length > 0) &&
+        plans.length === 0 &&
+        plansError == null && (
         <Card>
           <EmptyState>
             نمایش جزئیات کارنامه در این سازمان فعال نشده است. اگر فکر می‌کنید باید نتیجهٔ

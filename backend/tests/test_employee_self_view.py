@@ -86,8 +86,19 @@ def test_my_evaluations_only_own_finalized(client, db_session):
     assert "scores" not in item and "evaluator_comment" not in item
 
 
-def test_employee_list_evaluations_no_leak(client, db_session):
-    """شاخه صریح employee در GET /api/evaluations — نباید در مسیر «HR همه را می‌بیند» بیفتد."""
+def test_employee_gets_nothing_from_the_chain_side_list(client, db_session):
+    """`GET /api/evaluations` نمای *زنجیره* است و کارمند از آن هیچ نمی‌گیرد.
+
+    این تست قبلاً عکسِ این را می‌سنجید — که کارمند پروندهٔ خودش را در همان
+    فهرست *ببیند* — و همان، یک نشت را قفل کرده بود: نمای زنجیره
+    (`EvaluationRead`) `evaluator_comment` و نامِ کارشناسِ HR و شناسهٔ صندلی‌ها
+    را دارد و `MyEvaluationRead` عمداً ندارد. دو نما برای یک داده، و انتخابِ
+    میانشان به این بند بود که کارمند کدام آدرس را صدا بزند.
+
+    حالا یک آدرس دارد: `/api/me/evaluations`. و این‌جا — با سوییچِ روشن هم —
+    تهی می‌گیرد، نه ۴۰۳: همان کاری که این endpoint از قبل با کارمندِ
+    بی‌پیوندِ پرسنلی می‌کرد.
+    """
     hr, sup, dep, ceo = _make_chain(db_session)
     mine = make_personnel(db_session, full_name="کارمند لیست")
     other = make_personnel(db_session, full_name="غریبه لیست")
@@ -99,15 +110,18 @@ def test_employee_list_evaluations_no_leak(client, db_session):
     db_session.commit()
 
     my_final = _finalize_evaluation(client, db_session, hr, sup, dep, ceo, mine)
-    other_final = _finalize_evaluation(client, db_session, hr, sup, dep, ceo, other)
+    _finalize_evaluation(client, db_session, hr, sup, dep, ceo, other)
 
     r = client.get("/api/evaluations", headers=auth_header(employee))
     assert r.status_code == 200
-    ids = [item["id"] for item in r.json()["items"]]
-    assert my_final in ids
-    assert other_final not in ids
+    assert r.json() == {"total": 0, "items": []}
 
-    # کارمند بدون پیوند پرسنلی هیچ‌چیز نمی‌بیند (نه همه‌چیز!)
+    # ولی مسیرِ خودش کار می‌کند — این تست فایل با سوییچِ *روشن* اجرا می‌شود.
+    mine_page = client.get("/api/me/evaluations", headers=auth_header(employee)).json()
+    assert [item["id"] for item in mine_page["items"]] == [my_final]
+    assert "evaluator_comment" not in mine_page["items"][0]
+
+    # کارمند بدون پیوند پرسنلی هم هیچ‌چیز (نه همه‌چیز!)
     r = client.get("/api/evaluations", headers=auth_header(orphan))
     assert r.status_code == 200
     assert r.json()["total"] == 0

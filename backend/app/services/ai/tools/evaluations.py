@@ -85,7 +85,7 @@ def search_evaluations(
 
     db = ctx.db
     query = select(EvaluationRecord)
-    query = scope_evaluations_for_role(query, ctx.user)
+    query = scope_evaluations_for_role(query, ctx.user, db)
     status_filter = EvaluationStatus(status) if status else None
     query = _apply_evaluation_filters(
         query,

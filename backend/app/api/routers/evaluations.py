@@ -49,7 +49,11 @@ from app.schemas.evaluation import (
     SubmissionExtension,
 )
 from app.services.audit import log_event
-from app.services.authorization import ensure_module_enabled
+from app.services.authorization import (
+    ensure_module_enabled,
+    ensure_subject_may_read_own_result,
+    subject_may_read_own_result,
+)
 from app.services.documents import archive_final_pdf, archive_final_pdf_detached
 from app.services.evaluation import inactive_seat_labels, next_evaluation_code, validate_bonus
 from app.services.evaluation_window import ensure_open as ensure_submission_window_open
@@ -576,12 +580,17 @@ def _apply_evaluation_filters(
     return query
 
 
-def scope_evaluations_for_role(query, user: CurrentUser):
+def scope_evaluations_for_role(query, user: CurrentUser, db: Session):
     """دامنهٔ دیدِ ارزیابی‌ها به‌صورت allowlist — یک‌جا برای فهرست و دستیار.
 
     قبلاً همین منطق داخل endpoint فهرست بود. دستیار هوشمند هم باید *دقیقاً*
     همان را ببیند، و دو نسخه‌کردنِ allowlist یعنی روزی یکی قاعده بگیرد و
     دیگری نگیرد. نقش ناشناخته هیچ — پیش‌فرضِ باز ممنوع.
+
+    `db` برای شاخهٔ کارمند لازم است و نه تشریفاتی: دیدنِ نتیجهٔ خودِ فرد یک
+    سوییچِ سازمانی دارد (`subject_may_read_own_result`) و آن سوییچ باید *این‌جا*
+    پرسیده شود، نه در هر مصرف‌کننده. سه مصرف‌کننده وجود دارد — فهرست، خروجیِ
+    Excel و دستیار — و تا امروز هیچ‌کدام نمی‌پرسید.
     """
     if user.role == UserRole.hr:
         # منابع انسانی همه را می‌بیند، *به‌جز پروندهٔ خودش*.
@@ -607,7 +616,8 @@ def scope_evaluations_for_role(query, user: CurrentUser):
         return query.where(EvaluationRecord.ceo_user_id == user.id)
     if user.role == UserRole.employee:
         # کارمند فقط ارزیابی‌های نهایی‌شده خودش را می‌بیند (رابط اصلی‌اش /api/me است)
-        if user.personnel_id is None:
+        # — و آن هم فقط اگر سازمان نمایشِ نتیجه به کارکنان را روشن کرده باشد.
+        if user.personnel_id is None or not subject_may_read_own_result(db):
             return query.where(sa_false())
         return query.where(
             EvaluationRecord.subject_personnel_id == user.personnel_id,
@@ -649,7 +659,25 @@ def list_evaluations(
     # شاخه‌ها نبود همه‌چیز را می‌دید (داستانِ نقش support — P0-03). حالا منطق
     # در `scope_evaluations_for_role` است که دستیار هم از همان استفاده می‌کند؛
     # دو نسخه یعنی روزی یکی قاعده می‌گیرد و دیگری نمی‌گیرد.
-    query = scope_evaluations_for_role(query, current_user)
+    query = scope_evaluations_for_role(query, current_user, db)
+
+    # و شاخهٔ کارمند این‌جا تمام می‌شود، حتی با سوییچِ *روشن*.
+    #
+    # `MyEvaluationRead` عمداً کوچک‌تر از `EvaluationRead` است: بی
+    # `evaluator_comment`، بی نامِ کارشناسِ HR، بی شناسهٔ صندلی‌ها، بی وضعیتِ
+    # مرحله. یعنی سامانه *دو* نمای متفاوت برای یک داده دارد و کدامش به کارمند
+    # می‌رسد را تا امروز این تعیین می‌کرد که کارمند کدام آدرس را صدا بزند —
+    # و این‌جا نمای بزرگ‌تر می‌آمد.
+    #
+    # نگه‌داشتنِ هر دو نما و «کوچک‌کردنِ» یکی، همان دو-نسخه‌بودن است با یک لایه
+    # آرایش: فردا فیلدی به `EvaluationRead` اضافه می‌شود و کسی یادش نمی‌ماند
+    # این‌جا هم پاکش کند. پس یک نما می‌ماند و یک آدرس: `/api/me/evaluations`.
+    # هیچ صفحه‌ای در رابط، کارمند را به این endpoint نمی‌آورد.
+    #
+    # تهی و نه ۴۰۳: همان کاری که `/api/me/evaluations` با سوییچِ خاموش می‌کند،
+    # و همان کاری که این endpoint از قبل با کارمندِ بی‌پیوندِ پرسنلی می‌کرد.
+    if current_user.role == UserRole.employee:
+        return EvaluationPage(total=0, items=[])
 
     query = _apply_evaluation_filters(
         query,
@@ -718,7 +746,7 @@ def export_evaluations_excel(
     جریانِ واحدش. گاردی که فقط روی صفحه باشد و روی «دریافت خروجی» نه، گارد نیست.
     """
     query = _apply_evaluation_filters(
-        scope_evaluations_for_role(select(EvaluationRecord), current_user),
+        scope_evaluations_for_role(select(EvaluationRecord), current_user, db),
         q=q,
         status_filter=status_filter,
         org_unit=org_unit,
@@ -1578,7 +1606,20 @@ def evaluation_summary_pdf(
         current_user.personnel_id is not None
         and current_user.personnel_id == record.subject_personnel_id
     )
-    if not is_subject:
+    if is_subject:
+        # سندِ خودِ فرد، ولی همان سوییچی که فهرست و `/api/me` را می‌بندد این را
+        # هم می‌بندد. تا امروز نمی‌بست: این شاخه `_ensure_can_view` را رد
+        # می‌کرد و هیچ گاردِ دیگری هم نداشت، پس با سوییچِ خاموش کارمندی که
+        # شناسهٔ پرونده را می‌دانست کلِ سندِ رسمی را می‌گرفت — امتیازِ هر شاخص،
+        # شواهدِ ارزیاب و کامنت‌های همهٔ مراحل — در حالی که `/api/me` درست
+        # جواب می‌داد «چیزی نیست».
+        #
+        # قاعده به نقش کار ندارد — مثلِ خودِ `is_subject`. کارشناسِ منابع
+        # انسانی که *موضوعِ* پرونده است هم همان‌جا ایستاده که کارمند: او در
+        # این درخواست ارزیابی‌شده است، نه ارزیاب. دسترسیِ منابع انسانی به سندِ
+        # *دیگران* دست‌نخورده است و از شاخهٔ پایین می‌گذرد.
+        ensure_subject_may_read_own_result(db)
+    else:
         _ensure_can_view(record, current_user)
         # سایر نقش‌های زنجیره پرونده را می‌بینند ولی سند رسمی را دانلود نمی‌کنند.
         if current_user.role != UserRole.hr:
