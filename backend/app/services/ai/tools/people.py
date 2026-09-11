@@ -20,13 +20,15 @@ from app.models.evaluation_access import EvaluationAccess
 from app.models.personnel import Personnel
 from app.models.user import User
 from app.schemas.auth import CurrentUser
-from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
+from app.services.ai.tools.base import (
+    ToolContext,
+    ToolOutcome,
+    first_validation_message,
+    json_content,
+    tool,
+)
 from app.services.audit import log_event
 from app.services.org_unit import split_site
-from app.services.self_evaluation import (
-    ensure_chain_stages_are_not_redundant,
-    ensure_evaluators_are_not_the_subject,
-)
 from app.services.workflow import IS_OPEN_RECORD
 
 #: نقش‌هایی که فهرست کاملِ پرسنل را در رابط هم می‌بینند — و فقط همان‌ها.
@@ -376,9 +378,12 @@ def update_personnel(
     is_manager: bool | None = None,
     contract_end_date: str | None = None,
 ) -> ToolOutcome:
+    from app.api.routers.personnel import update_personnel as update_personnel_endpoint
+    from app.schemas.personnel import PersonnelUpdate
+
     db = ctx.db
     person = _person_or_404(db, personnel_id)
-    before: dict[str, object] = {}
+
     fields: dict[str, object] = {}
     if job_title is not None:
         fields["job_title"] = job_title.strip()[:150]
@@ -394,37 +399,23 @@ def update_personnel(
     if not fields:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "فیلدی برای تغییر داده نشده است")
 
-    # تغییر «مدیر بودن» وقتی پروندهٔ بازی هست ممنوع است — همان قانونِ PATCH رابط.
-    if "is_manager" in fields and fields["is_manager"] != person.is_manager:
-        open_record = db.scalar(
-            select(EvaluationRecord).where(
-                EvaluationRecord.subject_personnel_id == person.id, IS_OPEN_RECORD
-            )
-        )
-        if open_record is not None:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "این پرسنل پروندهٔ ارزیابی باز دارد؛ تغییر «مدیر بودن» تا تعیین تکلیف پرونده ممکن نیست",
-            )
-
-    for key, value in fields.items():
-        before[key] = str(getattr(person, key))
-        setattr(person, key, value)
-
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="personnel_updated",
-        old_value={"id": person.id, **{k: str(v) for k, v in before.items()}},
-        new_value={"id": person.id, **{k: str(v) for k, v in fields.items()}, "via": "ai_copilot"},
+    # بدنهٔ پیشین سه قاعدهٔ PATCH را تکرار می‌کرد و دو تا را جا انداخته بود:
+    # سنجشِ «پایان بعد از شروع» *پس از* اعمالِ تغییر (آپدیتِ تک‌فیلدی وگرنه
+    # می‌توانست پایانِ قرارداد را پیش از شروع بگذارد و گزارشِ قراردادهای رو به
+    # اتمام را بی‌صدا بد مرتب کند)، و پاک‌کردنِ دسترسیِ مسئولِ واحدِ قدیمی وقتی
+    # کسی «مدیر» می‌شود. با واگذاری، هر سه از یک جا می‌آیند.
+    updated = update_personnel_endpoint(
+        personnel_id=person.id,
+        payload=PersonnelUpdate(**fields),
+        db=db,
+        current_user=ctx.user,
     )
-    db.commit()
-    payload = _person_payload(db, person)
+    payload = _person_payload(db, updated)
     changed = "، ".join(fields)
     return ToolOutcome(
         content=json_content({"updated": True, "changed": list(map(str, fields)), "person": payload}),
         ui={"kind": "person_card", "person": payload},
-        summary=f"پروندهٔ «{person.full_name}» به‌روز شد ({changed})",
+        summary=f"پروندهٔ «{updated.full_name}» به‌روز شد ({changed})",
     )
 
 
@@ -624,61 +615,47 @@ def create_user(
     personnel_id: int | None = None,
     full_name: str = "",
 ) -> ToolOutcome:
-    from app.core.security import hash_password
-    from app.services.authorization import apply_default_hr_capabilities
+    from pydantic import ValidationError
+
+    from app.api.routers.users import create_user as create_user_endpoint
+    from app.schemas.user import UserCreate
     from app.services.security_tokens import generate_temp_password
-    from app.services.self_evaluation import ensure_user_link_is_not_self_evaluation
 
     db = ctx.db
-    username = username.strip()
-    if not username or len(username) < 3:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "نام کاربری باید دست‌کم ۳ نویسه باشد")
-    if db.scalar(select(User).where(User.username == username)):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "این نام کاربری از قبل وجود دارد")
-    role_value = UserRole(role)
-    if role_value == UserRole.employee:
-        if personnel_id is None:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "حسابِ کارمند باید به پرسنل گره بخورد")
-        person = db.get(Personnel, int(personnel_id))
-        if person is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "پرسنلی با این شناسه پیدا نشد")
+    # تنها کاری که پیش از واگذاری لازم است: رمزِ موقتِ خودکار. `UserCreate.password`
+    # اجباری است، پس «رمز را خودت بساز» باید این‌جا به یک رمزِ واقعی تبدیل شود.
     generated = ""
     plain = (password or "").strip()
     if not plain:
         plain = generate_temp_password()
         generated = plain
-    if len(plain) < 10:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "رمز باید دست‌کم ۱۰ نویسه باشد")
-    user = User(
-        username=username,
-        password_hash=hash_password(plain),
-        role=role_value,
-        personnel_id=int(personnel_id) if personnel_id else None,
-        full_name=(full_name or "").strip() or None,
-        is_active=True,
-        must_change_password=True,
-    )
-    db.add(user)
-    db.flush()
-    if role_value == UserRole.hr:
-        apply_default_hr_capabilities(db, user.id)
-    if user.personnel_id:
-        ensure_user_link_is_not_self_evaluation(db, user, user.personnel_id)
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="user_created",
-        new_value={"id": user.id, "username": user.username, "role": user.role.value, "via": "ai_copilot"},
-    )
-    db.commit()
-    content = {"created": True, "user": {"id": user.id, "username": user.username, "role": user.role.value}}
+
+    # بدنهٔ پیشین همهٔ قاعده‌ها را دست‌نویس تکرار می‌کرد و یکی را جا انداخته بود:
+    # `ensure_personnel_has_one_account`. یعنی حسابِ فعالِ *دوم* روی یک پرسنل از
+    # راه دستیار ساخته می‌شد — چیزی که رابط ردّ می‌کند و کارنامهٔ خودِ کارمند و
+    # قاعده‌های خودارزیابی رویش بنا شده‌اند.
+    try:
+        payload = UserCreate(
+            username=(username or "").strip(),
+            password=plain,
+            role=UserRole(role),
+            personnel_id=int(personnel_id) if personnel_id else None,
+            full_name=(full_name or "").strip() or None,
+        )
+    except ValidationError as err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, first_validation_message(err)) from err
+    except ValueError as err:  # نقشِ ناشناخته از سمتِ مدل
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"نقشِ «{role}» شناخته نشد") from err
+
+    created = create_user_endpoint(payload=payload, db=db, current_user=ctx.user)
+    content = {"created": True, "user": {"id": created.id, "username": created.username, "role": created.role.value}}
     if generated:
         content["temporary_password"] = generated
         content["note"] = "این رمز فقط همین‌جا نشان داده می‌شود؛ کاربر در اولین ورود باید عوضش کند."
     return ToolOutcome(
         content=json_content(content),
         ui={"kind": "user_created", "user": content.get("user"), "temporary_password": generated},
-        summary=f"حساب «{user.username}» با نقش {_ROLE_LABELS.get(user.role)} ساخته شد",
+        summary=f"حساب «{created.username}» با نقش {_ROLE_LABELS.get(created.role)} ساخته شد",
     )
 
 
@@ -797,7 +774,13 @@ update_user.describe = _describe_update_user
     description="فهرست واحدهای سازمانی با شمارِ پرسنل هر واحد.",
     category="سازمان",
     read_only=True,
-    guarded_inline=True,
+    # `guarded_inline=True` بود و بدنه هیچ گاردی نداشت — یعنی هر کاربرِ دارای
+    # دستیار، از جمله کارمندی بی هیچ مجوز، نقشهٔ کاملِ سازمان را با شمارِ پرسنلِ
+    # هر واحد می‌گرفت. رابط `hr OR manage_personnel` می‌خواهد و `context.py`
+    # همین نقشه را عمداً از نقش‌های محدود پنهان می‌کند. اعلانِ صریح، هم گاردِ
+    # اجرا را می‌آورد هم ابزار را از فهرستِ تبلیغ‌شدهٔ آن کاربر برمی‌دارد.
+    capabilities=(Capability.manage_personnel,),
+    roles=(UserRole.hr,),
     parameters={"type": "object", "properties": {"include_inactive": {"type": "boolean"}}},
 )
 def list_org_units(ctx: ToolContext, include_inactive: bool = False) -> ToolOutcome:
@@ -850,26 +833,17 @@ def list_org_units(ctx: ToolContext, include_inactive: bool = False) -> ToolOutc
     },
 )
 def create_org_unit(ctx: ToolContext, name: str, site: str = "") -> ToolOutcome:
-    from app.models.org_unit import OrgUnit
-    from app.services.org_unit import join_site
+    # واگذاری، نه بازنویسی: بدنهٔ دست‌نویس `display_order` نمی‌گذاشت و واحدِ تازه
+    # با مقدارِ پیش‌فرضِ ۰ بالای *همهٔ* فهرست‌ها می‌نشست. endpoint همان‌جا
+    # `max(display_order) + 1` می‌گذارد تا واحدِ تازه ته فهرست بیاید.
+    from app.api.routers.org_units import create_org_unit as create_org_unit_endpoint
+    from app.schemas.org_unit import OrgUnitCreate
 
-    db = ctx.db
-    unit_name = name.strip()[:150]
-    site_name = site.strip()[:100]
-    full = join_site(site_name, unit_name)
-    existing = db.scalar(select(OrgUnit).where(OrgUnit.name == unit_name, OrgUnit.site == (site_name or None)))
-    if existing is not None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"واحد «{full}» از قبل وجود دارد")
-    unit = OrgUnit(site=site_name or None, name=unit_name, is_active=True)
-    db.add(unit)
-    db.flush()
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="org_unit_created",
-        new_value={"id": unit.id, "full_name": unit.full_name, "via": "ai_copilot"},
+    unit = create_org_unit_endpoint(
+        payload=OrgUnitCreate(name=name.strip()[:150], site=site.strip()[:100] or None),
+        db=ctx.db,
+        current_user=ctx.user,
     )
-    db.commit()
     return ToolOutcome(
         content=json_content({"created": True, "org_unit": {"id": unit.id, "full_name": unit.full_name}}),
         summary=f"واحد «{unit.full_name}» افزوده شد",
@@ -954,66 +928,50 @@ def set_evaluation_access(
     deputy: str = "",
     ceo: str = "",
 ) -> ToolOutcome:
+    from app.api.routers.evaluation_access import upsert_access
+    from app.schemas.evaluation_access import EvaluationAccessUpsert
+
     db = ctx.db
     person = _person_or_404(db, personnel_id)
 
     def resolve(username: str) -> int | None:
+        """نام کاربری → شناسه. *فقط* ترجمه؛ هیچ قاعده‌ای این‌جا اعمال نمی‌شود."""
         username = (username or "").strip()
         if not username:
             return None
-        user = db.scalar(select(User).where(User.username == username, User.is_active.is_(True)))
+        user = db.scalar(select(User).where(User.username == username))
         if user is None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                f"کاربر فعالی با نام کاربری «{username}» پیدا نشد",
+                f"کاربری با نام کاربری «{username}» پیدا نشد",
             )
         return user.id
 
-    sup_id = resolve(unit_supervisor)
-    dep_id = resolve(deputy)
     ceo_id = resolve(ceo)
-    if person.is_manager:
-        sup_id = None
     if ceo_id is None:
+        # `EvaluationAccessUpsert.ceo_user_id` اجباری است و نبودش ValidationError
+        # می‌دهد، نه جمله‌ای که مدل بتواند به کاربر بگوید.
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "مدیرعاملِ زنجیره الزامی است")
-    if sup_id is None and dep_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "دست‌کم یکی از «مسئول مستقیم» یا «معاونت» لازم است")
-    evaluator_ids = [i for i in (sup_id, dep_id, ceo_id) if i is not None]
-    ensure_evaluators_are_not_the_subject(db, person.id, evaluator_ids)
-    ensure_chain_stages_are_not_redundant(db, sup_id, dep_id, ceo_id)
 
-    access = db.scalar(select(EvaluationAccess).where(EvaluationAccess.personnel_id == person.id))
-    before = None
-    if access is None:
-        access = EvaluationAccess(personnel_id=person.id)
-        db.add(access)
-    else:
-        before = {
-            "unit_supervisor_user_id": access.unit_supervisor_user_id,
-            "deputy_user_id": access.deputy_user_id,
-            "ceo_user_id": access.ceo_user_id,
-        }
-    access.unit_supervisor_user_id = sup_id
-    access.deputy_user_id = dep_id
-    access.ceo_user_id = ceo_id
-    access.updated_by_user_id = ctx.user.id
-    db.flush()
-
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="evaluation_access_set",
-        evaluation_record_id=None,
-        old_value=before,
-        new_value={
-            "personnel_id": person.id,
-            "unit_supervisor_user_id": sup_id,
-            "deputy_user_id": dep_id,
-            "ceo_user_id": ceo_id,
-            "via": "ai_copilot",
-        },
+    # همهٔ قاعده‌ها — فعال بودن، `may_act_at` برای هر صندلی، قانونِ «مدیر مسئولِ
+    # واحد ندارد»، تعارضِ خودارزیابی، و مرحلهٔ تکراری — در خودِ endpoint‌اند.
+    # بدنهٔ قبلی آن‌ها را *تکرار* می‌کرد و یکی را جا انداخته بود:
+    # `_ensure_active_user_with_role` سنجشِ `may_act_at` دارد و این‌جا فقط
+    # `is_active` سنجیده می‌شد، پس یک کارمند روی صندلیِ معاونت می‌نشست و پرونده
+    # در همان مرحله برای همیشه گیر می‌کرد. قانونِ «مدیر» هم بی‌صدا صندلیِ مسئول
+    # را خالی می‌کرد؛ رابط همان‌جا ۴۰۰ می‌دهد و می‌گوید چرا.
+    access = upsert_access(
+        personnel_id=person.id,
+        payload=EvaluationAccessUpsert(
+            unit_supervisor_user_id=resolve(unit_supervisor),
+            deputy_user_id=resolve(deputy),
+            ceo_user_id=ceo_id,
+        ),
+        db=db,
+        current_user=ctx.user,
     )
-    db.commit()
+    sup_id = access.unit_supervisor_user_id
+    dep_id = access.deputy_user_id
     ids = {sup_id, dep_id, ceo_id} - {None}
     names = dict(db.execute(select(User.id, User.username).where(User.id.in_(ids))).all())
     chain = {

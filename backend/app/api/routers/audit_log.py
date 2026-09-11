@@ -48,7 +48,6 @@ SYSTEM_EVENT_TYPES: frozenset[str] = frozenset(
         # کاربران و مجوزها
         "user_created",
         "user_updated",
-        "user_deactivated",
         "user_deleted",
         "capabilities_changed",
         # پیکربندی سامانه
@@ -76,6 +75,7 @@ SYSTEM_EVENT_TYPES: frozenset[str] = frozenset(
         "ai_access_changed",
         "ai_tool_invoked",
         "ai_tool_failed",
+        "ai_tool_refused",
         "ai_action_confirmed",
         "ai_action_rejected",
         "ai_action_failed",

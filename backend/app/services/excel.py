@@ -120,7 +120,16 @@ def _to_bytes(wb: Workbook) -> bytes:
     return buffer.getvalue()
 
 
-def build_evaluations_workbook(records: list[EvaluationRecord]) -> bytes:
+def build_evaluations_workbook(
+    records: list[EvaluationRecord], applied_bonus_by_record: dict[int, float | None]
+) -> bytes:
+    """خروجیِ Excelِ فهرستِ ارزیابی‌ها.
+
+    `applied_bonus_by_record` را فراخواننده حساب می‌کند (چون به `db` و نسخهٔ
+    طرحِ هر پرونده نیاز دارد) و عمداً اجباری است: ستونِ خامِ
+    `record.bonus_points` با عددی که روی سندِ رسمی چاپ می‌شود یکی نیست، و
+    آرگومانِ اختیاری یعنی روزی کسی فراموشش می‌کند و همان واگرایی برمی‌گردد.
+    """
     wb, ws = _new_sheet("ارزیابی‌ها", _HEADERS)
     for r in records:
         ws.append(
@@ -131,7 +140,7 @@ def build_evaluations_workbook(records: list[EvaluationRecord]) -> bytes:
                 _STATUS_LABELS.get(r.status.value, r.status.value),
                 float(r.general_score_pct) if r.general_score_pct is not None else None,
                 float(r.specialized_score_pct) if r.specialized_score_pct is not None else None,
-                float(r.bonus_points) if r.bonus_points else None,
+                applied_bonus_by_record.get(r.id),
                 float(r.final_weighted_pct) if r.final_weighted_pct is not None else None,
                 r.recommendation or "",
                 to_jalali(r.created_at.isoformat()),

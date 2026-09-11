@@ -458,6 +458,22 @@ def period_progress(ctx: ToolContext, period_id: int) -> ToolOutcome:
     )
 
 
+def _cohort_payload(org_unit: str, only_managers: bool | None, contract_ends_before: str):
+    """کوهورتِ آغاز گروهی، با همان معنایی که رابط دارد.
+
+    `only_managers` سه‌حالته است و باید بماند: `None` یعنی «هر دو». پیش از این
+    امضای ابزار `bool = False` بود، پس «برای واحد فروش پرونده بساز» بی‌صدا به
+    «فقط غیرمدیرانِ واحد فروش» ترجمه می‌شد و مدیرِ واحد پرونده نمی‌گرفت.
+    """
+    from app.schemas.period import BulkCreateRequest
+
+    return BulkCreateRequest(
+        org_unit=(org_unit or "").strip() or None,
+        only_managers=only_managers,
+        contract_ends_before=_parse_date(contract_ends_before),
+    )
+
+
 @tool(
     name="preview_bulk_evaluations",
     description="آزمایشِ اجرای گروهی ارزیابی برای یک گروه (بدون ثبت): چه کسانی پرونده می‌گیرند، چه کسانی بلاک‌اند و چرا.",
@@ -468,35 +484,39 @@ def period_progress(ctx: ToolContext, period_id: int) -> ToolOutcome:
         "type": "object",
         "properties": {
             "org_unit": {"type": "string"},
-            "only_managers": {"type": "boolean"},
+            "only_managers": {
+                "type": "boolean",
+                "description": "بله = فقط مدیران، خیر = فقط غیرمدیران؛ نیاوردنش یعنی هر دو",
+            },
             "contract_ends_before": {"type": "string"},
         },
     },
 )
 def preview_bulk_evaluations(
-    ctx: ToolContext, org_unit: str = "", only_managers: bool = False, contract_ends_before: str = ""
+    ctx: ToolContext,
+    org_unit: str = "",
+    only_managers: bool | None = None,
+    contract_ends_before: str = "",
 ) -> ToolOutcome:
-    from app.services.bulk_evaluation import CohortFilter, plan, summarise
+    from app.api.routers.periods import preview_bulk_create
 
-    db = ctx.db
-    cohort = CohortFilter(
-        org_unit=(org_unit or "").strip() or None,
-        only_managers=bool(only_managers),
-        contract_ends_before=_parse_date(contract_ends_before),
+    result = preview_bulk_create(
+        payload=_cohort_payload(org_unit, only_managers, contract_ends_before),
+        db=ctx.db,
+        current_user=ctx.user,
     )
-    plans = plan(db, cohort)
     items = [
         {
-            "personnel_id": p.personnel_id,
-            "full_name": p.full_name,
-            "org_unit": p.org_unit,
-            "outcome": p.outcome.value,
-            "reason": p.reason,
+            "personnel_id": r.personnel_id,
+            "full_name": r.full_name,
+            "org_unit": r.org_unit,
+            "outcome": r.outcome,
+            "reason": r.reason,
         }
-        for p in plans
+        for r in result.results
     ]
     return ToolOutcome(
-        content=json_content({"summary": summarise(plans), "results": items}),
+        content=json_content({"summary": result.counts, "results": items}),
         ui={"kind": "bulk_preview", "items": items},
         summary="پیش‌نمایش آغاز گروهی ارزیابی",
     )
@@ -508,6 +528,10 @@ def preview_bulk_evaluations(
         "اجرای واقعی آغاز گروهی ارزیابی برای یک گروه. پرونده‌های تازه به دورهٔ باز و طرحِ فعال مهر می‌خورند؛ بلاک‌ها رد "
         "می‌شوند و در نتیجه می‌آیند."
     ),
+    # هر دو ابزارِ گروهی به endpoint واگذار می‌شوند، نه به `bulk_evaluation`. صدا
+    # زدنِ مستقیمِ سرویس، `ensure_module_enabled(db, "periods")` را دور می‌زد: با
+    # ماژول خاموش رابط ردّ می‌کرد و دستیار پروندهٔ واقعی می‌ساخت. واگذاری، اعلانِ
+    # «چند پرونده روی میزت آمد» به نمره‌دهنده‌ها را هم برمی‌گرداند که ابزار نداشت.
     category="دوره‌ها",
     risky=True,
     roles=(UserRole.hr,),
@@ -515,44 +539,40 @@ def preview_bulk_evaluations(
         "type": "object",
         "properties": {
             "org_unit": {"type": "string"},
-            "only_managers": {"type": "boolean"},
+            "only_managers": {
+                "type": "boolean",
+                "description": "بله = فقط مدیران، خیر = فقط غیرمدیران؛ نیاوردنش یعنی هر دو",
+            },
             "contract_ends_before": {"type": "string"},
         },
     },
 )
 def run_bulk_evaluations(
-    ctx: ToolContext, org_unit: str = "", only_managers: bool = False, contract_ends_before: str = ""
+    ctx: ToolContext,
+    org_unit: str = "",
+    only_managers: bool | None = None,
+    contract_ends_before: str = "",
 ) -> ToolOutcome:
-    from app.services.audit import log_event
-    from app.services.bulk_evaluation import CohortFilter, execute, summarise
+    from app.api.routers.periods import run_bulk_create
 
-    db = ctx.db
-    cohort = CohortFilter(
-        org_unit=(org_unit or "").strip() or None,
-        only_managers=bool(only_managers),
-        contract_ends_before=_parse_date(contract_ends_before),
+    result = run_bulk_create(
+        payload=_cohort_payload(org_unit, only_managers, contract_ends_before),
+        db=ctx.db,
+        current_user=ctx.user,
     )
-    plans = execute(db, cohort)
-    log_event(
-        db,
-        actor_user_id=ctx.user.id,
-        event_type="evaluations_bulk_created",
-        new_value={"summary": summarise(plans), "via": "ai_copilot"},
-    )
-    db.commit()
     items = [
         {
-            "personnel_id": p.personnel_id,
-            "full_name": p.full_name,
-            "outcome": p.outcome.value,
-            "evaluation_id": p.evaluation_id,
-            "evaluation_code": p.evaluation_code,
-            "reason": p.reason,
+            "personnel_id": r.personnel_id,
+            "full_name": r.full_name,
+            "outcome": r.outcome,
+            "evaluation_id": r.evaluation_id,
+            "evaluation_code": r.evaluation_code,
+            "reason": r.reason,
         }
-        for p in plans
+        for r in result.results
     ]
     return ToolOutcome(
-        content=json_content({"summary": summarise(plans), "results": items}),
+        content=json_content({"summary": result.counts, "results": items}),
         ui={"kind": "bulk_preview", "items": items},
         summary="اجرای گروهی ارزیابی انجام شد",
     )
@@ -670,20 +690,29 @@ def create_improvement_plan(
     },
 )
 def update_improvement_plan_goal(ctx: ToolContext, goal_id: int, is_done: bool = True) -> ToolOutcome:
+    # بدنهٔ پیشین سه چیزِ endpoint را نداشت: `_ensure_plan_open` (پس هدفِ یک
+    # برنامهٔ تکمیل/لغوشده — سندی بسته — هم جابه‌جا می‌شد)، رویدادِ
+    # `improvement_goal_updated`، و قفلِ `for_update` روی برنامه که همین اواخر
+    # به همهٔ مسیرهای نوشتنِ برنامهٔ بهبود اضافه شد. ابزار فقط شناسهٔ هدف را
+    # می‌گیرد، پس `plan_id` از خودِ هدف خوانده می‌شود و بقیه دستِ endpoint است.
+    from app.api.routers.improvement_plans import update_goal
     from app.models.improvement_plan import ImprovementPlanGoal
+    from app.schemas.improvement_plan import GoalUpdate
 
     db = ctx.db
     goal = db.get(ImprovementPlanGoal, int(goal_id))
     if goal is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "هدفی با این شناسه پیدا نشد")
-    plan = goal.plan
-    if ctx.user.role != UserRole.hr and plan.owner_user_id != ctx.user.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "پیگیری این برنامه با شما نیست")
-    goal.is_done = bool(is_done)
-    db.commit()
+    updated = update_goal(
+        plan_id=goal.plan_id,
+        goal_id=goal.id,
+        payload=GoalUpdate(is_done=bool(is_done)),
+        db=db,
+        current_user=ctx.user,
+    )
     return ToolOutcome(
-        content=json_content({"updated": True, "goal_id": goal.id, "is_done": goal.is_done}),
-        summary=f"هدف «{goal.description[:40]}» {'انجام‌شده علامت خورد' if is_done else 'باز شد'}",
+        content=json_content({"updated": True, "goal_id": updated.id, "is_done": updated.is_done}),
+        summary=f"هدف «{updated.description[:40]}» {'انجام‌شده علامت خورد' if is_done else 'باز شد'}",
     )
 
 

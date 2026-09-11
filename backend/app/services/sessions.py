@@ -84,7 +84,28 @@ def rotate_session(
     (در این حالت access token صادر می‌شود ولی کوکی عوض نمی‌شود).
     خطا: RefreshReuseError برای توکن باطل/سرقتی — تمام نشست‌های کاربر باطل می‌شوند.
     """
-    session = db.scalar(select(AuthSession).where(AuthSession.jti == jti))
+    # قفلِ ردیفی، و نه یک `SELECT` ساده.
+    #
+    # کلِ کشفِ سرقت روی یک «بخوان، بسنج، بنویس» بنا شده: اگر `rotated_at`
+    # پر باشد یعنی این توکن قبلاً مصرف شده و کسِ دوم دزد است. بی قفل، دو
+    # `POST /auth/refresh`ِ هم‌زمان با یک کوکی هر دو `rotated_at IS NULL`
+    # می‌بینند، هر دو نشستِ جانشین می‌سازند و هر دو ۲۰۰ می‌گیرند — یعنی
+    # تضمین فقط برای استفادهٔ *متوالی* برقرار بود. دزدی که هم‌زمان با قربانی
+    # refresh می‌کرد، دو شاخهٔ زندهٔ نشست می‌ساخت و کشف نمی‌شد.
+    #
+    # با قفل، دومی پشتِ اولی می‌ماند و بعد `rotated_at`ِ پرشده را می‌بیند:
+    # یا در مهلتِ grace است (پاسخِ بی‌چرخش) یا خارجش، که همان مسیرِ
+    # «همه را باطل کن» است.
+    #
+    # `populate_existing` لازم است چون ممکن است همین ردیف از قبل در Identity
+    # Map نشسته باشد؛ بی آن، مقدارِ کهنهٔ داخلِ نشست برمی‌گردد و قفل بی‌اثر
+    # می‌شود (همان الگوی `login_guard.record_failure`).
+    session = db.scalar(
+        select(AuthSession)
+        .where(AuthSession.jti == jti)
+        .with_for_update(of=AuthSession)
+        .execution_options(populate_existing=True)
+    )
     now = _now()
 
     if (

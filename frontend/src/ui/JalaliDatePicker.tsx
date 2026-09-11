@@ -75,14 +75,29 @@ export function JalaliDatePicker({
       if (containerRef.current?.contains(t) || popoverContains(t)) return;
       setOpen(false);
     }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+    // Escape فقط *این* لایه را می‌بندد، نه هرچه زیرش باز است.
+    //
+    // تقویم اغلب داخلِ یک مودال است و `useFocusTrap` هم شنوندهٔ Escape روی
+    // `document` دارد. تا امروز هیچ‌کدام جلوی دیگری را نمی‌گرفت، پس یک Escape
+    // هم تقویم را می‌بست و هم کلِ دیالوگ را: کاربر در «آغاز دورهٔ ارزیابی
+    // جدید» تاریخ را باز می‌کرد، Escape می‌زد که فقط تقویم برود، و کلِ فرم
+    // ناپدید می‌شد. در `BulkCreateDialog` یعنی از دست رفتنِ انتخابِ پرسنلِ
+    // چندمرحله‌ای.
+    //
+    // فازِ **capture** و نه bubble: هر دو شنونده روی `document` نشسته‌اند، پس
+    // `stopPropagation` در فازِ bubble آن یکی را — که روی همان گره است —
+    // متوقف نمی‌کند. در capture، رویداد هنوز به هدف نرسیده؛ متوقف‌کردنش
+    // یعنی هیچ‌وقت به فازِ bubble و به تلهٔ مودال نمی‌رسد.
+    function onKeyDownCapture(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
     }
     document.addEventListener("mousedown", onClickOutside);
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDownCapture, true);
     return () => {
       document.removeEventListener("mousedown", onClickOutside);
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDownCapture, true);
     };
   }, [open, popoverContains]);
 
