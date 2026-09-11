@@ -395,6 +395,27 @@ def execute_tool(ctx: ToolContext, spec: ToolSpec, arguments: dict) -> ToolOutco
     return outcome
 
 
+def first_validation_message(err: Exception) -> str:
+    """اولین پیامِ ValidationError، به زبانی که مدل بتواند به کاربر بگوید.
+
+    ابزارهایی که کارشان را به endpoint واگذار می‌کنند، ورودیِ مدل را در همان
+    schema رابط می‌ریزند. اگر آن schema ردّش کند، `ValidationError` خام یک بلوکِ
+    چندخطیِ انگلیسی با نام کلاس و URL است؛ چیزی که نه به کاربر گفتنی است نه به
+    مدل کمکی می‌کند. متنِ خودِ قاعده — که در schema به فارسی نوشته شده — همان
+    چیزی است که باید بالا بیاید.
+    """
+    errors = getattr(err, "errors", None)
+    details = errors() if callable(errors) else []
+    if not details:
+        return "ورودیِ این کار معتبر نبود"
+    first = details[0]
+    message = str(first.get("msg") or "").removeprefix("Value error, ").strip()
+    location = "، ".join(str(part) for part in first.get("loc", ()) if part != "__root__")
+    if message and location:
+        return f"{message} (فیلد: {location})"
+    return message or f"ورودیِ «{location}» معتبر نبود"
+
+
 def json_content(payload: Any) -> str:
     """محتوایی که مدل می‌بیند — JSON خوانا، کوتاه، بدون کلید اضافه."""
     return json.dumps(payload, ensure_ascii=False, default=str)

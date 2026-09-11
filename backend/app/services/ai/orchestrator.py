@@ -149,6 +149,27 @@ def _system_prompt(
     )
 
 
+def _log_refusal(ctx: ToolContext, spec: ToolSpec, arguments: dict, *, reason: str) -> None:
+    """ردّشدنِ یک کنشِ پرخطر در لحظهٔ *پیشنهاد* — پیش از آنکه کارتی وجود داشته باشد.
+
+    تراکنش جداگانه‌ای ندارد: همان `db.commit()` انتهای هر پلهٔ حلقه ماندگارش
+    می‌کند. اگر نوبت شکست بخورد، رویداد هم با آن برمی‌گردد — که درست است،
+    چون آن‌وقت هیچ چیزِ دیگری هم از آن نوبت نمانده.
+    """
+    log_event(
+        ctx.db,
+        actor_user_id=ctx.user.id,
+        event_type="ai_tool_refused",
+        new_value={
+            "tool": spec.name,
+            "arguments": tools_base.sanitize_arguments(arguments),
+            "conversation_id": ctx.conversation_id,
+            "reason": reason,
+            "via": "ai_copilot",
+        },
+    )
+
+
 def _execute_call(
     ctx: ToolContext,
     spec: ToolSpec,
@@ -165,8 +186,19 @@ def _execute_call(
     db = ctx.db
     if spec.risky:
         if not allow_writes:
+            _log_refusal(ctx, spec, arguments, reason="read_only_mode")
             return json_content({"error": "اجازهٔ تغییر داده ندارید؛ این کنش فقط خواندنی است."})
-        tools_base.guard(spec, ctx.user, ctx.caps)
+        try:
+            tools_base.guard(spec, ctx.user, ctx.caps)
+        except HTTPException:
+            # قوی‌ترین نشانهٔ حمله، تا امروز نامرئی بود: گارد *پیش از*
+            # `execute_tool` بالا می‌آید، پس هیچ‌کدام از دو رویدادِ آن‌جا
+            # (`ai_tool_invoked` / `ai_tool_failed`) نوشته نمی‌شد و تنها ردّش یک
+            # `StepTrace` در پاسخِ همان نوبت بود — چیزی که در گزارشِ رویدادها
+            # نمی‌ماند. ابزارِ *فقط-خواندنیِ* ردشده لاگ می‌گرفت و پرخطر نه؛
+            # یعنی دقیقاً برعکسِ چیزی که باید.
+            _log_refusal(ctx, spec, arguments, reason="not_permitted")
+            raise
         pending = AiPendingAction(
             conversation_id=ctx.conversation_id,
             user_id=ctx.user.id,

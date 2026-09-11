@@ -12,7 +12,7 @@ from datetime import date
 from fastapi import HTTPException, status
 
 from app.core.clock import local_day_end, local_day_start
-from app.models.enums import UserRole
+from app.models.enums import Capability, UserRole
 from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
 
 
@@ -35,7 +35,11 @@ def _parse_date(value: str | None) -> date | None:
     ),
     category="گزارش",
     read_only=True,
-    guarded_inline=True,
+    # `guarded_inline=True` بدون اعلانِ نقش یعنی `is_allowed` برای *همه* True
+    # برمی‌گرداند، پس این ابزار به کارمند هم تبلیغ می‌شد و `_hr_only` در لحظهٔ
+    # اجرا ۴۰۳ می‌داد — دقیقاً همان «پیشنهادِ مطمئن با دکمهٔ مرده» که داک‌استرینگِ
+    # `allowed_tools` ممنوعش کرده. گارد سرِ جایش می‌ماند؛ اعلان اضافه می‌شود.
+    roles=(UserRole.hr,),
     parameters={
         "type": "object",
         "properties": {
@@ -77,7 +81,11 @@ def report_summary(
     description="مقایسهٔ امتیاز یک فرد با میانگین واحد خودش (ارزیابی نهایی‌شده؛ با رعایت سرکوب کوهورت).",
     category="گزارش",
     read_only=True,
-    guarded_inline=True,
+    # `guarded_inline=True` بدون اعلانِ نقش یعنی `is_allowed` برای *همه* True
+    # برمی‌گرداند، پس این ابزار به کارمند هم تبلیغ می‌شد و `_hr_only` در لحظهٔ
+    # اجرا ۴۰۳ می‌داد — دقیقاً همان «پیشنهادِ مطمئن با دکمهٔ مرده» که داک‌استرینگِ
+    # `allowed_tools` ممنوعش کرده. گارد سرِ جایش می‌ماند؛ اعلان اضافه می‌شود.
+    roles=(UserRole.hr,),
     parameters={
         "type": "object",
         "properties": {"personnel_id": {"type": "integer"}, "period_id": {"type": "integer"}},
@@ -110,7 +118,11 @@ def employee_vs_unit(ctx: ToolContext, personnel_id: int, period_id: int | None 
     ),
     category="گزارش",
     read_only=True,
-    guarded_inline=True,
+    # `guarded_inline=True` بدون اعلانِ نقش یعنی `is_allowed` برای *همه* True
+    # برمی‌گرداند، پس این ابزار به کارمند هم تبلیغ می‌شد و `_hr_only` در لحظهٔ
+    # اجرا ۴۰۳ می‌داد — دقیقاً همان «پیشنهادِ مطمئن با دکمهٔ مرده» که داک‌استرینگِ
+    # `allowed_tools` ممنوعش کرده. گارد سرِ جایش می‌ماند؛ اعلان اضافه می‌شود.
+    roles=(UserRole.hr,),
     parameters={"type": "object", "properties": {}},
 )
 def dashboard_overview(ctx: ToolContext) -> ToolOutcome:
@@ -127,7 +139,11 @@ def dashboard_overview(ctx: ToolContext) -> ToolOutcome:
     description="پرسنلِ فعالِ قراردادش رو به اتمام است یا منقضی شده — ورودیِ طبیعی تصمیم تمدید.",
     category="گزارش",
     read_only=True,
-    guarded_inline=True,
+    # `guarded_inline=True` بدون اعلانِ نقش یعنی `is_allowed` برای *همه* True
+    # برمی‌گرداند، پس این ابزار به کارمند هم تبلیغ می‌شد و `_hr_only` در لحظهٔ
+    # اجرا ۴۰۳ می‌داد — دقیقاً همان «پیشنهادِ مطمئن با دکمهٔ مرده» که داک‌استرینگِ
+    # `allowed_tools` ممنوعش کرده. گارد سرِ جایش می‌ماند؛ اعلان اضافه می‌شود.
+    roles=(UserRole.hr,),
     parameters={
         "type": "object",
         "properties": {
@@ -192,7 +208,9 @@ def my_scoring_analysis(ctx: ToolContext) -> ToolOutcome:
     ),
     category="گزارش",
     read_only=True,
-    guarded_inline=True,
+    # بدنه هر دو مجوز را می‌پذیرد («گزارش کامل» یا فقط رویدادهای سامانه‌ای) و
+    # `is_allowed` اشتراکِ مجموعه‌ای می‌گیرد، پس اعلانِ هر دو همان «یا» است.
+    capabilities=(Capability.view_audit_log, Capability.view_diagnostics),
     parameters={
         "type": "object",
         "properties": {

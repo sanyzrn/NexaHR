@@ -149,11 +149,19 @@ def test_hr_owner_of_a_claimed_case_is_also_seated(client, db_session, seated):
 
 
 def test_copilot_deactivation_uses_the_same_guard(client, db_session, seated):
-    """مسیرِ همکار endpoint را صدا نمی‌زند، پس گاردش را جدا لازم دارد."""
+    """همان گارد، از راهِ ابزارِ همکار.
+
+    این تست قبلاً `ai/actions.py:_do_deactivate_user` را صدا می‌زد — لایه‌ای که
+    دیگر به هیچ مسیری وصل نبود و *فقط همین تست* نگهش داشته بود. یعنی گاردِ
+    زندهٔ امروز را نمی‌سنجید. حالا از `update_user`ِ ابزارها می‌رود، که همان
+    راهی است که دستیار واقعاً می‌پیماید.
+    """
     from fastapi import HTTPException
 
+    from app.models.enums import Capability
     from app.schemas.auth import CurrentUser
-    from app.services.ai.actions import _do_deactivate_user
+    from app.services.ai.tools.base import ToolContext
+    from app.services.ai.tools.people import update_user as update_user_tool
 
     db = db_session
     person, sup, ceo, hr = seated
@@ -163,6 +171,13 @@ def test_copilot_deactivation_uses_the_same_guard(client, db_session, seated):
         id=hr.id, username=hr.username, role=UserRole.hr, personnel_id=None,
         full_name=hr.username, must_change_password=False,
     )
+    ctx = ToolContext(
+        db=db,
+        user=actor,
+        caps=frozenset({Capability.manage_users}),
+        conversation_id=0,
+        allow_writes=True,
+    )
     with pytest.raises(HTTPException) as exc:
-        _do_deactivate_user(db, {"user_id": sup.id}, actor)
+        update_user_tool(ctx, user_id=sup.id, is_active=False)
     assert exc.value.status_code == 409

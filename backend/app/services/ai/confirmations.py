@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import update
+from sqlalchemy import delete, or_, update
 from sqlalchemy.orm import Session
 
 from app.models.ai import AiConversation, AiMessage, AiPendingAction
@@ -242,3 +242,31 @@ def reject(
     )
     db.commit()
     return row
+
+
+#: چند روز پس از تصمیم، کارتِ یک کنش دور ریخته می‌شود.
+#:
+#: کارت فقط *ظاهرِ* گفت‌وگوست؛ سندِ ماندگارِ «چه کسی چه چیزی را تأیید کرد»
+#: رویدادِ `ai_action_confirmed` در گزارش رویدادهاست و دست نمی‌خورد. پس
+#: نگه‌داشتنِ ابدیِ ردیف، فقط جدولی است که با هر گفت‌وگو بزرگ‌تر می‌شود.
+PENDING_RETENTION_DAYS = 30
+
+
+def purge_decided_actions(db: Session) -> int:
+    """کارت‌های تصمیم‌گرفته‌شده و رهاشدهٔ قدیمی را پاک می‌کند.
+
+    تا امروز هیچ جارویی این جدول را نمی‌دید: `confirmed`، `rejected`، `failed`
+    و `expired` تا ابد می‌ماندند. ردیفِ `pending` هم وقتی حذف می‌شود که از
+    انقضایش هم همان‌قدر گذشته باشد — یعنی کسی هرگز تصمیمی نگرفت و دیگر هم
+    نمی‌گیرد (نقطهٔ تأیید، منقضی را اجرا نمی‌کند).
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=PENDING_RETENTION_DAYS)
+    result = db.execute(
+        delete(AiPendingAction).where(
+            or_(
+                (AiPendingAction.status != "pending") & (AiPendingAction.created_at < cutoff),
+                (AiPendingAction.status == "pending") & (AiPendingAction.expires_at < cutoff),
+            )
+        )
+    )
+    return result.rowcount or 0

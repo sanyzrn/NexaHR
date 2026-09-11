@@ -131,6 +131,13 @@ def _row_report(preview: ImportPreview, only_problems: bool = False) -> list[dic
     return out
 
 
+def _may_import_personnel(db: Session, user: CurrentUser) -> bool:
+    """همان گاردِ `POST /api/personnel/import/preview`: نقشِ hr یا `manage_personnel`."""
+    from app.api.deps import capabilities_of
+
+    return user.role == UserRole.hr or Capability.manage_personnel in capabilities_of(db, user.id)
+
+
 def stage_upload(
     db: Session, user: CurrentUser, conversation_id: int, filename: str, mime_type: str, content: bytes
 ) -> tuple[object, dict]:
@@ -142,7 +149,7 @@ def stage_upload(
 
     lowered = (filename or "").lower()
     structure: dict = {"kind": "file"}
-    if lowered.endswith(_ALLOWED_EXTENSIONS):
+    if lowered.endswith(_ALLOWED_EXTENSIONS) and _may_import_personnel(db, user):
         preview = parse_workbook(content, db)
         if not preview.file_errors:
             structure = {
@@ -153,6 +160,14 @@ def stage_upload(
         else:
             # فایل اکسل است ولی قالبِ پرسنل نیست: بازرسیِ عمومی می‌ماند.
             structure = {"kind": "excel", "file_errors": list(preview.file_errors)}
+    elif lowered.endswith(_ALLOWED_EXTENSIONS):
+        # اکسل هست ولی این کاربر حقِ ورودِ گروهی ندارد: بازرسیِ عمومی می‌ماند و
+        # مسیرِ قالبِ پرسنل اصلاً باز نمی‌شود. `parse_workbook` برای هر ردیف
+        # می‌گوید «این کد پرسنلی از قبل ثبت شده است» یا «این نام کاربری هست» —
+        # یعنی یک اوراکلِ وجود روی کدهای پرسنلی و نام‌های کاربری، در دستِ کسی که
+        # در رابط حتی پیش‌نمایشِ ورود را هم نمی‌بیند (`POST /api/personnel/import/preview`
+        # پشتِ `hr OR manage_personnel` است).
+        structure = {"kind": "excel", "file_errors": []}
     else:
         structure = {
             "kind": "file",

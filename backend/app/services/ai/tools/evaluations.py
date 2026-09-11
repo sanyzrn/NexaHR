@@ -24,6 +24,7 @@ from app.models.enums import Capability, EvaluationStatus, UserRole
 from app.models.evaluation import EvaluationRecord
 from app.models.personnel import Personnel
 from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
+from app.services.workflow import IS_OPEN_RECORD
 
 _STATUS_LABELS = {
     "draft": "نمره‌دهی",
@@ -467,14 +468,18 @@ def add_evaluation_comment(
     parameters={"type": "object", "properties": {"personnel_id": {"type": "integer"}}, "required": ["personnel_id"]},
 )
 def invite_self_assessment(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
-    from app.services.self_assessment import invite
+    # واگذاری، چون `ensure_module_enabled(db, "self_assessment")` در بدنهٔ
+    # endpoint است و صدا زدنِ مستقیمِ سرویس دورش می‌زد: سازمانی که خودارزیابی را
+    # خاموش کرده بود، از راه دستیار دعوت‌نامه می‌فرستاد.
+    from app.api.routers.personnel import invite_to_self_assessment
 
     db = ctx.db
-    person = db.get(Personnel, int(personnel_id))
-    if person is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "پرسنلی با این شناسه پیدا نشد")
-    record = invite(db, person, ctx.user.id)
-    db.commit()
+    person = invite_to_self_assessment(personnel_id=int(personnel_id), db=db, current_user=ctx.user)
+    record = db.scalar(
+        select(EvaluationRecord).where(
+            EvaluationRecord.subject_personnel_id == person.id, IS_OPEN_RECORD
+        )
+    )
     return ToolOutcome(
         content=json_content({
             "invited": True,
@@ -493,7 +498,15 @@ def invite_self_assessment(ctx: ToolContext, personnel_id: int) -> ToolOutcome:
     ),
     category="ارزیابی",
     read_only=True,
-    guarded_inline=True,
+    # هر نقشی که بدنه شاخه‌ای برایش دارد؛ `support` عمداً نیست و بدنه هم ۴۰۳
+    # می‌دهد. بدون این اعلان، ابزار به `support` تبلیغ می‌شد و دکمه‌اش مرده بود.
+    roles=(
+        UserRole.hr,
+        UserRole.unit_supervisor,
+        UserRole.deputy,
+        UserRole.ceo,
+        UserRole.employee,
+    ),
     parameters={"type": "object", "properties": {"limit": {"type": "integer"}}},
 )
 def my_open_cases(ctx: ToolContext, limit: int = 15) -> ToolOutcome:
@@ -571,6 +584,27 @@ def my_open_cases(ctx: ToolContext, limit: int = 15) -> ToolOutcome:
     },
 )
 def explain_evaluation_rules(ctx: ToolContext, evaluation_id: int | None = None) -> ToolOutcome:
+    """طرحِ نمره‌دهی، در دو لایه — نه همه‌چیز برای همه، نه هیچ‌چیز برای هیچ‌کس.
+
+    تا امروز این ابزار `guarded_inline=True` بود و بدنه‌اش هیچ گاردی نداشت، پس
+    کلِ طرح — وزنِ تک‌تک شاخص‌ها، قانونِ شواهد، سقفِ امتیازِ ویژه — به هر
+    کاربرِ دارای دستیار می‌رسید. در رابط هر پنج endpointِ خواندنِ طرح پشتِ
+    `manage_scoring` است (`routers/scoring_schemes.py`).
+
+    ولی بستنِ کامل هم جواب نیست: کارمندی که نداند ۷۵ یعنی «قابل قبول»،
+    کارنامهٔ خودش را نمی‌فهمد. آن شفافیت است، نه نشت.
+
+    پس مرز این‌جاست — **آنچه می‌گوید «با چه معیاری قضاوت می‌شوی»** برای همه،
+    و **آنچه می‌گوید «کدام دکمه را فشار بده تا نمره بالا برود»** فقط برای
+    دارندهٔ `manage_scoring`:
+
+    * باز: نسخه و نامِ طرح، آستانه‌های برچسب، وزنِ دو بخشِ عمومی/تخصصی.
+      برچسبِ نمره چیزی است که روی کارنامهٔ خودِ فرد چاپ می‌شود، و سهمِ دو
+      بخش هم روی همان کارنامه دیده می‌شود.
+    * بسته: وزنِ تک‌تک شاخص‌ها (کدام شاخص واقعاً نمره می‌سازد)، قانونِ شواهد
+      (چه نمره‌ای شواهد می‌خواهد و چند کلمه)، سقفِ امتیازِ ویژه، و سقفِ اثرِ
+      برنامهٔ بهبود. هر چهارتا قابلِ بازی‌کردن‌اند.
+    """
     db = ctx.db
     from app.models.scoring_scheme import ScoringScheme
     from app.services.scoring_scheme import active_scheme
@@ -594,14 +628,25 @@ def explain_evaluation_rules(ctx: ToolContext, evaluation_id: int | None = None)
         "status": scheme.status.value,
         "general_section_weight": float(scheme.general_section_weight),
         "specialized_section_weight": float(scheme.specialized_section_weight),
-        "evidence_required_scores": scheme.evidence_required_scores,
-        "evidence_min_words": scheme.evidence_min_words,
-        "evidence_max_words": scheme.evidence_max_words,
-        "bonus_max_points": float(scheme.bonus_max_points),
-        "improvement_plan_max_pct": float(scheme.improvement_plan_max_pct),
         "thresholds": scheme.thresholds,
-        "indicator_weights": {str(k): float(v) for k, v in (scheme.indicator_weights or {}).items()},
     }
+    if Capability.manage_scoring in ctx.caps:
+        payload.update({
+            "evidence_required_scores": scheme.evidence_required_scores,
+            "evidence_min_words": scheme.evidence_min_words,
+            "evidence_max_words": scheme.evidence_max_words,
+            "bonus_max_points": float(scheme.bonus_max_points),
+            "improvement_plan_max_pct": float(scheme.improvement_plan_max_pct),
+            "indicator_weights": {
+                str(k): float(v) for k, v in (scheme.indicator_weights or {}).items()
+            },
+        })
+    else:
+        payload["note"] = (
+            "جزئیاتِ داخلیِ طرح — وزنِ هر شاخص، قانونِ شواهد و سقفِ امتیازِ ویژه — "
+            "دادهٔ مدیریتِ نمره‌دهی است و در دسترس شما نیست. آستانه‌ها و سهمِ دو "
+            "بخش، همان چیزی است که روی کارنامهٔ خودتان هم می‌بینید."
+        )
     return ToolOutcome(
         content=json_content(payload),
         summary=f"قواعد طرح نمره‌دهی نسخهٔ {scheme.version}",
