@@ -662,29 +662,45 @@ def test_a_second_confirm_during_execution_is_refused_and_runs_once(monkeypatch)
             thread.join(5)
             second.close()
 
-        assert result["second"] == 409, f"تأیید دوم باید ۴۰۹ بگیرد، نه {result['second']!r}"
-        assert result["first"] == "confirmed"
-        checker = make_session()
+        # پاک‌سازی **پیش از** ادعاها، در `finally`.
+        #
+        # این تست عمداً commit می‌کند (دو اتصالِ واقعی لازم دارد)، پس
+        # ردیف‌هایش از rollbackِ savepointِ conftest بیرون‌اند و در دیتابیسِ
+        # *مشترکِ* تست می‌مانند. تا امروز پاک‌سازی **بعد از** ادعاها بود:
+        # اولین assertionی که می‌شکست، پرسنلِ نشان‌دار و ردیفِ `AiSettings` را
+        # جا می‌گذاشت — و داکِ خودِ `_cleanup_confirm_fixture` می‌گوید
+        # تست‌های بعدی «تنظیم‌نشده» بودنِ AI را فرض می‌کنند. یعنی یک شکستِ
+        # ساده (مثلاً ریفکتورِ مقدارِ بازگشتیِ `confirm`) همهٔ اجراهای بعدی را
+        # آلوده می‌کرد، و علتش دیگر پیدا نبود.
+        #
+        # الگو از `test_score_write_lock.py`: پاک‌سازی کارِ teardown است، نه
+        # کارِ مسیرِ موفق.
         try:
-            written = checker.scalars(
-                select(Personnel).where(Personnel.personnel_code == marker_code)
-            ).all()
+            checker = make_session()
+            try:
+                written = checker.scalars(
+                    select(Personnel).where(Personnel.personnel_code == marker_code)
+                ).all()
+            finally:
+                checker.close()
+
+            assert result["second"] == 409, (
+                f"تأیید دوم باید ۴۰۹ بگیرد، نه {result['second']!r}"
+            )
+            assert result["first"] == "confirmed"
             assert len(written) == 1, "اجرای دوباره یعنی claiming اتمی نیست"
         finally:
-            checker.close()
-
-        # پاک‌سازیِ داده‌ای که عمداً commit شده (پرسنلِ نشان‌دار + دادهٔ AI)
-        cleanup = make_session()
-        try:
-            person = cleanup.scalars(
-                select(Personnel).where(Personnel.personnel_code == marker_code)
-            ).first()
-            if person is not None:
-                cleanup.delete(person)
-            cleanup.commit()
-        finally:
-            cleanup.close()
-        _cleanup_confirm_fixture(make_session, hr.id)
+            cleanup = make_session()
+            try:
+                person = cleanup.scalars(
+                    select(Personnel).where(Personnel.personnel_code == marker_code)
+                ).first()
+                if person is not None:
+                    cleanup.delete(person)
+                cleanup.commit()
+            finally:
+                cleanup.close()
+            _cleanup_confirm_fixture(make_session, hr.id)
     finally:
         tools_base.REGISTRY.pop("af_slow_write", None)
         engine.dispose()

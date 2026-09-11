@@ -34,11 +34,18 @@ def _evaluator_seat(record: EvaluationRecord) -> tuple[int | None, str]:
     return getattr(record, field), SEAT_LABEL[field]
 
 
-def _applied_bonus_for_document(db: Session, record: EvaluationRecord) -> float | None:
+def applied_bonus_for_document(db: Session, record: EvaluationRecord) -> float | None:
     """امتیازِ ویژه‌ای که در نتیجه اثر کرده — همان که سند باید چاپش کند.
 
     `None` وقتی امتیازی ثبت نشده، تا شرطِ قالب (`{% if snapshot.bonus_points %}`)
     مثل قبل کار کند و بلوکِ سه‌عددی اصلاً نیاید.
+
+    عمومی است چون خروجیِ Excel هم باید *همین* عدد را بنویسد. ستونِ
+    `record.bonus_points` مقدارِ **خام** است — آنچه ارزیاب تایپ کرده، پیش از
+    دو مهارِ `applied_bonus` (سقفِ نسخهٔ طرح، و سقفِ ۱۰۰ روی حاصل). اکسل تا
+    امروز همان خام را می‌نوشت، پس با پایهٔ ۹۸ و خامِ ۵ و سقفِ ۲، ردیفِ اکسل
+    «۹۸ + ۵» می‌گفت و سندِ رسمی «۹۸ + ۲». منابع انسانی که این دو را کنارِ هم
+    می‌گذارد، عددهایی می‌بیند که جمع نمی‌شوند — و سند، همانی است که امضا شده.
     """
     raw = float(record.bonus_points or 0.0)
     if not raw:
@@ -130,7 +137,7 @@ def build_final_snapshot(db: Session, record: EvaluationRecord) -> dict:
         #
         # قاعده از `evaluation.applied_bonus` می‌آید و با قواعدِ *مهرشدهٔ همین
         # پرونده* حساب می‌شود، نه طرحِ فعالِ امروز.
-        "bonus_points": _applied_bonus_for_document(db, record),
+        "bonus_points": applied_bonus_for_document(db, record),
         "bonus_reason": record.bonus_reason,
         "recommendation": record.recommendation,
         "evaluator_comment": record.evaluator_comment,

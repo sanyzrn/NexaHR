@@ -108,6 +108,26 @@ _STAGE_LABELS = {
 }
 
 
+def build_evaluation_summary_html(snapshot: dict, verify_url: str | None = None) -> str:
+    """HTMLِ سند، پیش از تبدیل به PDF.
+
+    جدا شده چون *وصلِ* `verify_url` به QR تنها چیزی بود که هیچ تستی نداشت:
+    زنجیرهٔ `record.verify_token → verify_url_for() → qr_data_uri() → سند` سه
+    حلقه دارد و دو سرش سنجیده می‌شد، ولی وسطش نه. جهشِ `verify_qr=None`
+    این‌جا، کلِ مجموعه را سبز رد می‌کرد و سند بی QR چاپ می‌شد.
+
+    تستِ WeasyPrint نیاز ندارد (کتابخانه‌های بومی‌اش ممکن است نباشند) و
+    بایت‌های فشرده‌شدهٔ PDF را هم نمی‌خواهد بکاود — همان HTMLی را می‌سنجد که
+    رندر از آن ساخته می‌شود.
+    """
+    return _env.get_template("evaluation_summary.html").render(
+        snapshot=snapshot,
+        verify_url=verify_url,
+        verify_qr=qr_data_uri(verify_url) if verify_url else None,
+        stage_labels=_STAGE_LABELS,
+    )
+
+
 def render_evaluation_summary_pdf(
     snapshot: dict, verify_url: str | None = None
 ) -> bytes:
@@ -116,13 +136,7 @@ def render_evaluation_summary_pdf(
             "WeasyPrint is not available (missing GTK/GObject native libraries). "
             "Install them to enable PDF generation."
         )
-    template = _env.get_template("evaluation_summary.html")
-    html = template.render(
-        snapshot=snapshot,
-        verify_url=verify_url,
-        verify_qr=qr_data_uri(verify_url) if verify_url else None,
-        stage_labels=_STAGE_LABELS,
-    )
+    html = build_evaluation_summary_html(snapshot, verify_url)
     return _WeasyPrintHTML(
         string=html,
         base_url=str(_TEMPLATES_DIR),

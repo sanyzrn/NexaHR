@@ -81,7 +81,7 @@ from app.services.self_evaluation import (
     ensure_may_administer,
     subject_belongs_to_hr,
 )
-from app.services.snapshot import build_final_snapshot
+from app.services.snapshot import applied_bonus_for_document, build_final_snapshot
 from app.services.workflow import (
     IS_ON_CEO_DESK,
     IS_OPEN_RECORD,
@@ -778,7 +778,13 @@ def export_evaluations_excel(
     # دسترسی به هر ستون یک SELECTِ تازه می‌زند — یک N+1ِ تمام‌عیار که نه از
     # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
     # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
-    content = build_evaluations_workbook(list(records))
+    # امتیازِ ویژه همان چیزی نوشته می‌شود که سندِ رسمی چاپ می‌کند، نه مقدارِ
+    # خامِ ستون — `applied_bonus_for_document` تنها جایی است که این قاعده
+    # نوشته شده.
+    rows = list(records)
+    content = build_evaluations_workbook(
+        rows, {r.id: applied_bonus_for_document(db, r) for r in rows}
+    )
     log_event(db, actor_user_id=current_user.id, event_type="excel_exported")
     db.commit()
     return Response(
