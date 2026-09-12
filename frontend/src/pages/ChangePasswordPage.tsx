@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { apiClient, authToken, extractErrorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useToast } from "../components/Toast";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 import { PasswordInput } from "../ui/PasswordInput";
 import {
   MIN_PASSWORD_LENGTH,
@@ -14,7 +15,7 @@ import {
 } from "../utils/password";
 
 export function ChangePasswordPage() {
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const { showSuccess } = useToast();
   const navigate = useNavigate();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -24,6 +25,8 @@ export function ChangePasswordPage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // فوکوس با باز شدن روی اولین فیلد می‌نشیند، نه روی دکمهٔ بستن.
+  const firstFieldRef = useRef<HTMLInputElement>(null);
 
   const forced = user?.must_change_password ?? false;
   const check = checkPassword(newPassword, {
@@ -82,16 +85,24 @@ export function ChangePasswordPage() {
     }
   }
 
+  /* چرا مودال و نه یک کارت در میانهٔ صفحه:
+     این صفحه داخلِ `Layout` رندر می‌شود، پس تا امروز کلِ پوسته — ناوبری،
+     زنگِ اعلان با متنِ اعلان‌ها، دستیار، دکمهٔ خروج — کنارش زنده می‌ماند.
+     یعنی کاربری که هنوز رمزِ موقتِ HR را دارد، اعلان‌هایش را می‌خواند.
+
+     در حالتِ اجباری این لایه بسته نمی‌شود: نه Escape، نه کلیکِ پس‌زمینه، نه
+     دکمهٔ بستن — و پرده‌ای که پشتش خوانده نمی‌شود. تنها راهِ بیرون، یا
+     گذاشتنِ رمزِ تازه است یا خروج از حساب. آن دکمهٔ خروج عمدی است: کسی که
+     رمزِ فعلی‌اش را به‌یاد نمی‌آورد نباید در یک صفحه حبس شود. */
   return (
-    <div className="mx-auto max-w-md py-6">
-      <motion.form
-        onSubmit={handleSubmit}
-        className="rounded-3xl border border-gray-200 bg-white p-6"
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-      >
-        <h1 className="mb-1 text-lg font-bold text-gray-900">تغییر رمز عبور</h1>
+    <Modal
+      title="تغییر رمز عبور"
+      size="md"
+      dismissible={!forced}
+      onClose={() => navigate(-1)}
+      initialFocusRef={firstFieldRef}
+    >
+      <form onSubmit={handleSubmit}>
         {forced ? (
           <p className="mb-5 text-sm text-amber-700">
             رمز فعلی شما موقتی است و توسط منابع انسانی تعیین شده؛ برای ادامه کار باید رمز جدیدی
@@ -105,6 +116,7 @@ export function ChangePasswordPage() {
 
         <Field label="رمز عبور فعلی" htmlFor="current-password">
           <PasswordInput
+            ref={firstFieldRef}
             id="current-password"
             autoComplete="current-password"
             required
@@ -212,8 +224,21 @@ export function ChangePasswordPage() {
         >
           {submitting ? "در حال ذخیره…" : "تغییر رمز عبور"}
         </Button>
-      </motion.form>
-    </div>
+
+        {forced && (
+          <button
+            type="button"
+            onClick={() => {
+              logout();
+              navigate("/login");
+            }}
+            className="tap-target mx-auto mt-3 block text-xs font-medium text-gray-500 hover:text-gray-700"
+          >
+            خروج از حساب
+          </button>
+        )}
+      </form>
+    </Modal>
   );
 }
 

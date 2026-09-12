@@ -27,6 +27,7 @@ export function Modal({
   children,
   footer,
   initialFocusRef,
+  dismissible = true,
 }: {
   title: ReactNode;
   onClose: () => void;
@@ -39,6 +40,16 @@ export function Modal({
    * effect خودش دوباره focus() صدا بزند — و دو جا که سرِ فوکوس دعوا کنند،
    * برنده‌اش به ترتیب اجرای effectها بستگی دارد، نه به تصمیم کسی. */
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /** آیا کاربر می‌تواند بی تصمیم‌گیری از این لایه بیرون بیاید.
+   *
+   * `false` یعنی نه Escape، نه کلیکِ پس‌زمینه، نه دکمهٔ بستن — و پرده‌ای که
+   * پشتش واقعاً خوانده نمی‌شود. برای صفحه‌هایی که تا انجام‌نشدنِ کار نباید
+   * کنار بروند: تغییرِ رمزِ موقت.
+   *
+   * پردهٔ سنگین‌تر یک تصمیمِ جدا نیست، از خودِ همین معنا می‌آید: لایه‌ای که
+   * بسته نمی‌شود، هرچه پشتش است هم نباید *خوانده* شود. `blur-sm`ِ استاندارد
+   * متن را محو می‌کند ولی همچنان خواندنی می‌گذارد. */
+  dismissible?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -47,14 +58,17 @@ export function Modal({
   // (`ui/focusTrap`). کشوی ناوبریِ موبایل همین رفتار را لازم داشت و نداشتش،
   // و دو نسخهٔ جدا از این منطق یعنی روزی یکی از حالت‌های مرزی فقط در یکی
   // درست است.
-  useFocusTrap(dialogRef, { onEscape: onClose, initialFocusRef });
+  // لایهٔ غیرقابل‌بستن، Escape هم نمی‌گیرد: `onEscape` اصلاً داده نمی‌شود.
+  useFocusTrap(dialogRef, { onEscape: dismissible ? onClose : undefined, initialFocusRef });
 
   return createPortal(
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4 backdrop-blur-sm"
+        className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
+          dismissible ? "bg-gray-900/40 backdrop-blur-sm" : "bg-gray-900/70 backdrop-blur-lg"
+        }`}
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) onClose();
+          if (dismissible && e.target === e.currentTarget) onClose();
         }}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -83,15 +97,17 @@ export function Modal({
             <h3 id={titleId} className="text-sm font-bold text-gray-900 sm:text-base">
               {title}
             </h3>
-            <button
-              onClick={onClose}
-              aria-label="بستن"
-              className="-ml-1 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-            >
-              <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M5 5l10 10M15 5L5 15" />
-              </svg>
-            </button>
+            {dismissible && (
+              <button
+                onClick={onClose}
+                aria-label="بستن"
+                className="-ml-1 rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              >
+                <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M5 5l10 10M15 5L5 15" />
+                </svg>
+              </button>
+            )}
           </div>
           {/* بدونِ footer، همین بخش کفِ مودال است — و padding پایین لازم دارد.
               وگرنه آخرین سطرِ متن به لبهٔ کارت می‌چسبد؛ جایی که footer هست،

@@ -76,9 +76,29 @@ export function Layout() {
   }
 
   if (!user) return null;
-  // رمز موقت (تعیین‌شده توسط HR) باید قبل از هر کار دیگری عوض شود
-  if (user.must_change_password && location.pathname !== "/change-password") {
-    return <Navigate to="/change-password" replace />;
+
+  // رمزِ موقت (تعیین‌شده توسط منابع انسانی) باید پیش از هر کارِ دیگری عوض شود.
+  //
+  // تا امروز فقط یک `Navigate` بود، و صفحهٔ تغییرِ رمز *داخلِ همین پوسته*
+  // رندر می‌شد — یعنی ناوبری، زنگِ اعلان با متنِ اعلان‌ها، دستیار و منوی
+  // پروفایل همه کنارش زنده می‌ماندند. کاربری که هنوز رمزِ HR را داشت،
+  // اعلان‌هایش را می‌خواند.
+  //
+  // حالا پوسته اصلاً ساخته نمی‌شود. این از «پنهان‌کردن با پرده» قوی‌تر است:
+  // چیزی که رندر نشده، نه با z-index بالا می‌آید، نه با Tab پیدا می‌شود، نه
+  // صفحه‌خوان می‌بیندش، و نه کوئری‌هایش به سرور می‌رود. (پردهٔ تارِ خودِ
+  // صفحهٔ تغییرِ رمز سرِ جایش می‌ماند — `Modal` با `dismissible={false}`.)
+  if (user.must_change_password) {
+    if (location.pathname !== "/change-password") {
+      return <Navigate to="/change-password" replace />;
+    }
+    return (
+      <div className="min-h-screen bg-cream-50">
+        <ErrorBoundary>
+          <Outlet />
+        </ErrorBoundary>
+      </div>
+    );
   }
 
   const items = navItemsFor(user.role, can, moduleEnabled, user.personnel_id !== null);
