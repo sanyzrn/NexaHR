@@ -15,6 +15,8 @@ import { Card, EmptyState, PageHeader } from "../../ui/Card";
 import { PctBadge, PctBar, ScoreRing } from "../../ui/Meters";
 import { formatDate, formatDateTime } from "../../utils/dates";
 import type { ImprovementPlanDetail, MyEvaluation } from "../../types";
+import { OBJECTION_MAX } from "../../utils/textLimits";
+import { CharCounter } from "../../ui/CharCounter";
 
 function MyEvaluationCard({
   item,
@@ -225,6 +227,7 @@ function ObjectionSection({ item }: { item: MyEvaluation }) {
             دلیل اعتراض شما
           </label>
           <textarea
+            maxLength={OBJECTION_MAX}
             id={`objection-${item.id}`}
             className="w-full resize-none rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm outline-none"
             rows={3}
@@ -232,6 +235,7 @@ function ObjectionSection({ item }: { item: MyEvaluation }) {
             onChange={(e) => setReason(e.target.value)}
             placeholder="مثلاً: شواهد ثبت‌شده برای شاخص تعهد سازمانی با گزارش حضور و غیاب هم‌خوان نیست"
           />
+          <CharCounter value={reason} max={OBJECTION_MAX} />
           <p className="mt-1.5 text-xs text-amber-700">
             نتیجه و سند رسمی تغییر نمی‌کنند؛ اعتراض شما ثبت و به منابع انسانی ارجاع می‌شود
             و پاسخ آن همین‌جا نمایش داده خواهد شد.

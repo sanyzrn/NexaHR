@@ -18,6 +18,8 @@ import { Card } from "../../ui/Card";
 import { useLocalDraft } from "../../ui/useLocalDraft";
 import { formatDate, formatDateTime } from "../../utils/dates";
 import type { MyOpenEvaluation, SelfAssessment } from "../../types";
+import { SELF_ASSESSMENT_SUMMARY_MAX } from "../../utils/textLimits";
+import { CharCounter } from "../../ui/CharCounter";
 
 const SCORE_OPTIONS = [1, 2, 3, 4, 5];
 
@@ -322,12 +324,14 @@ function SelfAssessmentForm({
           دستاورد کلی شما در این دوره (اختیاری)
         </span>
         <textarea
+          maxLength={SELF_ASSESSMENT_SUMMARY_MAX}
           className="w-full resize-none rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-gray-900"
           rows={3}
           value={overallNote}
           onChange={(e) => setOverallNote(e.target.value)}
           placeholder="مثلاً: راه‌اندازی سامانهٔ گزارش‌گیری واحد و کاهش زمان تهیهٔ گزارش ماهانه"
         />
+        <CharCounter value={overallNote} max={SELF_ASSESSMENT_SUMMARY_MAX} />
       </label>
 
       <div className="flex flex-wrap items-center gap-2">

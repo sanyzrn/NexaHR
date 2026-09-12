@@ -113,3 +113,28 @@ def test_filter_boundary_moves_with_the_timezone(monkeypatch):
 
     monkeypatch.setattr(settings, "org_timezone", "UTC")
     assert local_day_start(date(2025, 10, 7)) == datetime(2025, 10, 7, 0, 0, tzinfo=UTC)
+
+
+def test_the_frontend_formats_dates_in_the_same_timezone():
+    """رابط و سرور باید یک ساعت داشته باشند، وگرنه سند و صفحه دو تاریخ می‌گویند.
+
+    قالب‌بندهای `Intl.DateTimeFormat` بی `timeZone` به وقتِ *مرورگرِ بیننده*
+    کار می‌کنند. روی صفحهٔ عمومیِ تأییدِ QR — که کارش دقیقاً اثباتِ اصالتِ سند
+    است — ممیزی که از بیرونِ تهران اسکن می‌کرد، «تاریخ نهایی‌شدن»ی می‌دید که
+    با تاریخِ چاپ‌شده روی خودِ همان سند یکی نبود.
+
+    همان الگوی `test_audit_event_labels.py`: ثابتِ دو طرف را کنار هم می‌گذارد
+    تا با گذشت زمان از هم جدا نشوند.
+    """
+    from pathlib import Path
+
+    dates_ts = Path(__file__).resolve().parents[2] / "frontend" / "src" / "utils" / "dates.ts"
+    if not dates_ts.exists():  # pragma: no cover — نصبِ بدونِ فرانت‌اند
+        pytest.skip("فرانت‌اند در این نصب نیست")
+
+    source = dates_ts.read_text(encoding="utf-8")
+    assert f'export const ORG_TIMEZONE = "{settings.org_timezone}";' in source, (
+        f"ORG_TIMEZONE فرانت با تنظیمِ سرور ({settings.org_timezone!r}) یکی نیست"
+    )
+    # و هر دو قالب‌بند باید واقعاً از آن استفاده کنند، نه فقط تعریفش کند.
+    assert source.count("timeZone: ORG_TIMEZONE") == 2, source

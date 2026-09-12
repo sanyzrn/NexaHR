@@ -188,3 +188,46 @@ def test_the_row_index_is_left_out_of_the_message():
         [{"type": "greater_than_equal", "loc": ("body", "scores", 3, "score"), "ctx": {"ge": 1}}]
     )
     assert message == "مقدار «امتیاز» خارج از بازهٔ مجاز است (مرز: 1)"
+
+
+def test_the_frontend_mirrors_every_limit():
+    """لایهٔ چهارم: فرم هم باید همان سقف را بداند.
+
+    `maxLength` در کلِ فرانت یک بار به‌کار رفته بود، پس کاربر تا لحظهٔ «ثبت»
+    هیچ نشانه‌ای از سقف نمی‌دید و بعد ۴۲۲ می‌گرفت. داده خراب نمی‌شد؛ فرم با
+    سکوتش دروغ می‌گفت.
+
+    این اعداد تنظیمِ زمانِ اجرا نیستند و بی استقرارِ تازه عوض نمی‌شوند، پس
+    به‌جای یک endpoint، در `utils/textLimits.ts` آینه می‌شوند — و این تست
+    نمی‌گذارد دو طرف از هم جدا بیفتند. همان الگوی
+    `test_audit_event_labels.py` و `test_org_timezone.py`.
+    """
+    import re
+    from pathlib import Path
+
+    mirror = (
+        Path(__file__).resolve().parents[2] / "frontend" / "src" / "utils" / "textLimits.ts"
+    )
+    if not mirror.exists():  # pragma: no cover — نصبِ بدونِ فرانت‌اند
+        pytest.skip("فرانت‌اند در این نصب نیست")
+
+    source = mirror.read_text(encoding="utf-8")
+    found = {
+        name: int(value)
+        for name, value in re.findall(r"export const (\w+) = (\d+);", source)
+    }
+    expected = {
+        name: value
+        for name, value in vars(text_limits).items()
+        if name.isupper()
+        and isinstance(value, int)
+        and name not in text_limits.NOT_USER_FACING
+    }
+
+    assert expected, "هیچ ثابتی در text_limits پیدا نشد — الگوی این تست شکسته است"
+    assert found == expected, (
+        "سقف‌های فرانت و بک‌اند یکی نیستند.\n"
+        f"فقط در بک‌اند: {sorted(set(expected) - set(found))}\n"
+        f"فقط در فرانت: {sorted(set(found) - set(expected))}\n"
+        f"مقدارِ متفاوت: {sorted(k for k in set(found) & set(expected) if found[k] != expected[k])}"
+    )

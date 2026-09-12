@@ -15,6 +15,7 @@
  * این‌جا نباشد، خام نمایش داده می‌شود؛ نبودِ برچسب نباید به گم‌شدن مدرک منجر شود.
  */
 import { ROLE_LABELS, STATUS_LABELS } from "../types";
+import { round1 } from "../utils/rounding";
 
 type Json = Record<string, unknown>;
 
@@ -93,7 +94,7 @@ function formatValue(key: string, value: unknown): string {
   if (typeof value === "boolean") return value ? "بله" : "خیر";
 
   if (typeof value === "number") {
-    if (PERCENT_KEYS.has(key)) return `${faNum(Math.round(value * 10) / 10)}٪`;
+    if (PERCENT_KEYS.has(key)) return `${faNum(round1(value))}٪`;
     if (USER_KEYS.has(key) || key.endsWith("_id")) return `#${faNum(value)}`;
     return faNum(value);
   }
