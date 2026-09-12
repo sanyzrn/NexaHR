@@ -27,7 +27,7 @@ from app.schemas.personnel import (
 )
 from app.services.audit import log_event
 from app.services.authorization import ensure_module_enabled
-from app.services.excel import build_personnel_workbook
+from app.services.excel import EXPORT_MAX_ROWS, build_personnel_workbook, cap_rows, note_truncation
 from app.services.notifications import notify_vacated_seats
 from app.services.org_unit import known_sites, units_in_site
 from app.services.personnel_import import ImportPreview, build_template, commit_import, parse_workbook
@@ -317,7 +317,11 @@ def export_personnel_excel(
         site=site,
         is_manager=is_manager,
     )
-    rows = list(db.scalars(query.order_by(*_personnel_order_by(sort_by, sort_dir))))
+    rows, truncated = cap_rows(
+        db.scalars(
+            query.order_by(*_personnel_order_by(sort_by, sort_dir)).limit(EXPORT_MAX_ROWS + 1)
+        ).all()
+    )
     # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
     #
     # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
@@ -326,6 +330,8 @@ def export_personnel_excel(
     # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
     # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
     content = build_personnel_workbook(rows)
+    if truncated:
+        content = note_truncation(content)
     log_event(db, actor_user_id=current_user.id, event_type="personnel_excel_exported")
     db.commit()
     return FastAPIResponse(

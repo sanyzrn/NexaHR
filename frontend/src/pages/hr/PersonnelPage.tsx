@@ -357,7 +357,16 @@ export function PersonnelPage({ showAccountsTab = true }: { showAccountsTab?: bo
     limit: pageSize,
     offset: page * pageSize,
   });
-  const { data: usersPage } = useUsersList({ limit: 1000 });
+  // فهرستِ کاربران فقط دو مصرف‌کننده دارد و هر دو در دیالوگ‌اند: انتخابگرِ
+  // صندلی‌های زنجیره در فرمِ «افزودن پرسنل» و در مودالِ ویرایش. تا امروز در
+  // *هر* رندرِ این صفحه گرفته می‌شد، حتی وقتی هیچ دیالوگی باز نبود — و
+  // پس از هزار کاربر هم بی‌صدا بریده می‌شد.
+  //
+  // `enabled` به‌جای بزرگ‌کردنِ سقف: مسئله اندازهٔ فهرست نیست، گرفتنِ فهرستی
+  // است که کسی نمی‌بیند. (اگر روزی همین انتخابگر هم به جست‌وجوی سمتِ سرور
+  // برود — مثل `PersonPicker` — این هم برمی‌دارد.)
+  const needsUserList = showAddPersonnel || editingPersonnel !== null;
+  const { data: usersPage } = useUsersList({ limit: 1000, enabled: needsUserList });
   const users = usersPage?.items ?? [];
   const { data: orgUnits = [] } = useOrgUnits(true);
   const hasActiveFilter = Boolean(

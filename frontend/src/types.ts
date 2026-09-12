@@ -829,6 +829,16 @@ export interface EligibleEvaluation {
   finalized_at: string | null;
 }
 
+/** صفحه‌ای از «نیازمند برنامه بهبود».
+ *
+ *  این فهرست هیچ‌وقت خودبه‌خود کوچک نمی‌شود — تنها راهِ خارج‌شدنِ یک پرونده
+ *  از آن، ساختنِ برنامه است. پس بی صفحه‌بندی، در سالِ پنجم چند هزار ردیف در
+ *  DOM می‌ریخت. */
+export interface EligibleEvaluationPage {
+  total: number;
+  items: EligibleEvaluation[];
+}
+
 export interface PeriodProgress {
   period: EvaluationPeriod;
   eligible: number;
