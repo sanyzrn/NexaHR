@@ -11,6 +11,8 @@ import { useUsersList } from "../api/queries";
 import { useConfirm } from "./ConfirmDialog";
 import { useToast } from "./Toast";
 import type { EvaluationDetail, UserRole } from "../types";
+import { REASON_MAX } from "../utils/textLimits";
+import { CharCounter } from "../ui/CharCounter";
 
 type StageField = "unit_supervisor_user_id" | "deputy_user_id" | "ceo_user_id";
 
@@ -289,6 +291,7 @@ function ReassignPanel({
           دلیل تغییر
         </label>
         <textarea
+          maxLength={REASON_MAX}
           id="reassign-reason"
           className={inputClass}
           rows={2}
@@ -296,6 +299,7 @@ function ReassignPanel({
           onChange={(e) => setReason(e.target.value)}
           placeholder="مثلاً: معاونت قبلی از سازمان خارج شد"
         />
+        <CharCounter value={reason} max={REASON_MAX} />
       </div>
 
       <div className="flex gap-2">
@@ -383,6 +387,7 @@ function HandoverPanel({
           دلیل واگذاری
         </label>
         <textarea
+          maxLength={REASON_MAX}
           id="handover-reason"
           className={inputClass}
           rows={2}
@@ -390,6 +395,7 @@ function HandoverPanel({
           onChange={(e) => setReason(e.target.value)}
           placeholder="مثلاً: مرخصی طولانی مسئول فعلی"
         />
+        <CharCounter value={reason} max={REASON_MAX} />
       </div>
 
       <div className="flex gap-2">
@@ -467,6 +473,7 @@ function CancelPanel({
           دلیل لغو
         </label>
         <textarea
+          maxLength={REASON_MAX}
           id="cancel-reason"
           className={inputClass}
           rows={2}
@@ -474,6 +481,7 @@ function CancelPanel({
           onChange={(e) => setReason(e.target.value)}
           placeholder="مثلاً: پرسنل پیش از پایان ارزیابی از سازمان خارج شد"
         />
+        <CharCounter value={reason} max={REASON_MAX} />
       </div>
       <div className="flex gap-2">
         <button

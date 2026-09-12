@@ -286,3 +286,48 @@ describe("کارت دستیار هوشمند", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("جهتِ حرکتِ دستهٔ کلیدها", () => {
+  const OFF: ModuleRow = {
+    key: "m_off",
+    label: "بخشِ خاموش",
+    description: "",
+    enabled: false,
+    requires: [],
+    blocked_by: [],
+    dependents: [],
+  };
+  const ON: ModuleRow = { ...OFF, key: "m_on", label: "بخشِ روشن", enabled: true };
+
+  /** فاصلهٔ دستهٔ کلید از راستِ ظرف، برحسب کلاس‌های Tailwind.
+   *
+   * در RTL «شروع» سمتِ راست است، پس فاصلهٔ بیشتر از راست یعنی دسته به سمتِ چپ
+   * — یعنی «روشن» — رفته. عددِ دقیق مهم نیست؛ فقط ترتیبِ دو حالت.
+   */
+  function knobOffset(sw: HTMLElement): number {
+    const cls = sw.querySelector("span[aria-hidden]")?.className ?? "";
+    const bracket = /right-\[(\d+)px\]/.exec(cls);
+    if (bracket) return Number(bracket[1]);
+    const spaced = /right-(\d+(?:\.\d+)?)/.exec(cls);
+    return spaced ? Number(spaced[1]) * 4 : Number.NaN;
+  }
+
+  it("روشن‌کردنِ یک بخش، دسته را به سمتِ چپ می‌برد — نه راست", async () => {
+    /* دو کلیدِ کشویی در یک صفحه در دو جهتِ مخالف حرکت می‌کردند: روشن‌کردنِ یک
+       ماژول دسته را به راست می‌بُرد و روشن‌کردنِ یک سرویسِ بیرونی به چپ
+       (`right-1` خاموش، `right-7` روشن). مدیری که هر دو را در یک نشست
+       می‌بیند، نمی‌داند کدام حالت «روشن» است. */
+    mockGets([OFF, ON]);
+    renderPage();
+    await openTab("بخش‌های سامانه");
+
+    const off = knobOffset(
+      await screen.findByRole("switch", { name: `فعال بودن ${OFF.label}` }),
+    );
+    const on = knobOffset(screen.getByRole("switch", { name: `فعال بودن ${ON.label}` }));
+
+    expect(Number.isNaN(off)).toBe(false);
+    expect(Number.isNaN(on)).toBe(false);
+    expect(on).toBeGreaterThan(off);
+  });
+});

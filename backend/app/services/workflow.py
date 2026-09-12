@@ -516,28 +516,61 @@ TRANSITIONS: dict[str, Transition] = {
 }
 
 
-def ensure_transition_allowed(
+#: چرا یک گذار ممکن نیست. `None` یعنی ممکن است.
+#:
+#: دو حالتِ ردّ عمداً از هم جدا شده‌اند چون دو پیامِ متفاوت دارند: «هنوز نوبتش
+#: نشده» (وضعیت/نقش/شکلِ زنجیره) در برابر «این پرونده مالِ تو نیست» (صندلی).
+_BLOCKED_BY_STAGE = "stage"
+_BLOCKED_BY_OWNER = "owner"
+
+
+def _transition_block(
     record: EvaluationRecord, action: str, current_user: CurrentUser
-) -> Transition:
+) -> str | None:
+    """تنها جایی که شرطِ «این گذار ممکن است یا نه» نوشته می‌شود.
+
+    دو مصرف‌کننده دارد: `ensure_transition_allowed` که ردّ را به استثنای درست
+    ترجمه می‌کند، و `transition_is_available` که فقط بله/خیر می‌خواهد. اگر هر
+    کدام نسخهٔ خودش را داشت، انتخابِ گذار و اجرایش می‌توانستند دو نظر داشته
+    باشند — و آن‌وقت دکمه‌ای نشان داده می‌شد که فشردنش ۴۰۳ می‌گیرد.
+    """
     spec = TRANSITIONS[action]
-    denied = HTTPException(status_code=spec.error_status, detail=spec.error_detail)
     if record.status not in spec.from_statuses or not may_act_at(
         current_user.role, spec.allowed_role
     ):
-        raise denied
+        return _BLOCKED_BY_STAGE
     if spec.guard is not None and not spec.guard(record):
-        raise denied
+        return _BLOCKED_BY_STAGE
     if spec.assignee_field is not None:
         assignee = getattr(record, spec.assignee_field)
         # صف مشترک: تا وقتی کسی مالک نشده، هر کاربری با نقش مجاز می‌تواند برش دارد.
         if not (assignee is None and spec.claimable_if_unassigned) and current_user.id != assignee:
-            # «مال تو نیست» با «هنوز نوبتش نشده» فرق دارد. برای مسئول واحد/معاونت/
-            # مدیرعامل همان error_detail خودش این را می‌گوید؛ مرحلهٔ HR چون از یک صف
-            # مشترک شروع می‌شود پیام جداگانه لازم دارد.
-            raise HTTPException(
-                status_code=http_status.HTTP_403_FORBIDDEN,
-                detail=spec.owner_error_detail or spec.error_detail,
-            )
+            return _BLOCKED_BY_OWNER
+    return None
+
+
+def transition_is_available(
+    record: EvaluationRecord, action: str, current_user: CurrentUser
+) -> bool:
+    """آیا این گذار همین حالا برای این کاربر روی این پرونده ممکن است."""
+    return _transition_block(record, action, current_user) is None
+
+
+def ensure_transition_allowed(
+    record: EvaluationRecord, action: str, current_user: CurrentUser
+) -> Transition:
+    spec = TRANSITIONS[action]
+    blocked = _transition_block(record, action, current_user)
+    if blocked == _BLOCKED_BY_STAGE:
+        raise HTTPException(status_code=spec.error_status, detail=spec.error_detail)
+    if blocked == _BLOCKED_BY_OWNER:
+        # «مال تو نیست» با «هنوز نوبتش نشده» فرق دارد. برای مسئول واحد/معاونت/
+        # مدیرعامل همان error_detail خودش این را می‌گوید؛ مرحلهٔ HR چون از یک صف
+        # مشترک شروع می‌شود پیام جداگانه لازم دارد.
+        raise HTTPException(
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=spec.owner_error_detail or spec.error_detail,
+        )
     return spec
 
 

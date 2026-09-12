@@ -3,7 +3,7 @@
  * بدون این، کاربر رمزی را که تایپ می‌کند نمی‌بیند و تنها راه اطمینانش «تکرار رمز»
  * است — که وقتی هر دو نامرئی‌اند، فقط اشتباه را دو بار تکرار می‌کند.
  */
-import { useId, useState, type InputHTMLAttributes } from "react";
+import { useId, useState, type InputHTMLAttributes, type Ref } from "react";
 
 /** ظاهرِ پیش‌فرض. جای چشم (`pl-11`) بخشی از همین قرارداد است: هر جا که این
  *  پایه عوض می‌شود، فضای چشم هم باید در نسخهٔ تازه باشد. */
@@ -20,6 +20,10 @@ interface PasswordInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   /** نمایشِ کنترل‌شده — برای فرمی که خودش هم به این حالت واکنش نشان می‌دهد. */
   visible?: boolean;
   onVisibleChange?: (visible: boolean) => void;
+  /** به خودِ `<input>` می‌رسد — برای فرمی که می‌خواهد فوکوسِ اولیه را
+   *  این‌جا بگذارد. در React 19، `ref` یک propِ معمولی است و با بقیه
+   *  اسپرد می‌شود؛ فقط باید در تایپ اعلام شود. */
+  ref?: Ref<HTMLInputElement>;
 }
 
 export function PasswordInput({

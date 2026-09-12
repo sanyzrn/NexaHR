@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { ScoreFormTable, SegmentedScore, computePreview, scoredRows, useScoreForm } from "./ScoreForm";
+import {
+  ScoreFormTable,
+  SegmentedScore,
+  appliedBonus,
+  computePreview,
+  scoredRows,
+  useScoreForm,
+} from "./ScoreForm";
 import { DEFAULT_APP_CONFIG, type Indicator } from "../types";
 
 function indicator(id: number, section: "general" | "specialized" = "general"): Indicator {
@@ -296,6 +303,26 @@ describe("computePreview", () => {
     expect(preview).toEqual({ general_pct: 80, specialized_pct: 20, final_pct: 56 });
   });
 
+  it("روی مرزِ نیم، همان عددی را می‌دهد که روی سند چاپ می‌شود", () => {
+    /* موردِ واقعیِ گزارش. شش شاخصِ عمومی با وزن‌های [۳,۳,۳,۳,۲,۲] و نمره‌های
+       [۱,۱,۲,۳,۱,۱] نتیجه‌اش دقیقاً ۳۱٫۲۵٪ است — یک نیمِ دقیق.
+
+       پایتون `round(31.25, 1)` را ۳۱٫۲ می‌دهد (نیم به رقمِ زوج) و
+       `Math.round(31.25 * 10) / 10` می‌شد ۳۱٫۳. یعنی ارزیاب در فرم ۳۱٫۳
+       می‌دید و سندِ رسمیِ همان پرونده ۳۱٫۲ چاپ می‌کرد. */
+    const six = [1, 2, 3, 4, 5, 6].map((id) => indicator(id));
+    const scores = [1, 1, 2, 3, 1, 1];
+    const preview = computePreview(
+      six.map((ind, i) => ({ indicator_id: ind.id, score: scores[i] ?? null, evidence_text: "" })),
+      six,
+      {
+        ...DEFAULT_APP_CONFIG,
+        indicator_weights: { "1": 3, "2": 3, "3": 3, "4": 3, "5": 2, "6": 2 },
+      },
+    );
+    expect(preview?.general_pct).toBe(31.2);
+  });
+
   it("چارچوبِ تک‌بخشی: فرمِ پُرِ ۵ باید ۱۰۰٪ باشد، نه ۶۰٪", () => {
     // بخشِ تخصصی در این پرونده شاخصی ندارد، پس وزنش بین بخش‌های موجود پخش
     // می‌شود و سقف ۱۰۰ می‌ماند. پیش از این `general × 0.6 + 0 × 0.4` حساب
@@ -315,5 +342,37 @@ describe("computePreview", () => {
       specializedOnly
     );
     expect(preview).toEqual({ general_pct: 0, specialized_pct: 100, final_pct: 100 });
+  });
+});
+
+
+describe("appliedBonus — همان سقفی که سرور می‌گذارد", () => {
+  const config = { ...DEFAULT_APP_CONFIG, bonus_max_points: 5 };
+
+  it("«۹۸ + ۵ = ۱۰۰» را به «۹۸ + ۲» تبدیل می‌کند", () => {
+    /* همان سردرگمی‌ای که `applied_bonus` سمتِ سرور برای کشتنش نوشته شد، ولی
+       یک لایه بالاتر مانده بود: حلقهٔ پیش‌نمایش clamp می‌شد و خطِ کنارش نه،
+       پس ارزیاب «۹۸ + ۵» می‌خواند و ۱۰۰ می‌دید. */
+    expect(appliedBonus(5, config, 98)).toBe(2);
+  });
+
+  it("سقفِ طرح را هم اعمال می‌کند، نه فقط فاصلهٔ تا صد", () => {
+    expect(appliedBonus(9, config, 10)).toBe(5);
+  });
+
+  it("زیرِ هر دو سقف، عدد دست‌نخورده می‌ماند", () => {
+    expect(appliedBonus(3, config, 40)).toBe(3);
+  });
+
+  it("پایهٔ صد یعنی هیچ امتیاز ویژه‌ای جا نمی‌شود", () => {
+    expect(appliedBonus(5, config, 100)).toBe(0);
+  });
+
+  it("تساویِ «فرم + ویژه = نهایی» همیشه برقرار می‌ماند", () => {
+    // خودِ دلیلِ وجودِ این تابع: سقف روی *افزوده* می‌نشیند نه روی حاصلِ جمع.
+    for (const base of [0, 40, 95, 98, 99.5, 100]) {
+      const applied = appliedBonus(5, config, base);
+      expect(base + applied).toBeLessThanOrEqual(100);
+    }
   });
 });

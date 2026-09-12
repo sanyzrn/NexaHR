@@ -455,10 +455,15 @@ function ModulesCard() {
                   module.enabled ? "bg-pulse-600" : "bg-gray-300"
                 }`}
               >
+                {/* در RTL، دستهٔ کلید از راست (خاموش) به چپ (روشن) می‌رود —
+                    قرینهٔ همان چیزی که در LTR از چپ به راست است، و همان جهتی
+                    که کلیدِ «سرویس‌های بیرونی» در همین صفحه دارد. این یکی
+                    وارونه بود: روشن‌کردنِ ماژول دسته را به *راست* می‌برد، پس
+                    دو کلید در یک صفحه دو زبانِ متفاوت حرف می‌زدند. */}
                 <span
                   aria-hidden
                   className={`absolute h-5 w-5 rounded-full bg-white shadow-sm transition-all ${
-                    module.enabled ? "right-0.5" : "right-[22px]"
+                    module.enabled ? "right-[22px]" : "right-0.5"
                   }`}
                 />
               </button>
@@ -718,7 +723,7 @@ function IntegrationsCard() {
           <button
             type="button"
             onClick={() => setDraft(null)}
-            className="text-xs font-medium text-gray-500 hover:text-gray-700"
+            className="tap-target text-xs font-medium text-gray-500 hover:text-gray-700"
           >
             بازگرداندن تغییرات
           </button>

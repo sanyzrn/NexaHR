@@ -100,6 +100,7 @@ from app.services.workflow import (
     scorer_seat,
     skips_deputy,
     skips_hr_review,
+    transition_is_available,
 )
 
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
@@ -1066,6 +1067,46 @@ _RETURN_ACTION_BY_ROLE = {
     UserRole.ceo: ("ceo_return", CommentStage.ceo_final),
 }
 
+#: همهٔ گذارهای برگشت، و مرحله‌ای که دلیلشان در آن ثبت می‌شود.
+#:
+#: ترتیب فقط برای تعیّن است: شرطِ خودِ هر گذار — وضعیتِ پرونده، شکلِ زنجیره، و
+#: صندلیِ کاربر — حداکثر یکی‌شان را ممکن می‌کند.
+_RETURN_ACTIONS: tuple[tuple[str, CommentStage], ...] = (
+    ("hr_return", CommentStage.hr_review),
+    ("deputy_return", CommentStage.deputy_review),
+    ("deputy_return_hr_subject", CommentStage.deputy_review),
+    ("ceo_return", CommentStage.ceo_final),
+    ("ceo_return_manager", CommentStage.ceo_final),
+    ("ceo_return_manager_hr_subject", CommentStage.ceo_final),
+    ("ceo_return_ceo_only", CommentStage.ceo_final),
+    ("ceo_return_no_deputy", CommentStage.ceo_final),
+    ("ceo_return_no_deputy_hr_subject", CommentStage.ceo_final),
+)
+
+
+def _return_action_for(
+    record: EvaluationRecord, current_user: CurrentUser
+) -> tuple[str, CommentStage] | None:
+    """برگشتی که *این کاربر* روی *این پرونده* می‌تواند بزند — از صندلی، نه از نقش.
+
+    هر تأییدی در این سامانه با صندلی تصمیم می‌گیرد (`require_chain_stage` +
+    `assignee_field`)، ولی برگشت با یک جدولِ نقش‌محور تصمیم می‌گرفت. نتیجه‌اش
+    برای مدیرعاملی که برای چند نفر خودش در صندلیِ معاونت نشسته این بود: پرونده
+    را تأیید می‌کرد و نمی‌توانست برگرداند — جدول برایش `ceo_return` می‌داد که
+    از `deputy_approved` شروع می‌شود، نه از `hr_approved`ی که پرونده‌اش روی آن
+    بود. همان جدول جلوی ثبتِ کامنتِ مرحله‌اش را هم می‌گرفت.
+
+    این‌جا از همان ماشینِ حالت پرسیده می‌شود که خودِ گذار از آن می‌گذرد، پس
+    انتخاب و اجرا نمی‌توانند دو نظر داشته باشند.
+
+    `None` یعنی هیچ برگشتی ممکن نیست؛ فراخواننده همان مسیرِ خطای قبلی را
+    می‌رود تا پیامِ دقیقِ «چرا نه» حفظ شود.
+    """
+    for action, stage in _RETURN_ACTIONS:
+        if transition_is_available(record, action, current_user):
+            return action, stage
+    return None
+
 
 @router.post("/{evaluation_id}/return", response_model=EvaluationRead)
 def return_evaluation(
@@ -1082,6 +1123,15 @@ def return_evaluation(
     # «در انتظار بررسی منابع انسانی نیست» — درست، و گمراه‌کننده: انگار روزی
     # نوبتش می‌شود. این‌جا زودتر و با پیامِ درست می‌ایستد.
     ensure_hr_may_handle(record, current_user)
+
+    seat_based = _return_action_for(record, current_user)
+    if seat_based is not None:
+        action, comment_stage = seat_based
+        return _do_return(db, record, action, comment_stage, payload, current_user)
+
+    # هیچ برگشتی ممکن نیست. مسیرِ زیر فقط برای *پیامِ خطا* می‌ماند: همان
+    # انتخابِ نقش‌محورِ قبلی، تا کاربر دقیقاً همان جمله‌ای را بشنود که پیش از
+    # این می‌شنید — «در مرحلهٔ تأیید نهایی توسط شما نیست» و نه یک ۴۰۳ِ کلی.
     action, comment_stage = _RETURN_ACTION_BY_ROLE[current_user.role]
 
     if action == "ceo_return" and is_ceo_only_path(record):
@@ -1116,6 +1166,17 @@ def return_evaluation(
     ):
         action += "_hr_subject"
 
+    return _do_return(db, record, action, comment_stage, payload, current_user)
+
+
+def _do_return(
+    db: Session,
+    record: EvaluationRecord,
+    action: str,
+    comment_stage: CommentStage,
+    payload: ReturnRequest,
+    current_user: CurrentUser,
+) -> EvaluationRead:
     def _before() -> None:
         # دلیل برگشت هم به‌صورت کامنت قابل‌مشاهده در پرونده ثبت می‌شود و هم در audit
         db.add(

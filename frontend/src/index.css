@@ -497,6 +497,23 @@ button:disabled,
    Reusable Utility Classes
    ═══════════════════════════════════════════════════════════════════════ */
 
+/* هدفِ لمسیِ حداقلی — WCAG 2.2، بند ۲٫۵٫۸ (سطح AA).
+
+   دکمه‌های متنیِ کوچکِ این سامانه («پاسخ»، «انصراف»، «علامت‌گذاری همه») با
+   `text-xs` و بی هیچ پدینگی حدودِ ۱۶ پیکسل ارتفاع داشتند. روی صفحهٔ لمسی
+   یعنی خطا؛ و برای کسی که دستش می‌لرزد یعنی نشدنی.
+
+   `min-height/width` به‌جای padding: متن سرِ جایش می‌ماند و فقط ناحیهٔ
+   قابلِ‌فشردن بزرگ می‌شود، پس چیدمانِ فشردهٔ کنارِ کامنت‌ها به‌هم نمی‌ریزد.
+   `inline-flex` لازم است تا ارتفاعِ حداقلی روی عنصرِ inline اثر کند. */
+.tap-target {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  min-width: 24px;
+}
+
 /* Skeleton shimmer for loading states */
 .skeleton {
   background: var(--shimmer-bg);

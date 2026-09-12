@@ -570,7 +570,7 @@ function IndicatorRow({
       <span className="flex w-36 items-center justify-start gap-2">
         <button
           onClick={onEdit}
-          className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
+          className="tap-target cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
           aria-label={`ویرایش ${indicator.category}`}
         >
           ویرایش
@@ -579,13 +579,13 @@ function IndicatorRow({
           onClick={onToggle}
           // «غیرفعال کردن» یک تغییرِ وضعیت است، نه یک هشدار؛ قرمز اینجا فقط
           // بیست لکهٔ قرمز در یک ستون می‌ساخت.
-          className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
+          className="tap-target cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
         >
           {indicator.is_active ? "غیرفعال" : "فعال"}
         </button>
         <button
           onClick={onDelete}
-          className="cursor-pointer text-xs font-medium text-gray-400 hover:text-red-600"
+          className="tap-target cursor-pointer text-xs font-medium text-gray-400 hover:text-red-600"
           aria-label={`حذف ${indicator.category}`}
         >
           حذف

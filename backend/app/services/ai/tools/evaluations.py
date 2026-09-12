@@ -310,7 +310,16 @@ _ADVANCE: dict[str, _Advance] = {
     "return": _Advance(
         _exact(UserRole.hr, UserRole.deputy, UserRole.ceo), _run_return, needs_reason=True
     ),
-    "cancel": _Advance(_exact(UserRole.hr), _run_cancel, needs_reason=True),
+    # سه نقش، مثل خودِ endpoint — و به همان دلیل: پروندهٔ بازِ عضوِ واحدِ منابع
+    # انسانی داورِ HR ندارد، پس معاونت و مدیرعامل تنها راهِ خروجش‌اند.
+    # `ensure_may_administer` در بدنهٔ endpoint همان‌جا تنگش می‌کند.
+    #
+    # این‌جا فقط `hr` بود، پس معاونتی که در رابط دکمهٔ «لغو» را می‌دید، از
+    # دستیار «اجازه ندارید» می‌شنید — پیامی که غلط بود و کاربر را به این
+    # نتیجه می‌رساند که دسترسی‌اش را از دست داده.
+    "cancel": _Advance(
+        _exact(UserRole.hr, UserRole.deputy, UserRole.ceo), _run_cancel, needs_reason=True
+    ),
     "hr_claim": _Advance(_exact(UserRole.hr), _run_hr_claim),
 }
 

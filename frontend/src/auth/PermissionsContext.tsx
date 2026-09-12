@@ -9,9 +9,9 @@
  * است و باید بماند؛ پنهان‌کردن یک دکمه هیچ‌کس را از صدا زدن مستقیم API باز
  * نمی‌دارد.
  */
-import { createContext, useContext, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "../api/client";
+import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiClient, onForbidden } from "../api/client";
 import { useAuth } from "./AuthContext";
 
 export type Capability =
@@ -62,18 +62,37 @@ export function isModuleEnabled(
   return modules?.[key] ?? false;
 }
 
+/** کلیدِ کشِ مجوزها — یک‌جا نوشته می‌شود تا باطل‌کردنش هیچ‌وقت کلیدِ دیگری نزند. */
+const PERMISSIONS_KEY = (userId: number | undefined) =>
+  ["administration", "my-permissions", userId] as const;
+
 const PermissionsContext = createContext<PermissionsValue | undefined>(undefined);
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
 
+  const queryClient = useQueryClient();
   const { data, isPending } = useQuery({
-    queryKey: ["administration", "my-permissions", user?.id],
+    queryKey: PERMISSIONS_KEY(user?.id),
     queryFn: async () =>
       (await apiClient.get<Permissions>("/administration/my-permissions")).data,
     enabled: user != null,
     staleTime: 60_000,
+    // دو محرکِ تازه‌شدن که این کوئری نداشت. `refetchOnWindowFocus` سراسری
+    // خاموش است و درست هم هست — ولی *این* کوئری استثناست: برگشتن به تب
+    // دقیقاً همان لحظه‌ای است که باید فهمید دسترسی عوض شده یا نه.
+    refetchOnWindowFocus: true,
+    refetchInterval: 5 * 60_000,
   });
+
+  // و محرکِ سوم: هر ۴۰۳ی از هر مسیری یعنی رابط و سرور دو نظر دارند.
+  useEffect(
+    () =>
+      onForbidden(() => {
+        void queryClient.invalidateQueries({ queryKey: PERMISSIONS_KEY(user?.id) });
+      }),
+    [queryClient, user?.id],
+  );
 
   const value: PermissionsValue = {
     can: (capability) => data?.capabilities.includes(capability) ?? false,

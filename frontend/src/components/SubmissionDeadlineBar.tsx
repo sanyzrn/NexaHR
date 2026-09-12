@@ -15,6 +15,8 @@ import { JalaliDatePicker } from "../ui/JalaliDatePicker";
 import { formatDate } from "../utils/dates";
 import { useToast } from "./Toast";
 import type { EvaluationDetail } from "../types";
+import { REASON_MAX } from "../utils/textLimits";
+import { CharCounter } from "../ui/CharCounter";
 
 export function SubmissionDeadlineBar({
   evaluation,
@@ -113,12 +115,14 @@ export function SubmissionDeadlineBar({
               دلیل تمدید (اجباری)
             </label>
             <textarea
+              maxLength={REASON_MAX}
               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
               rows={2}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="مثلاً: فرد در مرخصی استعلاجی بود"
             />
+            <CharCounter value={reason} max={REASON_MAX} />
             {/* دلیل اجباری است چون تمدیدِ بی‌دلیل، در بازبینی از تمدیدِ خودسرانه
                 قابل تشخیص نیست. متن هم در پرونده می‌ماند و هم در گزارش رخدادها. */}
           </div>

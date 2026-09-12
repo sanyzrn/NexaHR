@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_APP_CONFIG, type AppConfig, type Indicator, type EvaluationScoreRow } from "../types";
 import { NARROW_QUERY, useMediaQuery } from "../ui/useMediaQuery";
+import { round1 } from "../utils/rounding";
+import { EVIDENCE_MAX } from "../utils/textLimits";
 
 function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
@@ -174,7 +176,6 @@ export function computePreview(
       specializedMax += 5 * w;
     }
   }
-  const round1 = (v: number) => Math.round(v * 10) / 10;
   const general = generalMax ? round1((generalSum / generalMax) * 100) : 0;
   const specialized = specializedMax ? round1((specializedSum / specializedMax) * 100) : 0;
 
@@ -194,6 +195,22 @@ export function computePreview(
     final = round1(present.reduce((sum, [pct]) => sum + pct, 0) / present.length);
   }
   return { general_pct: general, specialized_pct: specialized, final_pct: final };
+}
+
+/** امتیاز ویژه‌ای که *واقعاً* اعمال می‌شود — قرینهٔ `evaluation.applied_bonus`.
+ *
+ * دو سقف دارد: سقفِ طرح، و فاصلهٔ تا ۱۰۰. سقفِ دوم روی *افزوده* می‌نشیند تا
+ * این تساوی همیشه برقرار بماند: «امتیاز فرم + امتیاز ویژه = امتیاز نهایی».
+ *
+ * سمتِ سرور از ابتدا همین کار را می‌کرد و سندِ رسمی هم همین عدد را چاپ می‌کند.
+ * فرم ولی عددِ *خام* را کنارِ حلقه می‌نوشت: با پایهٔ ۹۸ و امتیازِ ۵، خط
+ * می‌گفت «۹۸ + ۵» و حلقه ۱۰۰ نشان می‌داد. ارزیاب یا فکر می‌کرد حلقه خراب
+ * است، یا اینکه نمره‌اش ۱۰۳ شده — همان سردرگمی‌ای که `applied_bonus` برای
+ * کشتنش نوشته شده بود، فقط یک لایه بالاتر.
+ */
+export function appliedBonus(raw: number, config: AppConfig, basePct: number): number {
+  const capped = Math.max(0, Math.min(raw, config.bonus_max_points, 100 - basePct));
+  return Math.round(capped * 100) / 100;
 }
 
 /** ردیف‌های امتیاز برای ذخیره/ثبت به سرور — شاخص‌های بی‌امتیاز (null) ارسال نمی‌شوند
@@ -532,6 +549,7 @@ function ScoreCardList({
                   شواهد عینی
                   {needsEvidence && <span className="text-red-500"> *</span>}
                   <textarea
+                    maxLength={EVIDENCE_MAX}
                     className={`mt-1 w-full resize-none rounded-xl border px-3 py-2 text-sm text-gray-800 outline-none transition-colors ${
                       invalid
                         ? "border-red-400 bg-red-50 focus:border-red-500"
@@ -655,6 +673,7 @@ function ScoreFormTableWide({
                     <span className="whitespace-pre-wrap text-gray-700">{draft.evidence_text || "—"}</span>
                   ) : (
                     <textarea
+                      maxLength={EVIDENCE_MAX}
                       aria-label={`شواهد عینی شاخص: ${ind.category}`}
                       className={`w-full resize-none rounded-xl border px-3 py-2 text-sm text-gray-800 outline-none transition-colors duration-150 ${
                         invalid

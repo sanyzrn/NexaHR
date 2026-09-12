@@ -44,10 +44,30 @@ export function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
+/** شنونده‌های «سرور یک درخواست را با ۴۰۳ رد کرد».
+ *
+ * `client.ts` عمداً از react-query چیزی نمی‌داند — این قلّاب اجازه می‌دهد
+ * `PermissionsProvider` خودش را ثبت کند بی آنکه این فایل به آن وابسته شود.
+ */
+const forbiddenListeners = new Set<() => void>();
+
+/** ثبتِ یک شنونده؛ خروجی، تابعِ لغوِ ثبت است. */
+export function onForbidden(listener: () => void): () => void {
+  forbiddenListeners.add(listener);
+  return () => forbiddenListeners.delete(listener);
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config;
+    // ۴۰۳ یعنی «آنچه رابط فکر می‌کند می‌توانی، دیگر درست نیست» — و کشِ مجوزها
+    // هیچ محرکی برای تازه‌شدن نداشت: `staleTime` داشت ولی refetch روی فوکوس
+    // سراسری خاموش است و بازهٔ زمانی هم نداشت. یعنی اگر ادمینِ دیگری دسترسی
+    // را می‌گرفت، منو تا رفرشِ کاملِ صفحه همان دکمه‌های مرده را نشان می‌داد.
+    if (error.response?.status === 403) {
+      for (const listener of forbiddenListeners) listener();
+    }
     // خطای 401 خودِ مسیرهای auth (مثلاً رمز اشتباه هنگام login) نشانه انقضای نشست
     // نیست؛ نباید باعث refresh/ریدایرکت شود وگرنه پیام خطای فرم ورود از بین می‌رود.
     const isAuthEndpoint =

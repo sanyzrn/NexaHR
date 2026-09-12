@@ -17,7 +17,7 @@ import { HrOwnerBar, HrRecoveryBox } from "../components/HrRecoveryBox";
 import { ObjectionPanel } from "../components/ObjectionPanel";
 import { SelfAssessmentPanel } from "../components/SelfAssessmentPanel";
 import { SubmissionDeadlineBar } from "../components/SubmissionDeadlineBar";
-import { ScoreFormTable, computePreview, scoredRows, useScoreForm } from "../components/ScoreForm";
+import { ScoreFormTable, appliedBonus, computePreview, scoredRows, useScoreForm } from "../components/ScoreForm";
 import { StatusBadge } from "../components/StatusBadge";
 import { WorkflowStepper } from "../components/WorkflowStepper";
 import { useToast } from "../components/Toast";
@@ -31,6 +31,13 @@ import {
   type EvaluationDetail,
   type Indicator,
 } from "../types";
+import { CharCounter } from "../ui/CharCounter";
+import {
+  BONUS_REASON_MAX,
+  COMMENT_MAX,
+  EVALUATOR_COMMENT_MAX,
+  REASON_MAX,
+} from "../utils/textLimits";
 
 /** پیشوندی که سرور موقع برگشت پرونده جلوی کامنت می‌گذارد (routers/evaluations.py). */
 const RETURN_COMMENT_PREFIX = "برگشت پرونده";
@@ -418,6 +425,7 @@ export function EvaluationDetailPage() {
                       {replyingTo === c.id ? (
                         <div>
                           <textarea
+                            maxLength={COMMENT_MAX}
                             className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none transition-colors duration-150 focus:border-gray-900"
                             rows={2}
                             autoFocus
@@ -425,6 +433,7 @@ export function EvaluationDetailPage() {
                             onChange={(e) => setReplyText(e.target.value)}
                             placeholder="پاسخ شما…"
                           />
+                          <CharCounter value={replyText} max={COMMENT_MAX} />
                           <div className="mt-1.5 flex items-center gap-2">
                             <button
                               disabled={busy || !replyText.trim()}
@@ -438,7 +447,7 @@ export function EvaluationDetailPage() {
                                 setReplyingTo(null);
                                 setReplyText("");
                               }}
-                              className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700"
+                              className="tap-target cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700"
                             >
                               انصراف
                             </button>
@@ -450,7 +459,7 @@ export function EvaluationDetailPage() {
                             setReplyingTo(c.id);
                             setReplyText("");
                           }}
-                          className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
+                          className="tap-target cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
                         >
                           پاسخ
                         </button>
@@ -466,12 +475,14 @@ export function EvaluationDetailPage() {
         {canComment && (
           <div className="mt-3">
             <textarea
+              maxLength={COMMENT_MAX}
               className="w-full resize-none rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 outline-none transition-colors duration-150 focus:border-gray-900 focus:bg-white text-sm"
               rows={2}
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               placeholder="افزودن کامنت…"
             />
+            <CharCounter value={newComment} max={COMMENT_MAX} />
             <button
               disabled={busy || !newComment.trim()}
               onClick={() => postComment(newComment, null)}
@@ -906,7 +917,12 @@ function EditableScoring({
   const preview = computePreview(drafts, indicators, config);
   // فقط امتیاز ویژهٔ *معتبر* در پیش‌نمایش اثر می‌گذارد؛ عددِ رد‌شدنی نباید
   // نمره‌ای نشان بدهد که سرور هرگز ثبتش نمی‌کند.
-  const previewBonus = showBonus && !bonusError ? bonusValue : 0;
+  // عددِ خام فقط برای اعتبارسنجی است؛ آنچه روی حلقه و کنارش دیده می‌شود باید
+  // همان چیزی باشد که سرور اعمال می‌کند — وگرنه «۹۸ + ۵» با حلقهٔ ۱۰۰ متناقض است.
+  const previewBonus =
+    showBonus && !bonusError && preview
+      ? appliedBonus(bonusValue, config, preview.final_pct)
+      : 0;
 
   async function submit() {
     // امتیاز ویژهٔ نیمه‌کاره نباید بی‌صدا کنار گذاشته شود: ارزیاب عدد را نوشته
@@ -1052,7 +1068,7 @@ function EditableScoring({
               <textarea
                 id="bonus-reason"
                 rows={2}
-                maxLength={500}
+                maxLength={BONUS_REASON_MAX}
                 minLength={config.bonus_reason_min_length}
                 placeholder="این امتیاز بابت چه کاری است؟"
                 value={bonusReason}
@@ -1062,6 +1078,7 @@ function EditableScoring({
                 }}
                 className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm outline-none transition-colors duration-150 focus:border-amber-500"
               />
+              <CharCounter value={bonusReason} max={BONUS_REASON_MAX} />
               <p className="mt-1 text-[11px] text-amber-700">
                 حداقل {config.bonus_reason_min_length.toLocaleString("fa-IR")} نویسه
               </p>
@@ -1075,11 +1092,13 @@ function EditableScoring({
         <div className="rounded-2xl border border-gray-200 bg-white p-4">
           <h3 className="mb-2 text-base font-bold text-gray-900">{commentLabel}</h3>
           <textarea
+            maxLength={EVALUATOR_COMMENT_MAX}
             className="w-full rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 outline-none transition-colors duration-150 focus:border-gray-900 focus:bg-white text-sm"
             rows={3}
             value={evaluatorComment}
             onChange={(e) => setEvaluatorComment(e.target.value)}
           />
+          <CharCounter value={evaluatorComment} max={EVALUATOR_COMMENT_MAX} />
         </div>
       )}
 
@@ -1117,7 +1136,7 @@ function EditableScoring({
                   </p>
                 )}
               </div>
-              <ScoreRing value={Math.min(100, preview.final_pct + previewBonus)} size={56} />
+              <ScoreRing value={preview.final_pct + previewBonus} size={56} />
             </div>
           </div>
         </div>
@@ -1210,6 +1229,7 @@ function ReturnBox({ evaluationId, onReturned }: { evaluationId: number; onRetur
             دلیل برگشت پرونده
           </label>
           <textarea
+            maxLength={REASON_MAX}
             id="return-reason"
             className="w-full resize-none rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm outline-none transition-all"
             rows={2}
@@ -1217,6 +1237,7 @@ function ReturnBox({ evaluationId, onReturned }: { evaluationId: number; onRetur
             onChange={(e) => setReason(e.target.value)}
             placeholder="مثلاً: شواهد شاخص «تعهد سازمانی» کافی نیست…"
           />
+          <CharCounter value={reason} max={REASON_MAX} />
           <div className="mt-3 flex gap-2">
             <button
               disabled={sending || !reason.trim()}

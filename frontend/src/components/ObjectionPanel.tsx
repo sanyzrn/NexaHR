@@ -11,6 +11,8 @@ import { useToast } from "./Toast";
 import { Button } from "../ui/Button";
 import { formatDateTime } from "../utils/dates";
 import type { CurrentUser, EvaluationDetail } from "../types";
+import { OBJECTION_MAX } from "../utils/textLimits";
+import { CharCounter } from "../ui/CharCounter";
 
 /** چه کسی به این اعتراض پاسخ می‌دهد — قرینهٔ `workflow.objection_resolver_field`.
  *
@@ -87,6 +89,7 @@ export function ObjectionPanel({
             پاسخ شما به این اعتراض
           </label>
           <textarea
+            maxLength={OBJECTION_MAX}
             id="objection-resolution"
             className="w-full resize-none rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm outline-none"
             rows={3}
@@ -94,6 +97,7 @@ export function ObjectionPanel({
             onChange={(e) => setResolution(e.target.value)}
             placeholder="مثلاً: با مسئول واحد بررسی شد؛ شواهد تکمیلی به پرونده افزوده شد و نتیجه بدون تغییر ماند"
           />
+          <CharCounter value={resolution} max={OBJECTION_MAX} />
           <Button className="mt-3" onClick={submit} loading={busy} disabled={!resolution.trim()}>
             ثبت پاسخ
           </Button>

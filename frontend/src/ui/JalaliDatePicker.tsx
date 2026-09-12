@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { useAnchoredPopover } from "./useAnchoredPopover";
+import { useFocusTrap } from "./focusTrap";
 import {
   JALALI_MONTH_NAMES,
   JALALI_WEEKDAY_LABELS,
@@ -58,6 +59,34 @@ export function JalaliDatePicker({
   // شروع پنجرهٔ ۱۲ سالهٔ حالت انتخاب سال
   const [yearWindowStart, setYearWindowStart] = useState(() => viewYear - 5);
 
+  // ── پیمایش با کیبورد ─────────────────────────────────────────────────
+  //
+  // تا امروز این تقویم برای کاربرِ فقط-کیبورد *غیرقابل‌استفاده* بود، نه
+  // سخت: پاپ‌آور به `body` پورتال می‌شود، پس هیچ‌چیز فوکوس را داخلش نمی‌بُرد.
+  // داخلِ مودال بدتر بود — تلهٔ فوکوسِ مودال فقط درونِ ظرفِ خودش جست‌وجو
+  // می‌کند و تقویمِ پورتال‌شده اصلاً در چرخهٔ Tab نبود. و تاریخِ قرارداد در
+  // نیمی از فرم‌های این سامانه هست (WCAG 2.1.2 و 2.4.3).
+  //
+  // الگو، همان «tabindex غلتان»ِ استانداردِ شبکه است: در هر لحظه فقط *یک*
+  // روز در چرخهٔ Tab است و کلیدهای جهت بینِ روزها می‌گردند. اگر هر ۳۱ روز
+  // tabbable بودند، رسیدن به دکمهٔ «ثبت» سی‌ویک بار Tab لازم داشت.
+  const [activeDay, setActiveDay] = useState<number>(() => (selectedJalali ?? todayJalali()).jd);
+  const activeDayRef = useRef<HTMLButtonElement>(null);
+  // با کلیدِ جهت که روز عوض می‌شود، فوکوس باید دنبالش برود — ولی *فقط* آن‌وقت.
+  // بی این پرچم، هر رندرِ دیگری (مثلاً باز شدنِ ماهِ بعد با کلیک) فوکوس را از
+  // جایی که کاربر گذاشته می‌دزدید.
+  const followFocusRef = useRef(false);
+
+  // فوکوس داخلِ پاپ‌آور قفل می‌شود و در بسته‌شدن به دکمهٔ بازکننده برمی‌گردد.
+  // `lockScroll` خاموش است: تقویم یک لایهٔ سبک است، نه مودالِ تمام‌صفحه.
+  // Escape عمداً به این هوک سپرده نمی‌شود — شنوندهٔ فازِ capture بالاتر
+  // خودش آن را می‌گیرد و `stopPropagation` می‌کند تا مودالِ زیرین بسته نشود.
+  useFocusTrap(popoverRef, {
+    active: open,
+    lockScroll: false,
+    initialFocusRef: activeDayRef,
+  });
+
   useEffect(() => {
     if (selectedJalali) {
       setViewYear(selectedJalali.jy);
@@ -104,7 +133,12 @@ export function JalaliDatePicker({
   // با هر بار بازشدن، از حالت روز شروع کن
   function toggleOpen() {
     setOpen((v) => {
-      if (!v) setMode("days");
+      if (!v) {
+        setMode("days");
+        // لنگرِ کیبورد روی روزِ انتخاب‌شده می‌نشیند، وگرنه روی امروز — نه روی
+        // جایی که آخرین بار رهایش کرده بودیم.
+        setActiveDay((selectedJalali ?? todayJalali()).jd);
+      }
       return !v;
     });
   }
@@ -134,10 +168,97 @@ export function JalaliDatePicker({
     setOpen(false);
   }
 
+  /** روزِ فعال را `delta` روز جابه‌جا می‌کند و در صورت لزوم از مرزِ ماه رد می‌شود. */
+  function moveActiveDay(delta: number) {
+    followFocusRef.current = true;
+    let y = viewYear;
+    let m = viewMonth;
+    let d = activeDay + delta;
+    // ماه‌های شمسی طولِ متفاوت دارند (و اسفندِ کبیسه ۳۰ روز)، پس مرز با
+    // `jalaliMonthLength` سنجیده می‌شود نه با یک عددِ ثابت.
+    while (d < 1) {
+      m -= 1;
+      if (m < 1) {
+        m = 12;
+        y -= 1;
+      }
+      d += jalaliMonthLength(y, m);
+    }
+    while (d > jalaliMonthLength(y, m)) {
+      d -= jalaliMonthLength(y, m);
+      m += 1;
+      if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+    }
+    setViewYear(y);
+    setViewMonth(m);
+    setActiveDay(d);
+  }
+
+  /** همان ماه، ولی `delta` ماه جلوتر/عقب‌تر — با روزی که از طولِ ماهِ مقصد نزند بیرون. */
+  function moveActiveMonth(delta: number) {
+    followFocusRef.current = true;
+    let m = viewMonth + delta;
+    let y = viewYear;
+    while (m < 1) {
+      m += 12;
+      y -= 1;
+    }
+    while (m > 12) {
+      m -= 12;
+      y += 1;
+    }
+    setViewYear(y);
+    setViewMonth(m);
+    // عمداً این‌جا clamp نمی‌شود. اگر روزِ فعال از طولِ ماهِ مقصد بزند بیرون،
+    // رندر لنگر را روی آخرین روز می‌گذارد و `onFocus`ِ همان دکمه حالت را
+    // اصلاح می‌کند — پس یک clampِ دوم این‌جا هیچ رفتاری را عوض نمی‌کند و هیچ
+    // تستی نمی‌تواند از هم جدایشان کند. دو قاعده برای یک چیز، یعنی روزی یکی
+    // از دو تا عوض می‌شود و آن یکی جا می‌ماند.
+  }
+
+  /** کلیدهای جهت روی شبکهٔ روزها.
+   *
+   *  در RTL جهتِ افقی آینه می‌شود: فلشِ راست یک روز *عقب* می‌رود و فلشِ چپ یک
+   *  روز جلو — همان‌طور که چشم روی شبکه حرکت می‌کند.
+   */
+  function onDayGridKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    const moves: Record<string, () => void> = {
+      ArrowRight: () => moveActiveDay(-1),
+      ArrowLeft: () => moveActiveDay(1),
+      ArrowUp: () => moveActiveDay(-7),
+      ArrowDown: () => moveActiveDay(7),
+      PageUp: () => moveActiveMonth(-1),
+      PageDown: () => moveActiveMonth(1),
+      Home: () => {
+        followFocusRef.current = true;
+        setActiveDay(1);
+      },
+      End: () => {
+        followFocusRef.current = true;
+        setActiveDay(jalaliMonthLength(viewYear, viewMonth));
+      },
+    };
+    const move = moves[e.key];
+    if (!move) return;
+    // جلوی اسکرولِ صفحه و جابه‌جاییِ کاراکتر گرفته می‌شود؛ این کلیدها این‌جا
+    // معنای خودشان را دارند.
+    e.preventDefault();
+    move();
+  }
+
   function openYears() {
     setYearWindowStart(viewYear - 5);
     setMode("years");
   }
+
+  useEffect(() => {
+    if (!followFocusRef.current) return;
+    followFocusRef.current = false;
+    activeDayRef.current?.focus();
+  }, [activeDay, viewYear, viewMonth]);
 
   const daysInMonth = jalaliMonthLength(viewYear, viewMonth);
   const firstWeekday = jalaliWeekday(viewYear, viewMonth, 1); // 0=شنبه ... 6=جمعه
@@ -247,18 +368,38 @@ export function JalaliDatePicker({
                       <div key={i}>{label}</div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-7 gap-0.5 px-2 pb-2 pt-1">
+                  {/* `onKeyDown` روی خودِ شبکه می‌نشیند و نه تک‌تکِ دکمه‌ها:
+                      رویداد از دکمهٔ فوکوس‌دار بالا می‌آید، پس یک شنونده کافی
+                      است و با عوض‌شدنِ روزِ فعال هم جابه‌جا نمی‌شود. */}
+                  <div
+                    role="grid"
+                    aria-label={`روزهای ${JALALI_MONTH_NAMES[viewMonth - 1]} ${toPersianDigits(viewYear)}`}
+                    onKeyDown={onDayGridKeyDown}
+                    className="grid grid-cols-7 gap-0.5 px-2 pb-2 pt-1"
+                  >
                     {cells.map((jd, idx) => {
-                      if (jd === null) return <div key={`empty-${idx}`} />;
+                      if (jd === null) return <div key={`empty-${idx}`} role="presentation" />;
                       const isSelected =
                         selectedJalali && selectedJalali.jy === viewYear && selectedJalali.jm === viewMonth && selectedJalali.jd === jd;
                       const isToday = today.jy === viewYear && today.jm === viewMonth && today.jd === jd;
+                      // دقیقاً یک روز در چرخهٔ Tab است — همان روزی که کلیدهای
+                      // جهت رویش ایستاده‌اند. اگر روزِ فعال از طولِ این ماه
+                      // بزند بیرون (ماه که عوض می‌شود)، آخرین روز می‌ایستد تا
+                      // شبکه هیچ‌وقت بی‌لنگر نماند.
+                      const anchor = Math.min(activeDay, daysInMonth);
+                      const isActive = jd === anchor;
                       return (
                         <button
                           key={jd}
+                          ref={isActive ? activeDayRef : undefined}
                           type="button"
+                          tabIndex={isActive ? 0 : -1}
                           onClick={() => pickDay(jd)}
-                          className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs transition-colors ${
+                          onFocus={() => setActiveDay(jd)}
+                          aria-label={`${toPersianDigits(jd)} ${JALALI_MONTH_NAMES[viewMonth - 1]} ${toPersianDigits(viewYear)}`}
+                          aria-current={isToday ? "date" : undefined}
+                          aria-pressed={Boolean(isSelected)}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs transition-colors focus-visible:ring-2 focus-visible:ring-pulse-500 focus-visible:ring-offset-1 ${
                             isSelected
                               ? "bg-pulse-600 font-bold text-white"
                               : isToday
@@ -361,7 +502,7 @@ export function JalaliDatePicker({
                   onChange(jalaliToIso(t.jy, t.jm, t.jd));
                   setOpen(false);
                 }}
-                className="text-xs font-medium text-pulse-600 hover:underline"
+                className="tap-target text-xs font-medium text-pulse-600 hover:underline"
               >
                 امروز
               </button>
@@ -372,7 +513,7 @@ export function JalaliDatePicker({
                     onChange("");
                     setOpen(false);
                   }}
-                  className="text-xs font-medium text-gray-400 hover:text-gray-600 hover:underline"
+                  className="tap-target text-xs font-medium text-gray-400 hover:text-gray-600 hover:underline"
                 >
                   پاک کردن
                 </button>

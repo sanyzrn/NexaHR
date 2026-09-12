@@ -209,3 +209,67 @@ def test_a_supervisor_cannot_be_assigned_as_deputy(client, db_session):
         headers=auth_header(hr),
     )
     assert response.status_code == 400, response.text
+
+
+def test_a_ceo_seated_as_deputy_can_return_not_only_approve(client, db_session):
+    """تأیید با صندلی تصمیم می‌گرفت و برگشت با نقش — پس نیمی از کار ممکن بود.
+
+    مدیرعاملی که برای چند نفر خودش در صندلیِ *معاونت* نشسته، پرونده را در
+    `hr_approved` تأیید می‌کرد ولی نمی‌توانست برگرداند: جدولِ نقش‌محور برایش
+    `ceo_return` می‌داد که از `deputy_approved` شروع می‌شود. همان جدول مرحلهٔ
+    کامنتش را هم غلط می‌گذاشت.
+    """
+    hr = make_user(db_session, "hr")
+    supervisor = make_user(db_session, "unit_supervisor", capabilities=[])
+    # نقشش «مدیرعامل» است، ولی در *این* پرونده روی صندلیِ معاونت نشسته. تأیید
+    # نهاییِ همین پرونده دستِ کسِ دیگری است (`ck_evaluation_access_deputy_not_ceo`
+    # اجازهٔ یک نفر روی هر دو صندلی را نمی‌دهد، و درست هم همین است).
+    ceo = make_user(db_session, "ceo", capabilities=[])
+    top_ceo = make_user(db_session, "ceo", capabilities=[])
+    personnel = make_personnel(db_session)
+    db_session.add(
+        EvaluationAccess(
+            personnel_id=personnel.id,
+            unit_supervisor_user_id=supervisor.id,
+            deputy_user_id=ceo.id,
+            ceo_user_id=top_ceo.id,
+        )
+    )
+    db_session.commit()
+
+    created = client.post(
+        "/api/evaluations",
+        json={"subject_personnel_id": personnel.id},
+        headers=auth_header(supervisor),
+    )
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+    client.put(
+        f"/api/evaluations/{record_id}/scores",
+        json={"scores": full_valid_scores(active_indicators(db_session))},
+        headers=auth_header(supervisor),
+    )
+    assert client.post(
+        f"/api/evaluations/{record_id}/submit", headers=auth_header(supervisor)
+    ).status_code == 200
+    assert client.post(
+        f"/api/evaluations/{record_id}/hr-approve", headers=auth_header(hr)
+    ).status_code == 200
+
+    returned = client.post(
+        f"/api/evaluations/{record_id}/return",
+        json={"reason": "شواهدِ شاخص سوم کافی نیست"},
+        headers=auth_header(ceo),
+    )
+    assert returned.status_code == 200, returned.text
+
+    db_session.expire_all()
+    # برگشتِ معاونت، نه برگشتِ نهایی: یک پله عقب، به صفِ منابع انسانی.
+    assert db_session.get(EvaluationRecord, record_id).status is EvaluationStatus.submitted
+
+    # و دلیلش در مرحلهٔ *معاونت* نشسته، نه در «تأیید نهایی».
+    detail = client.get(f"/api/evaluations/{record_id}", headers=auth_header(hr)).json()
+    stages = {
+        c["stage"] for c in detail["comments"] if "برگشت پرونده" in c["comment_text"]
+    }
+    assert stages == {"deputy_review"}, detail["comments"]
