@@ -109,7 +109,7 @@ export function NotificationBell() {
             <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5">
               <span className="text-sm font-bold text-gray-900">اعلان‌ها</span>
               {unread > 0 && (
-                <button onClick={markAllRead} className="text-xs font-medium text-pulse-600 hover:underline">
+                <button onClick={markAllRead} className="tap-target text-xs font-medium text-pulse-600 hover:underline">
                   علامت‌گذاری همه به‌عنوان خوانده‌شده
                 </button>
               )}

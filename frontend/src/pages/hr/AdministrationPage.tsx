@@ -723,7 +723,7 @@ function IntegrationsCard() {
           <button
             type="button"
             onClick={() => setDraft(null)}
-            className="text-xs font-medium text-gray-500 hover:text-gray-700"
+            className="tap-target text-xs font-medium text-gray-500 hover:text-gray-700"
           >
             بازگرداندن تغییرات
           </button>

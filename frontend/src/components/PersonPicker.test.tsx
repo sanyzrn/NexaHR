@@ -156,3 +156,49 @@ describe("PersonPicker", () => {
     expect(await screen.findByText(/نتیجهٔ نخست از/)).toBeInTheDocument();
   });
 });
+
+describe("اعلامِ گزینهٔ فعال به صفحه‌خوان", () => {
+  it("`aria-activedescendant` با فلش‌ها حرکت می‌کند", async () => {
+    /* فوکوس روی جعبهٔ جست‌وجو می‌ماند، پس صفحه‌خوان فقط از این راه می‌فهمد
+       نشانگر روی کدام گزینه است. بی آن، کاربرِ صفحه‌خوان با فلش در فهرست
+       حرکت می‌کرد و هیچ چیزی شنیده نمی‌شد — فهرست عملاً نامرئی بود. */
+    renderPicker();
+    fireEvent.click(screen.getByRole("combobox"));
+    await screen.findByText("علی محمدی");
+
+    const search = screen.getByRole("textbox", { name: "جست‌وجوی پرسنل" });
+    const options = screen.getAllByRole("option");
+
+    // گزینهٔ اول از ابتدا اعلام شده است
+    expect(search).toHaveAttribute("aria-activedescendant", options[0]!.id);
+    expect(options[0]!.id).toBeTruthy();
+
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveAttribute("aria-activedescendant", options[1]!.id);
+
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    expect(search).toHaveAttribute("aria-activedescendant", options[0]!.id);
+  });
+
+  it("وقتی نتیجه‌ای نیست، گزینهٔ فعالی هم اعلام نمی‌شود", async () => {
+    renderPicker();
+    fireEvent.click(screen.getByRole("combobox"));
+    const search = screen.getByRole("textbox", { name: "جست‌وجوی پرسنل" });
+    fireEvent.change(search, { target: { value: "هیچ‌کس" } });
+    await screen.findByText(/پیدا نشد/);
+
+    expect(search).not.toHaveAttribute("aria-activedescendant");
+  });
+
+  it("فهرستِ نتایج، فوکوس را از جعبهٔ جست‌وجو نمی‌دزدد", async () => {
+    // الگوی combobox: دقیقاً یک نقطهٔ فوکوس. اگر گزینه‌ها tabbable بمانند،
+    // Tab کاربر را از ورودی بیرون می‌بَرد وسطِ تایپ.
+    renderPicker();
+    fireEvent.click(screen.getByRole("combobox"));
+    await screen.findByText("علی محمدی");
+
+    for (const option of screen.getAllByRole("option")) {
+      expect(option.tabIndex).toBe(-1);
+    }
+  });
+});

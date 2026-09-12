@@ -55,6 +55,12 @@ export function PersonPicker({
   } = useAnchoredPopover<HTMLDivElement, HTMLDivElement>(open, { matchAnchorWidth: true });
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
+  /** شناسهٔ هر گزینه، برای `aria-activedescendant`.
+   *
+   *  صفحه‌خوان فوکوس را روی خودِ ورودی می‌بیند، پس تنها راهِ اعلامِ «الان روی
+   *  کدام گزینه‌ای» همین است. بی آن، کاربرِ صفحه‌خوان با فلش در فهرست حرکت
+   *  می‌کرد و *هیچ چیزی* شنیده نمی‌شد — فهرست عملاً نامرئی بود. */
+  const optionId = (index: number) => `${listId}-option-${index}`;
 
   const { data: page, isFetching } = usePersonnelList({
     q: debounced || undefined,
@@ -170,6 +176,12 @@ export function PersonPicker({
               onKeyDown={onKeyDown}
               placeholder="نام یا کد پرسنلی…"
               aria-label="جست‌وجوی پرسنل"
+              // `role="combobox"` این‌جا *نمی‌آید*: خودِ دکمهٔ بازکننده combobox
+              // است. این یک جعبهٔ جست‌وجوست که فهرست را کنترل می‌کند، و
+              // `aria-activedescendant` روی نقشِ ضمنیِ `textbox` هم معتبر است.
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={results[active] ? optionId(active) : undefined}
               className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-700 outline-none focus:border-gray-900 focus:bg-white"
             />
           </div>
@@ -185,6 +197,12 @@ export function PersonPicker({
                   <button
                     type="button"
                     role="option"
+                    id={optionId(index)}
+                    // فوکوس روی ورودی می‌ماند و گزینه‌ها با
+                    // `aria-activedescendant` اعلام می‌شوند — الگوی استانداردِ
+                    // combobox. بی این، Tab در فهرستِ نتایج راه می‌رفت و
+                    // ورودی را ترک می‌کرد.
+                    tabIndex={-1}
                     aria-selected={person.id === value}
                     onMouseEnter={() => setActive(index)}
                     onClick={() => choose(person)}

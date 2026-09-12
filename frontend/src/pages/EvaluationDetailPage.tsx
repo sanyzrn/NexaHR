@@ -447,7 +447,7 @@ export function EvaluationDetailPage() {
                                 setReplyingTo(null);
                                 setReplyText("");
                               }}
-                              className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700"
+                              className="tap-target cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-700"
                             >
                               انصراف
                             </button>
@@ -459,7 +459,7 @@ export function EvaluationDetailPage() {
                             setReplyingTo(c.id);
                             setReplyText("");
                           }}
-                          className="cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
+                          className="tap-target cursor-pointer text-xs font-medium text-gray-500 hover:text-gray-900"
                         >
                           پاسخ
                         </button>
