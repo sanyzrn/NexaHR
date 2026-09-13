@@ -75,6 +75,7 @@ const LABELS: Record<string, string> = {
   orphaned_case: "پروندهٔ بی‌صاحب",
   improvement_review: "بازنگری برنامهٔ بهبود",
   stale_login_attempts_purged: "پاک‌سازی تلاش‌های ورود",
+  audit_chain_anchored: "لنگر زنجیرهٔ یکپارچگی",
 };
 
 const PERCENT_KEYS = new Set([

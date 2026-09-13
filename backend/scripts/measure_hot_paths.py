@@ -110,6 +110,7 @@ def _paths() -> list[tuple[str, object]]:
         ("گزارش: خلاصه", lambda db: _summary_data(db, _Filters(personnel_status=None))),
         ("تحلیل: نمای مدیریتی", lambda db: executive_overview(db=db, current_user=None)),
         ("ممیزی: راستی‌آزماییِ کاملِ زنجیره", lambda db: verify_chain(db)),
+        ("ممیزی: بررسیِ سریع (از لنگر)", lambda db: verify_chain(db, since_anchor=True)),
     ]
 
 

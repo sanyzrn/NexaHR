@@ -7,7 +7,7 @@
 """
 import pytest
 from sqlalchemy import select, text
-from sqlalchemy.exc import InternalError, ProgrammingError
+from sqlalchemy.exc import DatabaseError, InternalError, ProgrammingError
 
 from app.models.audit_log import AuditLog
 from app.models.enums import Capability
@@ -139,20 +139,38 @@ def test_the_database_refuses_to_delete_an_audit_row(db_session):
         db_session.execute(text("DELETE FROM audit_log WHERE id = :i"), {"i": target.id})
 
 
-def test_the_database_refuses_to_truncate_the_audit_log(db_session):
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "TRUNCATE audit_log",
+        # `CASCADE` همان کاری است که کسی می‌کند که به دیوارِ اول خورده؛ پس
+        # همان‌جا هم باید بخورَد.
+        "TRUNCATE audit_log CASCADE",
+        "TRUNCATE audit_log, audit_chain_checks",
+        # دفترِ لنگر هم: پاک‌کردنش زنجیره را نگه می‌دارد ولی *تاریخِ
+        # راستی‌آزمایی* را می‌بَرد — یعنی همان چیزی که ثابت می‌کند زنجیره
+        # بررسی شده بود.
+        "TRUNCATE audit_chain_checks",
+    ],
+)
+def test_the_database_refuses_to_truncate_the_audit_tables(db_session, statement):
     """L-2 — تریگرِ سطری `TRUNCATE` را نمی‌بیند.
 
-    `TRUNCATE` هیچ ردیفی را UPDATE/DELETE نمی‌کند، پس تریگرِ
-    `FOR EACH ROW` از کنارش می‌گذشت و کلِ زنجیره بی هیچ اعتراضی پاک می‌شد.
-    و شدنی بود: `audit_log` سمتِ *ارجاع‌دهندهٔ* کلیدهای خارجی‌اش است، پس
-    `TRUNCATE` بی `CASCADE` هم موفق می‌شود.
+    `TRUNCATE` هیچ ردیفی را UPDATE/DELETE نمی‌کند، پس تریگرِ `FOR EACH ROW` از
+    کنارش می‌گذشت و کلِ زنجیره بی هیچ اعتراضی پاک می‌شد.
+
+    این‌جا *قاعده* سنجیده می‌شود و نه یک جمله: هر راهی که به پاک‌کردنِ این دو
+    جدول برسد باید رد شود. کدام گارد اول جواب می‌دهد، جزئیاتِ دیتابیس است و
+    عوض می‌شود — از فازِ ۳پ که `audit_chain_checks` با کلید خارجی به لاگ اشاره
+    می‌کند، `TRUNCATE audit_log`ِ ساده اصلاً به تریگر نمی‌رسد و همان کلیدِ
+    خارجی ردش می‌کند. مهم این است که هیچ‌کدام موفق نشوند.
     """
     actor = make_user(db_session, "hr")
     db_session.flush()
     _log_some(db_session, actor, 1)
 
-    with pytest.raises((InternalError, ProgrammingError), match="append-only"):
-        db_session.execute(text("TRUNCATE audit_log"))
+    with pytest.raises(DatabaseError):
+        db_session.execute(text(statement))
     db_session.rollback()
 
 
