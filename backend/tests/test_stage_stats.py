@@ -4,9 +4,12 @@
 است ولی نه چرا — و مهم‌ترین چیزی که این‌جا سنجیده می‌شود همان تفاوت است: تعداد،
 زمان توقف، و اینکه پرونده‌ها دستِ چه کسی‌اند.
 """
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from app.models.enums import EvaluationStatus
+from app.models.evaluation import EvaluationRecord
 from app.services.stage_stats import STAGE_ORDER, stage_stats
 from tests.helpers import (
     active_indicators,
@@ -87,6 +90,31 @@ def test_a_stage_that_was_passed_counts_as_closed_not_active(client, db_session,
     assert draft["closed"] == 1
     # میانگین توقف روی همان یک ماندنِ تمام‌شده حساب می‌شود.
     assert draft["avg_dwell_days"] is not None
+
+
+def test_the_dwell_average_ignores_the_case_still_sitting_there(client, db_session, chain):
+    """میانگین توقف فقط روی ماندن‌های *تمام‌شده* است، نه روی همهٔ بازدیدها.
+
+    مرحله‌ای با دو پرونده: یکی پس از ده روز رد شده، و یکی که هنوز همان‌جاست.
+    میانگینِ درست ده روز است — یعنی همان یک ماندنِ تمام‌شده. اگر مخرج «همهٔ
+    بازدیدها» بود، پروندهٔ در جریان که هنوز طولِ نهایی‌اش را ندارد عدد را نصف
+    می‌کرد و یک مرحلهٔ کُند، دو برابر سریع‌تر از واقعیت دیده می‌شد.
+
+    تا امروز این تفاوت جایی سنجیده نمی‌شد، چون شمارنده و جمع‌کننده یک شیء بودند
+    و نمی‌توانستند از هم فاصله بگیرند.
+    """
+    passed = _case(client, db_session, chain, "گذشته")
+    record = db_session.get(EvaluationRecord, passed)
+    record.created_at = datetime.now(UTC) - timedelta(days=10)
+    db_session.commit()
+    client.post(f"/api/evaluations/{passed}/submit", headers=auth_header(chain["sup"]))
+    _case(client, db_session, chain, "مانده")  # هنوز در پیش‌نویس
+
+    draft = _by_status(stage_stats(db_session))[EvaluationStatus.draft.value]
+    assert draft["passes"] == 2
+    assert draft["closed"] == 1
+    assert draft["active"] == 1
+    assert draft["avg_dwell_days"] == 10.0
 
 
 def test_a_returned_case_is_counted_as_a_second_pass(client, db_session, chain):

@@ -1,7 +1,7 @@
 """خواندن مجوزها و وضعیت ماژول‌ها (نیمهٔ دوم P0-03)."""
 from fastapi import HTTPException
 from fastapi import status as http_status
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
 from app.core.modules import MODULES, MODULES_BY_KEY
@@ -47,13 +47,50 @@ def apply_default_hr_capabilities(db: Session, user_id: int) -> None:
     )
 
 
+#: کلیدِ عکسِ لحظه‌ایِ `module_settings` در `Session.info`.
+_MODULE_SNAPSHOT = "module_settings_snapshot"
+
+
+def _stored_states(db: Session) -> dict[str, bool]:
+    """ردیف‌های `module_settings`، یک‌بار در هر session.
+
+    بی این، هر بررسیِ ماژول یک کوئری بود — و بدتر: *دقیقاً در استقرارِ تازه*.
+    `db.get(ModuleSetting, key)` وقتی ردیف هست آن را در identity map نگه
+    می‌دارد، ولی «ردیفی نیست» را نگه نمی‌دارد؛ و ردیف فقط وقتی ساخته می‌شود که
+    مدیری سوییچی را دست بزند. یعنی سامانه‌ای که هیچ‌کس تنظیماتش را عوض نکرده،
+    بدترین حالت را داشت: در جاروی SLA دو هزار کوئریِ یکسان، یکی به‌ازای هر
+    اعلان.
+
+    عمرِ این عکس یک session است و نه بیشتر — یعنی یک درخواست، یا یک اجرای
+    جارو. و اگر همان session خودش سوییچی را عوض کند، `after_flush` پایین آن را
+    دور می‌اندازد، پس خواندنِ بعدی مقدارِ تازه را می‌بیند.
+    """
+    cached = db.info.get(_MODULE_SNAPSHOT)
+    if cached is None:
+        cached = {row.key: row.enabled for row in db.scalars(select(ModuleSetting))}
+        db.info[_MODULE_SNAPSHOT] = cached
+    return cached
+
+
+@event.listens_for(Session, "after_flush")
+def _drop_module_snapshot(session: Session, flush_context) -> None:
+    """عکسِ ماژول‌ها با هر نوشتنِ `ModuleSetting` باطل می‌شود.
+
+    شنونده و نه یک فراخوانیِ دستی در پنلِ مدیریت: «یادت باشد کش را پاک کنی»
+    همان جنسِ قاعده‌ای است که یک بار رعایت می‌شود و دفعهٔ بعد نه.
+    """
+    touched = (*session.new, *session.dirty, *session.deleted)
+    if any(isinstance(obj, ModuleSetting) for obj in touched):
+        session.info.pop(_MODULE_SNAPSHOT, None)
+
+
 def module_states(db: Session) -> dict[str, bool]:
     """وضعیت همهٔ ماژول‌ها. ماژولی که ردیفی ندارد، پیش‌فرضِ خودش را می‌گیرد.
 
     یعنی افزودن یک ماژول تازه به کد، بدون مایگریشن کار می‌کند — و مهم‌تر،
     ماژولِ تازه با حالتِ درستش شروع می‌شود نه با «خاموش» فقط چون ردیف ندارد.
     """
-    stored = {row.key: row.enabled for row in db.scalars(select(ModuleSetting))}
+    stored = _stored_states(db)
     return {
         module.key: stored.get(module.key, module.default_enabled)
         for module in MODULES
@@ -69,8 +106,7 @@ def stored_module_state(db: Session, key: str) -> bool:
     module = MODULES_BY_KEY.get(key)
     if module is None:
         raise KeyError(f"ماژولی با کلید «{key}» تعریف نشده است (core/modules.py)")
-    row = db.get(ModuleSetting, key)
-    return row.enabled if row is not None else module.default_enabled
+    return _stored_states(db).get(key, module.default_enabled)
 
 
 def unmet_requirements(db: Session, key: str) -> tuple[str, ...]:

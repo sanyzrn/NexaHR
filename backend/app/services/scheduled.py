@@ -30,7 +30,7 @@ from app.services.ai.confirmations import purge_decided_actions
 from app.services.delivery import run_delivery_sweep
 from app.services.documents import archive_final_pdf
 from app.services.login_guard import purge_stale
-from app.services.notifications import notify_once
+from app.services.notifications import already_notified, notify_once
 from app.services.pdf import weasyprint_available
 from app.services.workflow import IS_OPEN_RECORD, owner_after_hr_review, scorer_seat
 
@@ -65,6 +65,11 @@ def run_contract_expiry_sweep(db: Session) -> int:
     ).all()
 
     hr_ids = _active_hr_ids(db)
+    seen = already_notified(
+        db,
+        [f"contract_expiry:{personnel_id}" for personnel_id, _, _ in expiring],
+        settings.notification_dedup_days,
+    )
     created = 0
     today = today_local()
     for personnel_id, full_name, end_date in expiring:
@@ -86,13 +91,19 @@ def run_contract_expiry_sweep(db: Session) -> int:
                 dedup_key=f"contract_expiry:{personnel_id}",
                 within_days=settings.notification_dedup_days,
                 link="/hr/dashboard",
+                seen=seen,
             ):
                 created += 1
     return created
 
 
-def _current_owner_ids(db: Session, record: EvaluationRecord) -> list[int]:
+def _current_owner_ids(record: EvaluationRecord, hr_ids: list[int]) -> list[int]:
     """چه کسی *الان* روی این پرونده باید اقدام کند.
+
+    `hr_ids` را فراخواننده می‌دهد و این‌جا گرفته نمی‌شود: صفِ مشترکِ منابع
+    انسانی برای *همهٔ* پرونده‌ها یکی است، و پرسیدنش در هر پرونده یعنی هزار
+    کوئریِ یکسان در یک جارو. روی دیتابیسِ هزارنفره همین یک سطر، ۲۵۰ کوئری از
+    ۶۲۵۱ کوئریِ جاروی SLA بود.
 
     صاحبِ هر مرحله از شکلِ زنجیره می‌آید و نه فقط از وضعیت — و همین تفاوت،
     سه خرابیِ جدا می‌ساخت (`tests/test_scheduled.py`):
@@ -112,7 +123,7 @@ def _current_owner_ids(db: Session, record: EvaluationRecord) -> list[int]:
         _, scorer_id = scorer_seat(record)
         return [scorer_id] if scorer_id is not None else []
     if record.status == EvaluationStatus.submitted:
-        return _active_hr_ids(db)
+        return hr_ids
     if record.status == EvaluationStatus.hr_approved:
         return [owner_after_hr_review(record)]
     if record.status == EvaluationStatus.deputy_approved:
@@ -135,13 +146,20 @@ def run_sla_sweep(db: Session) -> int:
         )
     )
 
+    stalled = list(stalled)
     created = 0
+    hr_ids = _active_hr_ids(db)
+    seen = already_notified(
+        db,
+        [f"sla:{record.id}:{record.status.value}" for record in stalled],
+        settings.sla_reminder_days,
+    )
     for record in stalled:
         message = (
             f"پرونده {record.evaluation_code} ({record.subject.full_name}) بیش از "
             f"{fa_digits(settings.sla_reminder_days)} روز است در همین مرحله منتظر اقدام شماست"
         )
-        for owner_id in _current_owner_ids(db, record):
+        for owner_id in _current_owner_ids(record, hr_ids):
             if notify_once(
                 db,
                 user_id=owner_id,
@@ -151,6 +169,7 @@ def run_sla_sweep(db: Session) -> int:
                 within_days=settings.sla_reminder_days,
                 evaluation_record_id=record.id,
                 link=f"/evaluations/{record.id}",
+                seen=seen,
             ):
                 created += 1
     return created
@@ -164,21 +183,43 @@ def run_orphaned_case_sweep(db: Session) -> int:
     شود پرونده تا ابد سر جایش می‌ماند. بدون این جارو، HR فقط موقع تمدید قرارداد —
     یعنی بدترین لحظهٔ ممکن — متوجهش می‌شد.
     """
-    open_records = db.scalars(select(EvaluationRecord).where(IS_OPEN_RECORD))
+    open_records = list(db.scalars(select(EvaluationRecord).where(IS_OPEN_RECORD)))
     hr_ids = _active_hr_ids(db)
     created = 0
 
-    for record in open_records:
-        owner_ids = _current_owner_ids(db, record)
-        # وضعیت submitted صاحب مشخصی ندارد (هر HR فعالی می‌تواند اقدام کند)، پس
-        # «بی‌صاحب» بودنش معنای دیگری دارد و این‌جا موضوعیت ندارد.
-        if not owner_ids or record.status == EvaluationStatus.submitted:
-            continue
+    # وضعیت submitted صاحب مشخصی ندارد (هر HR فعالی می‌تواند اقدام کند)، پس
+    # «بی‌صاحب» بودنش معنای دیگری دارد و این‌جا موضوعیت ندارد.
+    owners_by_record = {
+        record.id: _current_owner_ids(record, hr_ids)
+        for record in open_records
+        if record.status != EvaluationStatus.submitted
+    }
 
-        active_owners = db.scalars(
-            select(User.id).where(User.id.in_(owner_ids), User.is_active.is_(True))
-        ).all()
-        if active_owners:
+    # یک کوئری برای همهٔ صندلی‌ها، نه یکی به‌ازای هر پرونده. تعدادِ صندلی‌های
+    # متمایز به اندازهٔ *سازمان* است و نه به اندازهٔ تاریخِ پرونده‌ها، پس این
+    # مجموعه کوچک می‌ماند حتی وقتی پرونده‌ها ده‌هزارتا شوند — و همان است که
+    # پرسیدنِ یکی‌یکی را بی‌معنا می‌کند.
+    seat_ids = {owner_id for owners in owners_by_record.values() for owner_id in owners}
+    active_seat_ids = (
+        set(db.scalars(select(User.id).where(User.id.in_(seat_ids), User.is_active.is_(True))))
+        if seat_ids
+        else set()
+    )
+    seen = already_notified(
+        db,
+        [
+            f"orphaned:{record.id}:{record.status.value}"
+            for record in open_records
+            if record.id in owners_by_record
+        ],
+        settings.notification_dedup_days,
+    )
+
+    for record in open_records:
+        owner_ids = owners_by_record.get(record.id)
+        if not owner_ids:
+            continue
+        if any(owner_id in active_seat_ids for owner_id in owner_ids):
             continue
 
         message = (
@@ -195,6 +236,7 @@ def run_orphaned_case_sweep(db: Session) -> int:
                 within_days=settings.notification_dedup_days,
                 evaluation_record_id=record.id,
                 link=f"/evaluations/{record.id}",
+                seen=seen,
             ):
                 created += 1
     return created
@@ -212,7 +254,16 @@ def run_improvement_review_sweep(db: Session) -> int:
         )
     )
 
+    due_plans = list(due_plans)
     hr_ids = _active_hr_ids(db)
+    seen = already_notified(
+        db,
+        [
+            f"improvement_review:{plan.id}:{plan.review_date.isoformat()}"
+            for plan in due_plans
+        ],
+        settings.notification_dedup_days,
+    )
     created = 0
     today = today_local()
     for plan in due_plans:
@@ -238,6 +289,7 @@ def run_improvement_review_sweep(db: Session) -> int:
                 dedup_key=f"improvement_review:{plan.id}:{plan.review_date.isoformat()}",
                 within_days=settings.notification_dedup_days,
                 link=f"/improvement-plans/{plan.id}",
+                seen=seen,
             ):
                 created += 1
     return created

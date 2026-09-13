@@ -258,6 +258,43 @@ def overview(
         for uid, username, full_name, avg, count, people in evaluator_rows
     ]
 
+    # میانگینِ هر شاخص، *یک‌بار* برای هر چهار فهرستِ پایین — با دو اصلاح که
+    # روی هم ۵۳۶ میلی‌ثانیه را به ۱۳۳ رساندند.
+    #
+    # **یک اسکن به‌جای چهار.** «ضعیف‌ها» و «قوی‌ها»، در دو بخشِ فرم، چهار کوئریِ
+    # جدا بودند که فقط در بخش و جهتِ مرتب‌سازی فرق داشتند؛ تجمیعِ زیرشان — اسکنِ
+    # ۱۲۰ هزار ردیفِ نمره — در هر چهارتا یکی بود. گرفتنِ *همهٔ* شاخص‌ها و بریدن
+    # در پایتون این‌جا بی‌خطر است و جای دیگر نه: تعدادِ شاخص‌ها به چارچوبِ فرم
+    # بند است (چند ده‌تا) و با انباشتِ داده رشد نمی‌کند. همان کاری که برای
+    # پرونده‌ها یا نمره‌ها هرگز نباید کرد.
+    #
+    # **متنِ شاخص‌ها بیرونِ تجمیع.** `count(distinct …)`ِ سنجهٔ کوهورت، Postgres
+    # را به مرتب‌سازی می‌بَرد نه هش، و آن مرتب‌سازی هر ستونی را که در `GROUP BY`
+    # باشد با خودش حمل می‌کند. با `category` و `description` در گروه، ۱۲۰ هزار
+    # ردیفِ پهن مرتب می‌شد: ۲۲ مگابایت روی دیسک و ۲۰۰ میلی‌ثانیه از ۲۵۴. حالا
+    # فقط دو شناسه مرتب می‌شوند و متن‌ها به همان بیست ردیفِ خروجی می‌چسبند.
+    per_indicator = (
+        select(
+            EvaluationScore.indicator_id.label("indicator_id"),
+            func.avg(EvaluationScore.score).label("avg_score"),
+            cohort_size(EvaluationRecord.subject_personnel_id).label("people"),
+        )
+        .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
+        .where(_FINALIZED, in_site)
+        .group_by(EvaluationScore.indicator_id)
+        .subquery()
+    )
+    indicator_rows = db.execute(
+        select(
+            Indicator.id,
+            Indicator.section,
+            Indicator.category,
+            Indicator.description,
+            per_indicator.c.avg_score,
+            per_indicator.c.people,
+        ).join(per_indicator, per_indicator.c.indicator_id == Indicator.id)
+    ).all()
+
     def _indicator_stats(section: IndicatorSection | None, *, weakest: bool) -> list[IndicatorStat]:
         """پنج شاخصِ ضعیف یا قوی، در یک بخشِ فرم یا در کل آن.
 
@@ -265,23 +302,16 @@ def overview(
         می‌دهد، هر سازمانی را بیمار جلوه می‌دهد و هیچ‌وقت نمی‌گوید کجا باید همان
         کار را تکرار کرد.
         """
-        query = (
-            select(
-                Indicator.id,
-                Indicator.category,
-                Indicator.description,
-                func.avg(EvaluationScore.score),
-                cohort_size(EvaluationRecord.subject_personnel_id),
-            )
-            .join(EvaluationScore, EvaluationScore.indicator_id == Indicator.id)
-            .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
-            .where(_FINALIZED, in_site)
-            .group_by(Indicator.id, Indicator.category, Indicator.description)
-            .order_by(func.avg(EvaluationScore.score) if weakest else func.avg(EvaluationScore.score).desc())
-            .limit(5)
-        )
-        if section is not None:
-            query = query.where(Indicator.section == section)
+        rows = [row for row in indicator_rows if section is None or row[1] == section]
+        # دو مرتب‌سازی و نه یکی، چون `sort` پایتون پایدار است: اول شناسه، بعد
+        # میانگین. این‌طور شاخص‌های هم‌میانگین در *هر دو* فهرست به ترتیبِ شناسه
+        # می‌آیند، نه در یکی صعودی و در دیگری نزولی.
+        #
+        # `ORDER BY avg`ِ قبلی برای تساوی‌ها هیچ تضمینی نداشت، و صفحه‌ای که با
+        # هر بازخوانی جای دو ردیف را عوض می‌کند، خواننده را به شک می‌اندازد که
+        # داده عوض شده.
+        rows.sort(key=lambda row: row[0])
+        rows.sort(key=lambda row: float(row[4]), reverse=not weakest)
         return [
             IndicatorStat(
                 indicator_id=iid,
@@ -289,7 +319,7 @@ def overview(
                 description=description,
                 avg_score=suppressed_avg(round(float(avg), 2), people),
             )
-            for iid, category, description, avg, people in db.execute(query).all()
+            for iid, _section, category, description, avg, people in rows[:5]
         ]
 
     lowest_by_indicator = _indicator_stats(IndicatorSection.general, weakest=True)

@@ -18,7 +18,7 @@
 ۲. **هر میانگینِ گروهی از سرکوب کوهورت رد می‌شود** (P1-08). استثنا فقط آمارِ
    *خودِ* ارزیاب است: او همان نمره‌ها را خودش داده و چیزی کشف نمی‌کند.
 """
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import Float, func, select
@@ -61,22 +61,6 @@ _EXPOSURE_HORIZONS = (30, 60, 90)
 
 def _round(value, digits: int = 2) -> float | None:
     return round(float(value), digits) if value is not None else None
-
-
-def _median(values: list[float]) -> float | None:
-    if not values:
-        return None
-    middle = len(values) // 2
-    if len(values) % 2:
-        return values[middle]
-    return (values[middle - 1] + values[middle]) / 2
-
-
-def _percentile(values: list[float], fraction: float) -> float | None:
-    if not values:
-        return None
-    index = min(len(values) - 1, int(round(fraction * (len(values) - 1))))
-    return values[index]
 
 
 @router.get("/my-scoring", response_model=MyScoringProfile)
@@ -232,16 +216,16 @@ def my_scoring_profile(
     # برای پروندهٔ نهایی‌شده، «ثبت» همان لحظه‌ای است که از draft بیرون رفت. آن لحظه
     # را نگه نمی‌داریم، ولی audit log دارد؛ به‌جای پیوند سنگین با لاگ، از تقریبِ
     # صادقانه‌تری استفاده می‌کنیم: پرونده‌های بازِ من که همین حالا روی میز من‌اند.
-    open_mine = [
-        row[0]
-        for row in db.execute(
-            select(EvaluationRecord.stage_entered_at).where(
-                IS_OPEN_RECORD, mine, EvaluationRecord.status == EvaluationStatus.draft
-            )
-        ).all()
-    ]
-    now = datetime.now(UTC)
-    waiting_days = sorted((now - entered).total_seconds() / 86400 for entered in open_mine)
+    # همان استدلالِ صدک‌های نمای مدیریتی: دو عدد لازم است، نه فهرستِ تاریخ‌ها.
+    open_count_mine, median_waiting_days = db.execute(
+        select(
+            func.count(),
+            func.percentile_cont(0.5).within_group(
+                func.extract("epoch", func.now() - EvaluationRecord.stage_entered_at).cast(Float)
+                / 86400.0
+            ),
+        ).where(IS_OPEN_RECORD, mine, EvaluationRecord.status == EvaluationStatus.draft)
+    ).one()
 
     return MyScoringProfile(
         my_score_count=my_count,
@@ -251,8 +235,8 @@ def my_scoring_profile(
         distribution=distribution,
         indicator_gaps=indicator_gaps,
         evidence_rate_pct=round(with_evidence * 100 / my_count, 1) if my_count else None,
-        median_days_in_my_stage=_round(_median(waiting_days), 1),
-        open_with_me=len(open_mine),
+        median_days_in_my_stage=_round(median_waiting_days, 1),
+        open_with_me=open_count_mine,
     )
 
 
@@ -369,34 +353,50 @@ def executive_overview(
     ]
 
     # --- زمان چرخه ----------------------------------------------------------
-    durations = sorted(
-        row[0]
-        for row in db.execute(
-            select(
-                func.extract(
-                    "epoch", EvaluationRecord.finalized_at - EvaluationRecord.created_at
-                ).cast(Float)
-                / 86400.0
-            ).where(_FINALIZED, EvaluationRecord.finalized_at.is_not(None))
-        ).all()
-        if row[0] is not None
+    #
+    # میانه و صدکِ ۹۰ در خودِ Postgres حساب می‌شوند و نه در پایتون.
+    #
+    # پیش از این، *یک ردیف به‌ازای هر پروندهٔ نهایی‌شدهٔ تاریخِ سازمان* از سیم رد
+    # می‌شد تا در پایتون مرتب شود — برای رسیدن به دو عدد. روی هزار نفر و سه
+    # سال، شش هزار ردیف؛ و برخلاف بقیهٔ این صفحه هیچ سقفی نداشت: پنجرهٔ زمانی
+    # نداشت، دوره نداشت، فقط بزرگ‌تر می‌شد.
+    #
+    # `percentile_cont` و نه انتخابِ عضوِ موجود: برای میانه دقیقاً همان عددِ
+    # قبلی را می‌دهد (فرمولِ قبلی هم برای تعدادِ زوج میانگینِ دو عضوِ میانی را
+    # می‌گرفت). برای صدکِ ۹۰ ممکن است کسری فرق کند، چون تعریفِ استانداردِ صدک
+    # بینِ دو عضو درون‌یابی می‌کند و فرمولِ قبلی نزدیک‌ترین عضوِ موجود را
+    # برمی‌داشت. هر دو «صدکِ ۹۰»اند؛ این یکی تعریفِ رایج‌تر است و دیگر با
+    # اضافه‌شدنِ یک پرونده نمی‌پرد.
+    duration_days = (
+        func.extract("epoch", EvaluationRecord.finalized_at - EvaluationRecord.created_at).cast(
+            Float
+        )
+        / 86400.0
     )
-    open_ages = sorted(
-        row[0]
-        for row in db.execute(
-            select(
+    finalized_count, median_days, p90_days = db.execute(
+        select(
+            func.count(),
+            func.percentile_cont(0.5).within_group(duration_days),
+            func.percentile_cont(0.9).within_group(duration_days),
+        ).where(_FINALIZED, EvaluationRecord.finalized_at.is_not(None))
+    ).one()
+
+    open_count, oldest_open_days = db.execute(
+        select(
+            func.count(),
+            func.max(
                 func.extract("epoch", func.now() - EvaluationRecord.stage_entered_at).cast(Float)
                 / 86400.0
-            ).where(IS_OPEN_RECORD)
-        ).all()
-        if row[0] is not None
-    )
+            ),
+        ).where(IS_OPEN_RECORD)
+    ).one()
+
     cycle_time = CycleTime(
-        finalized_count=len(durations),
-        median_days=_round(_median(durations), 1),
-        p90_days=_round(_percentile(durations, 0.9), 1),
-        oldest_open_stage_days=_round(open_ages[-1], 1) if open_ages else None,
-        open_count=len(open_ages),
+        finalized_count=finalized_count,
+        median_days=_round(median_days, 1),
+        p90_days=_round(p90_days, 1),
+        oldest_open_stage_days=_round(oldest_open_days, 1),
+        open_count=open_count,
     )
 
     # --- ریسک تمدید --------------------------------------------------------

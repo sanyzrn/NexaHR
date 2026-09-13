@@ -160,21 +160,39 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
         for unit, avg, count, people in unit_rows
     ]
 
+    # متنِ شاخص‌ها بیرونِ تجمیع می‌ماند و بعد وصل می‌شود.
+    #
+    # `count(distinct …)`ِ سنجهٔ کوهورت، Postgres را به مرتب‌سازی می‌بَرد نه هش،
+    # و آن مرتب‌سازی هر ستونی را که در `GROUP BY` باشد با خودش حمل می‌کند. با
+    # `category`، `description` و `section` در گروه، صد و بیست هزار ردیفِ پهن
+    # مرتب می‌شد و روی دیسک سرریز می‌کرد: ۲۴۶ میلی‌ثانیه از ۲۶۴ میلی‌ثانیهٔ کلِ
+    # این گزارش. حالا فقط دو شناسه مرتب می‌شوند.
+    #
+    # همان الگوی `dashboard.overview` — و همان دلیل.
+    per_indicator = (
+        select(
+            EvaluationScore.indicator_id.label("indicator_id"),
+            func.avg(EvaluationScore.score).label("avg_score"),
+            func.count().label("score_count"),
+            cohort_size(EvaluationRecord.subject_personnel_id).label("people"),
+        )
+        .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
+        .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
+        .where(*conditions)
+        .group_by(EvaluationScore.indicator_id)
+        .subquery()
+    )
     indicator_rows = db.execute(
         select(
             Indicator.id,
             Indicator.category,
             Indicator.description,
             Indicator.section,
-            func.avg(EvaluationScore.score),
-            func.count(),
-            cohort_size(EvaluationRecord.subject_personnel_id),
+            per_indicator.c.avg_score,
+            per_indicator.c.score_count,
+            per_indicator.c.people,
         )
-        .join(EvaluationScore, EvaluationScore.indicator_id == Indicator.id)
-        .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
-        .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
-        .where(*conditions)
-        .group_by(Indicator.id, Indicator.category, Indicator.description, Indicator.section, Indicator.display_order)
+        .join(per_indicator, per_indicator.c.indicator_id == Indicator.id)
         .order_by(Indicator.section, Indicator.display_order)
     ).all()
     by_indicator = [
