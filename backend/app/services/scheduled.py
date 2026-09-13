@@ -15,7 +15,9 @@ from sqlalchemy.orm import Session
 from app.core.clock import today_local
 from app.core.config import settings
 from app.core.persian import fa_digits
+from app.models.capability import UserCapability
 from app.models.enums import (
+    Capability,
     EvaluationStatus,
     ImprovementPlanStatus,
     PersonnelStatus,
@@ -27,6 +29,7 @@ from app.models.improvement_plan import ImprovementPlan
 from app.models.personnel import Personnel
 from app.models.user import User
 from app.services.ai.confirmations import purge_decided_actions
+from app.services.audit import latest_check, record_full_verification
 from app.services.delivery import run_delivery_sweep
 from app.services.documents import archive_final_pdf
 from app.services.login_guard import purge_stale
@@ -295,6 +298,66 @@ def run_improvement_review_sweep(db: Session) -> int:
     return created
 
 
+def run_audit_anchor_sweep(db: Session) -> int:
+    """زنجیرهٔ ممیزی را کامل می‌سنجد و لنگر را جلو می‌برد. خروجی: ۱ اگر جلو رفت.
+
+    **چرا این‌جا و نه روی مسیرِ درخواست:** بررسیِ کامل از ابتدای تاریخ حساب
+    می‌کند و آن عدد هیچ‌وقت کوچک نمی‌شود. جای چنین کاری پس‌زمینه است، نه
+    لحظه‌ای که منابع انسانی صفحهٔ گزارش رویدادها را باز می‌کند.
+
+    **چرا با فاصلهٔ خودش:** زمان‌بند هر پنج دقیقه اجرا می‌شود. بی این گارد،
+    همان هزینه فقط جابه‌جا می‌شد.
+
+    **و اگر شکست خورد:** لنگر تکان نمی‌خورد (قاعده‌اش در
+    `audit.record_full_verification`) و منابع انسانی خبردار می‌شود. اعلان
+    اختیاری نیست: از این پس بررسیِ تعاملی فقط *پس از* لنگر را می‌بیند، پس
+    دست‌کاری در ردیف‌های پیش از لنگر در رابط دیده نمی‌شود. کشفی که به کسی
+    نرسد، کشف نیست.
+    """
+    last = latest_check(db)
+    if last is not None:
+        due_after = last.verified_at + timedelta(hours=settings.audit_full_verify_interval_hours)
+        if datetime.now(UTC) < due_after:
+            return 0
+
+    outcome = record_full_verification(db)
+    if outcome["ok"]:
+        return 1 if outcome["advanced"] else 0
+
+    watchers = list(
+        db.scalars(
+            select(User.id)
+            .join(UserCapability, UserCapability.user_id == User.id)
+            .where(
+                UserCapability.capability == Capability.view_audit_log,
+                User.is_active.is_(True),
+            )
+            .distinct()
+        )
+    )
+    message = (
+        "راستی‌آزماییِ زنجیرهٔ گزارش رویدادها شکست خورد: "
+        f"{outcome['reason']} (نخستین ردیفِ ناسازگار: {fa_digits(outcome['broken_at_id'] or 0)}). "
+        "یعنی ردیفی از لاگ مستقیماً در دیتابیس ویرایش یا حذف شده است."
+    )
+    # کلیدِ dedup شاملِ نقطهٔ شکست است: شکستِ *تازه* در جای دیگر باید دوباره
+    # خبر بدهد، ولی همان شکست هر شب یک اعلانِ تکراری نسازد.
+    dedup = f"audit_chain_broken:{outcome['broken_at_id']}"
+    seen = already_notified(db, [dedup], settings.notification_dedup_days)
+    for user_id in watchers:
+        notify_once(
+            db,
+            user_id=user_id,
+            type_="audit_chain_broken",
+            message=message,
+            dedup_key=dedup,
+            within_days=settings.notification_dedup_days,
+            link="/hr/audit-log",
+            seen=seen,
+        )
+    return 0
+
+
 #: چند سند در هر جارو ساخته شود. رندر PDF گران است و جارو هر پنج دقیقه اجرا
 #: می‌شود؛ بدون سقف، یک backlog بزرگ (مثلاً سروری که تازه WeasyPrint گرفته) کل
 #: پنجرهٔ جارو را می‌بلعد و بقیهٔ یادآوری‌ها را عقب می‌اندازد. با این سقف، backlog
@@ -354,6 +417,8 @@ def run_all_sweeps(db: Session) -> dict[str, int]:
         # همان دستهٔ نگهداری: کارتِ تأییدِ تصمیم‌گرفته‌شده فقط ظاهرِ گفت‌وگوست و
         # سندش در گزارش رویدادها می‌ماند، پس نباید تا ابد در جدول بنشیند.
         "decided_ai_actions_purged": purge_decided_actions(db),
+        # راستی‌آزماییِ کاملِ زنجیره — با فاصلهٔ خودش، نه هر پنج دقیقه.
+        "audit_chain_anchored": run_audit_anchor_sweep(db),
     }
     # تحویل بیرونی *بعد* از بقیه می‌آید: جاروهای بالا ممکن است همین حالا اعلان
     # تازه ساخته باشند، و بی‌معناست که تا اجرای بعدی معطل بمانند.
