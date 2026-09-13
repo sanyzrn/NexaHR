@@ -87,7 +87,9 @@ def enqueue_for(db: Session, notification: Notification) -> int:
             continue
         db.add(
             NotificationDelivery(
-                notification_id=notification.id,
+                # خودِ شیء و نه شناسه‌اش: این‌طور نیازی به flushِ زودهنگام نیست
+                # و درجِ اعلان‌ها دسته‌ای می‌ماند (کامنتِ خودِ ستون).
+                notification=notification,
                 channel=kind,
                 recipient=recipient,
                 status=DeliveryStatus.pending,

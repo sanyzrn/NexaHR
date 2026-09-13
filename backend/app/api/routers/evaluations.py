@@ -59,7 +59,7 @@ from app.services.documents import archive_final_pdf, archive_final_pdf_detached
 from app.services.evaluation import inactive_seat_labels, next_evaluation_code, validate_bonus
 from app.services.evaluation_window import ensure_open as ensure_submission_window_open
 from app.services.evaluation_window import window_for
-from app.services.excel import build_evaluations_workbook
+from app.services.excel import EXPORT_MAX_ROWS, build_evaluations_workbook, cap_rows, note_truncation
 from app.services.indicator_framework import (
     ensure_framework,
     indicator_ids_for_record,
@@ -771,7 +771,11 @@ def export_evaluations_excel(
         max_final_pct=max_final_pct,
         was_returned=was_returned,
     )
-    records = db.scalars(query.order_by(EvaluationRecord.created_at.desc())).all()
+    records, truncated = cap_rows(
+        db.scalars(
+            query.order_by(EvaluationRecord.created_at.desc()).limit(EXPORT_MAX_ROWS + 1)
+        ).all()
+    )
     # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
     #
     # `SessionLocal` روی پیش‌فرضِ `expire_on_commit=True` است، پس هر commit همهٔ
@@ -786,6 +790,8 @@ def export_evaluations_excel(
     content = build_evaluations_workbook(
         rows, {r.id: applied_bonus_for_document(db, r) for r in rows}
     )
+    if truncated:
+        content = note_truncation(content)
     log_event(db, actor_user_id=current_user.id, event_type="excel_exported")
     db.commit()
     return Response(

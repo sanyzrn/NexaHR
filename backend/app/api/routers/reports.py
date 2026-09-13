@@ -160,21 +160,39 @@ def _summary_data(db: Session, filters: _Filters) -> ReportSummary:
         for unit, avg, count, people in unit_rows
     ]
 
+    # متنِ شاخص‌ها بیرونِ تجمیع می‌ماند و بعد وصل می‌شود.
+    #
+    # `count(distinct …)`ِ سنجهٔ کوهورت، Postgres را به مرتب‌سازی می‌بَرد نه هش،
+    # و آن مرتب‌سازی هر ستونی را که در `GROUP BY` باشد با خودش حمل می‌کند. با
+    # `category`، `description` و `section` در گروه، صد و بیست هزار ردیفِ پهن
+    # مرتب می‌شد و روی دیسک سرریز می‌کرد: ۲۴۶ میلی‌ثانیه از ۲۶۴ میلی‌ثانیهٔ کلِ
+    # این گزارش. حالا فقط دو شناسه مرتب می‌شوند.
+    #
+    # همان الگوی `dashboard.overview` — و همان دلیل.
+    per_indicator = (
+        select(
+            EvaluationScore.indicator_id.label("indicator_id"),
+            func.avg(EvaluationScore.score).label("avg_score"),
+            func.count().label("score_count"),
+            cohort_size(EvaluationRecord.subject_personnel_id).label("people"),
+        )
+        .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
+        .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
+        .where(*conditions)
+        .group_by(EvaluationScore.indicator_id)
+        .subquery()
+    )
     indicator_rows = db.execute(
         select(
             Indicator.id,
             Indicator.category,
             Indicator.description,
             Indicator.section,
-            func.avg(EvaluationScore.score),
-            func.count(),
-            cohort_size(EvaluationRecord.subject_personnel_id),
+            per_indicator.c.avg_score,
+            per_indicator.c.score_count,
+            per_indicator.c.people,
         )
-        .join(EvaluationScore, EvaluationScore.indicator_id == Indicator.id)
-        .join(EvaluationRecord, EvaluationRecord.id == EvaluationScore.evaluation_record_id)
-        .join(Personnel, Personnel.id == EvaluationRecord.subject_personnel_id)
-        .where(*conditions)
-        .group_by(Indicator.id, Indicator.category, Indicator.description, Indicator.section, Indicator.display_order)
+        .join(per_indicator, per_indicator.c.indicator_id == Indicator.id)
         .order_by(Indicator.section, Indicator.display_order)
     ).all()
     by_indicator = [
@@ -356,7 +374,14 @@ def export_report_excel(
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
 ) -> Response:
     """خروجی Excel ترکیبی: یک فایل با برگه‌های «خلاصه»، «میانگین به‌تفکیک واحد» و
-    «میانگین به‌تفکیک شاخص»، دقیقاً برای فیلترهای فعال."""
+    «میانگین به‌تفکیک شاخص»، دقیقاً برای فیلترهای فعال.
+
+    EXPORT_ROW_CAP_NOT_APPLICABLE — این خروجی ردیفِ خام ندارد. هر سه برگه
+    تجمیعی‌اند و شمارِ ردیفشان به *ساختارِ سازمان* بند است (تعدادِ واحدها،
+    تعدادِ شاخص‌ها)، نه به حجمِ پرونده‌ها. با ده سالِ داده هم همان چند ده ردیف
+    است. سقفِ ردیف این‌جا نه لازم است نه معنا دارد؛ کار را در SQL انجام
+    می‌شود، نه با کشیدنِ همه‌چیز به حافظه.
+    """
     summary = _summary_data(db, filters)
     content = build_report_workbook(
         total=summary.total_evaluations,

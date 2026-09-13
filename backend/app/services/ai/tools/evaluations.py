@@ -542,7 +542,13 @@ def my_open_cases(ctx: ToolContext, limit: int = 15) -> ToolOutcome:
             )
         )
     elif role == UserRole.ceo:
-        stage_condition = EvaluationRecord.status == EvaluationStatus.deputy_approved
+        # صندلیِ *خودِ این* مدیرعامل، نه هر پرونده‌ای که به تأیید نهایی رسیده.
+        # شاخه‌های معاونت و مسئولِ واحد این فیلتر را داشتند و این یکی نداشت.
+        # در سازمانِ تک‌مدیرعاملی تفاوتی ندارد؛ در نصبی با دو شرکت زیرِ یک
+        # سامانه، هر مدیرعامل پرونده‌های دیگری را هم روی میزش می‌دید.
+        stage_condition = (EvaluationRecord.ceo_user_id == ctx.user.id) & (
+            EvaluationRecord.status == EvaluationStatus.deputy_approved
+        )
     elif role == UserRole.employee:
         # کارمند فقط نتیجهٔ نهاییِ *خودش* را می‌بیند — همان قاعدهٔ
         # scope_evaluations_for_role. پیش از این هیچ فیلترِ موضوعی نبود و

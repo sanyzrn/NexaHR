@@ -28,11 +28,12 @@ from sqlalchemy import (
     String,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.text_limits import DELIVERY_ERROR_MAX
 from app.db.base import Base
 from app.models.enums import DeliveryChannel, DeliveryStatus
+from app.models.notification import Notification  # noqa: TC001  (relationship target)
 
 
 class NotificationDelivery(Base):
@@ -61,6 +62,21 @@ class NotificationDelivery(Base):
     last_error: Mapped[str | None] = mapped_column(String(DELIVERY_ERROR_MAX), nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    #: خودِ اعلان — نه فقط شناسه‌اش.
+    #:
+    #: بی این، ثبت‌کننده مجبور بود پیش از ساختنِ ردیفِ تحویل یک `flush()` بزند
+    #: تا شناسه‌ی اعلان را داشته باشد؛ و چون هر اعلان جدا flush می‌شد، هر
+    #: اعلان یک INSERTِ جدا و یک رفت‌وبرگشتِ جدا به دیتابیس بود. در جاروی SLA
+    #: با هزار پروندهٔ باز، همین دو هزار رفت‌وبرگشت بود. حالا SQLAlchemy خودش
+    #: ترتیب را می‌فهمد و کلیدِ خارجی را در همان flushِ پایانی پر می‌کند —
+    #: یعنی درج‌ها دسته‌ای می‌شوند.
+    #:
+    #: فقط همین یک سمت اعلام شده و نه `Notification.deliveries`: سمتِ مقابل
+    #: کاربردی ندارد و داشتنش یعنی هر بار که اعلانی پاک شود، SQLAlchemy
+    #: سراغِ ردیف‌های تحویل می‌رود — کاری که خودِ `ON DELETE CASCADE` دیتابیس
+    #: بهتر و ارزان‌تر انجام می‌دهد.
+    notification: Mapped["Notification"] = relationship()
 
     __table_args__ = (
         # جاروی تحویل فقط دنبال ردیف‌های در انتظار می‌گردد، به ترتیب قدمت.

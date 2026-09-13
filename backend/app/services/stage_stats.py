@@ -104,10 +104,15 @@ class _Bucket:
     active: int = 0
     closed: int = 0
     records: set[int] = field(default_factory=set)
-    #: فقط ماندن‌های *تمام‌شده*. ماندنِ در جریان هنوز طول نهایی‌اش را ندارد و
+    #: جمعِ ماندن‌های *تمام‌شده*. ماندنِ در جریان هنوز طول نهایی‌اش را ندارد و
     #: واردکردنش میانگین را به‌سمت پایین می‌کشد — دقیقاً برعکسِ چیزی که یک صفِ
     #: راکد باید نشان بدهد.
-    finished_seconds: list[float] = field(default_factory=list)
+    #:
+    #: جمع و نه فهرست: تنها استفاده‌اش میانگین بود، و شمارنده‌اش همان `closed`
+    #: است که کنارش نگه داشته می‌شود. فهرست یعنی یک `append` و یک float به‌ازای
+    #: هر گذارِ تاریخِ سازمان — ده‌ها هزار تا — برای عددی که دو متغیر کافی‌اش
+    #: بودند.
+    finished_seconds_total: float = 0.0
     #: طولانی‌ترین ماندنِ در جریان: همان پرونده‌ای که باید سراغش رفت.
     longest_active_seconds: float = 0.0
 
@@ -154,6 +159,11 @@ def stage_stats(db: Session, *, period_id: int | None = None) -> list[dict]:
     * `settings.stage_stats_window_days` — سقفِ همیشگی. پیش‌فرضش سه سال است،
       یعنی برای سازمانی در این اندازه «همه‌چیز»؛ عددهای امروز عوض نمی‌شوند و
       رشد دیگر بی‌سقف نیست.
+
+    **هزینه، اندازه‌گیری‌شده** (فازِ ۳ب، هزار پرسنل و سه سال): ۳۶۰ میلی‌ثانیه،
+    که ۴۵ تایش SQL است و بقیه همین حلقهٔ پایتونی. یعنی اگر روزی کند شد، بردنِ
+    *کوئری‌ها* به SQL کمکی نمی‌کند؛ کاری که می‌ماند بردنِ خودِ این تجمیع به
+    توابعِ پنجره‌ای است. چرا هنوز انجام نشده — با عدد — در `docs/perf-3b.md`.
     """
     now = datetime.now(UTC)
     window_start = now - timedelta(days=settings.stage_stats_window_days)
@@ -242,7 +252,16 @@ def stage_stats(db: Session, *, period_id: int | None = None) -> list[dict]:
     buckets: dict[str, _Bucket] = {status.value: _Bucket() for status in STAGE_ORDER}
     per_owner: dict[tuple[str, int], _Bucket] = defaultdict(_Bucket)
 
+    # ستونِ صاحبِ هر مرحله فقط به *شکلِ* زنجیره بند است و نه به خودِ پرونده، پس
+    # همان چند شکلِ ممکن یک‌بار حساب می‌شوند و بقیه از کش می‌آیند. پیش از این
+    # برای هر بازدیدِ هر پرونده دوباره حساب می‌شد — و هر بار یک
+    # `EvaluationStatus(...)` از رشته ساخته می‌شد، که در ده‌ها هزار تکرار
+    # دیده می‌شود.
+    owner_field_cache: dict[tuple[str, bool, bool], str | None] = {}
+
     for row in records:
+        seats = owners_by_record[row.id]
+        shape = (seats["unit_supervisor_user_id"] is None, seats["deputy_user_id"] is None)
         for status_value, seconds, is_current in _stage_visits(
             row.created_at,
             row.status.value,
@@ -262,10 +281,14 @@ def stage_stats(db: Session, *, period_id: int | None = None) -> list[dict]:
                 bucket.longest_active_seconds = max(bucket.longest_active_seconds, seconds)
             else:
                 bucket.closed += 1
-                bucket.finished_seconds.append(seconds)
+                bucket.finished_seconds_total += seconds
 
-            seats = owners_by_record[row.id]
-            owner_field = _owner_field_for(EvaluationStatus(status_value), seats)
+            cache_key = (status_value, *shape)
+            if cache_key in owner_field_cache:
+                owner_field = owner_field_cache[cache_key]
+            else:
+                owner_field = _owner_field_for(EvaluationStatus(status_value), seats)
+                owner_field_cache[cache_key] = owner_field
             owner_id = seats[owner_field] if owner_field else None
             if owner_id is None:
                 continue
@@ -277,7 +300,7 @@ def stage_stats(db: Session, *, period_id: int | None = None) -> list[dict]:
                 owner_bucket.longest_active_seconds = max(owner_bucket.longest_active_seconds, seconds)
             else:
                 owner_bucket.closed += 1
-                owner_bucket.finished_seconds.append(seconds)
+                owner_bucket.finished_seconds_total += seconds
 
     owner_ids = {owner_id for _, owner_id in per_owner}
     names = {
@@ -309,7 +332,7 @@ def stage_stats(db: Session, *, period_id: int | None = None) -> list[dict]:
                 "share_pct": round(len(bucket.records) * 100 / total_records, 1),
                 # «نهایی‌شده» مرحلهٔ انتظار نیست، مقصد است: «چقدر آن‌جا مانده»
                 # برایش یعنی «چند وقت است که تمام شده»، که پرسشِ دیگری است.
-                "avg_dwell_days": None if terminal else _avg_days(bucket.finished_seconds),
+                "avg_dwell_days": None if terminal else _avg_days(bucket),
                 "longest_active_days": (
                     None
                     if terminal or not bucket.active
@@ -327,22 +350,22 @@ def _finish_owner(name: str, bucket: _Bucket) -> dict:
         "total": len(bucket.records),
         "active": bucket.active,
         "closed": bucket.closed,
-        "avg_dwell_days": _avg_days(bucket.finished_seconds),
+        "avg_dwell_days": _avg_days(bucket),
         "longest_active_days": (
             round(bucket.longest_active_seconds / 86400, 1) if bucket.active else None
         ),
     }
 
 
-def _avg_days(seconds: list[float]) -> float | None:
+def _avg_days(bucket: _Bucket) -> float | None:
     """`None` و نه صفر وقتی هیچ ماندنِ تمام‌شده‌ای نیست.
 
     صفر یعنی «فوری رد شد»، که ادعای دیگری است. مرحله‌ای که هنوز هیچ پرونده‌ای از
     آن رد نشده، میانگین ندارد — و رابط باید بتواند این دو را از هم جدا نشان دهد.
     """
-    if not seconds:
+    if not bucket.closed:
         return None
-    return round(max(0.0, sum(seconds) / len(seconds)) / 86400, 1)
+    return round(max(0.0, bucket.finished_seconds_total / bucket.closed) / 86400, 1)
 
 
 #: نقش‌هایی که در هر مرحله می‌نشینند — برای مستندسازی و تست.

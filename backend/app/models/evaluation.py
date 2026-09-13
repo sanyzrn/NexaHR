@@ -255,6 +255,10 @@ class EvaluationRecord(Base):
         Index("ix_evaluation_records_hr_user_id", "hr_user_id"),
         Index("ix_evaluation_records_period", "period_id"),
         Index("ix_evaluation_records_status_created", "status", "created_at"),
+        # و همین ستون به‌تنهایی: ایندکسِ ترکیبیِ بالا ستونِ پیشروش `status` است،
+        # پس فیلترِ فقط-تاریخ از آن سودی نمی‌برد. «آمارِ مرحله‌ها» دقیقاً همان
+        # شکل را می‌زند (پنجرهٔ زمانی و فیلترِ دوره، هر دو روی `created_at`).
+        Index("ix_evaluation_records_created_at", "created_at"),
         Index("ix_evaluation_records_final_pct", "final_weighted_pct"),
         Index("ix_evaluation_records_stage_entered_at", "stage_entered_at"),
         Index("ix_evaluation_records_verify_token", "verify_token", unique=True),

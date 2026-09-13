@@ -20,7 +20,7 @@ from app.schemas.user import UserCreate, UserPage, UserRead, UserUpdate
 from app.services.audit import log_event
 from app.services.authorization import apply_default_hr_capabilities
 from app.services.evaluation import ensure_no_open_chain_seat
-from app.services.excel import build_users_workbook
+from app.services.excel import EXPORT_MAX_ROWS, build_users_workbook, cap_rows, note_truncation
 from app.services.login_guard import unlock as unlock_login
 from app.services.self_evaluation import (
     ensure_personnel_has_one_account,
@@ -137,7 +137,11 @@ def export_users_excel(
 ) -> Response:
     """خروجی Excel از فهرست کاربران (فقط HR) با همان فیلترهای فهرست."""
     query = _apply_user_filters(select(User), role=role, q=q, is_active=is_active)
-    users = list(db.scalars(query.order_by(*_user_order_by(sort_by, sort_dir))))
+    users, truncated = cap_rows(
+        db.scalars(
+            query.order_by(*_user_order_by(sort_by, sort_dir)).limit(EXPORT_MAX_ROWS + 1)
+        ).all()
+    )
     personnel_names = _linked_names(db, users)
     # فایل *پیش از* commit ساخته می‌شود، و این ترتیب مهم است.
     #
@@ -147,6 +151,8 @@ def export_users_excel(
     # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
     # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
     content = build_users_workbook(users, personnel_names)
+    if truncated:
+        content = note_truncation(content)
     log_event(db, actor_user_id=current_user.id, event_type="users_excel_exported")
     db.commit()
     return Response(

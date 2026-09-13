@@ -18,7 +18,7 @@ from app.schemas.auth import CurrentUser
 from app.services.audit import log_event, verify_chain
 from app.services.audit_events import EVENT_LABELS
 from app.services.authorization import capabilities_of
-from app.services.excel import build_audit_log_workbook
+from app.services.excel import EXPORT_MAX_ROWS, build_audit_log_workbook, cap_rows, note_truncation
 
 router = APIRouter(prefix="/api/audit-log", tags=["audit-log"])
 
@@ -255,7 +255,8 @@ def export_audit_log_excel(
     current_user: CurrentUser = Depends(require_capability(Capability.view_audit_log)),
 ) -> Response:
     """خروجی Excel از گزارش رویدادها (فقط HR) با همان فیلترهای فهرست. برای پرهیز از
-    فایل‌های عظیم، حداکثر ۵۰۰۰ ردیف اخیرِ منطبق با فیلتر صادر می‌شود."""
+    فایل‌های عظیم، حداکثر `EXPORT_MAX_ROWS` ردیف اخیرِ منطبق با فیلتر صادر می‌شود — و اگر به سقف
+    خورد، خودِ فایل می‌گوید که کامل نیست."""
     filters = _build_filters(
         event_type,
         evaluation_record_id,
@@ -267,7 +268,7 @@ def export_audit_log_excel(
         contract_end_from,
         contract_end_to,
     )
-    rows = _query_rows(db, filters, limit=5000, offset=0)
+    rows, truncated = cap_rows(_query_rows(db, filters, limit=EXPORT_MAX_ROWS + 1, offset=0))
     entries = [
         (row, full_name or username, evaluation_code)
         for row, username, full_name, evaluation_code in rows
@@ -280,6 +281,8 @@ def export_audit_log_excel(
     # نباید پس از commit بماند (همان الگوی R1).
     log_event(db, actor_user_id=current_user.id, event_type="audit_log_excel_exported")
     content = build_audit_log_workbook(entries, EVENT_LABELS)
+    if truncated:
+        content = note_truncation(content)
     db.commit()
     return Response(
         content=content,

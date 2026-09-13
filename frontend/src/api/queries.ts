@@ -10,7 +10,7 @@ import {
   type DashboardOverview,
   type EvaluationDetail,
   type EvaluationRecord,
-  type EligibleEvaluation,
+  type EligibleEvaluationPage,
   type EvaluationPeriod,
   type EvaluationStatus,
   type ExpiringContract,
@@ -401,11 +401,15 @@ export function useImprovementPlanDetail(id: number | null) {
   });
 }
 
-export function useEligibleEvaluations() {
+export function useEligibleEvaluations(params: { limit: number; offset: number }) {
   return useQuery({
-    queryKey: ["improvement-plans", "eligible"],
+    queryKey: ["improvement-plans", "eligible", params],
     queryFn: async () =>
-      (await apiClient.get<EligibleEvaluation[]>("/improvement-plans/eligible")).data,
+      (
+        await apiClient.get<EligibleEvaluationPage>("/improvement-plans/eligible", {
+          params,
+        })
+      ).data,
   });
 }
 

@@ -280,6 +280,48 @@ def test_goal_of_a_closed_plan_cannot_be_flipped(db_session, make_plan):
     assert "improvement_goal_updated" in events
 
 
+def test_the_ceo_queue_only_shows_this_ceos_own_cases(db_session):
+    """صفِ مدیرعامل هم مثل بقیهٔ صف‌ها به صندلیِ خودش بند است.
+
+    شاخه‌های معاونت و مسئولِ واحد این فیلتر را داشتند و این یکی نداشت: هر
+    پرونده‌ای که به `deputy_approved` رسیده بود، روی میزِ *هر* مدیرعاملی
+    می‌نشست. در سازمانِ تک‌مدیرعاملی تفاوتی ندارد؛ در نصبی با دو شرکت زیرِ
+    یک سامانه، هرکدام پرونده‌های دیگری را هم می‌دید.
+    """
+    from app.models.enums import EvaluationStatus
+    from app.models.evaluation import EvaluationRecord
+
+    mine = make_user(db_session, "ceo", capabilities=[])
+    theirs = make_user(db_session, "ceo", capabilities=[])
+    sup = make_user(db_session, "unit_supervisor", capabilities=[])
+    subject_a = make_personnel(db_session, full_name="پروندهٔ من")
+    subject_b = make_personnel(db_session, full_name="پروندهٔ آن یکی")
+    db_session.add_all(
+        [
+            EvaluationRecord(
+                evaluation_code="EV-MINE",
+                subject_personnel_id=subject_a.id,
+                unit_supervisor_user_id=sup.id,
+                ceo_user_id=mine.id,
+                status=EvaluationStatus.deputy_approved,
+            ),
+            EvaluationRecord(
+                evaluation_code="EV-THEIRS",
+                subject_personnel_id=subject_b.id,
+                unit_supervisor_user_id=sup.id,
+                ceo_user_id=theirs.id,
+                status=EvaluationStatus.deputy_approved,
+            ),
+        ]
+    )
+    db_session.commit()
+
+    outcome = _run(db_session, mine, "my_open_cases", {})
+    codes = {row.get("evaluation_code") for row in outcome.ui["items"]}
+    assert "EV-MINE" in codes
+    assert "EV-THEIRS" not in codes, codes
+
+
 # ── تبلیغ در برابر اجرا ───────────────────────────────────────────────────
 
 

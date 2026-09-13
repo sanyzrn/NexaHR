@@ -1,7 +1,9 @@
 """خروجی Excel از فهرست‌های سامانه (ارزیابی‌ها، پرسنل، برنامه‌های بهبود) برای
 گزارش‌گیری منابع انسانی."""
+from collections.abc import Sequence
 from datetime import date
 from io import BytesIO
+from typing import TypeVar
 
 import jdatetime
 from openpyxl import Workbook
@@ -16,7 +18,29 @@ from app.models.user import User
 from app.services.org_unit import split_site
 from app.services.pdf import to_jalali
 
+T = TypeVar("T")
+
 _PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
+
+#: سقفِ ردیفِ هر خروجیِ Excel.
+#:
+#: این فایل‌ها روی نخِ درخواست و کاملاً در حافظه ساخته می‌شوند. بی سقف، یک
+#: «خروجی اکسل»ِ بی‌فیلتر در پایانِ دوره یک worker و یک اتصالِ دیتابیس را برای
+#: دقیقه‌ها می‌گیرد — و همان استخرِ اتصالی است که به بقیهٔ کاربران خدمت می‌دهد.
+#:
+#: گزارشِ رویدادها از ابتدا همین سقف را داشت و چهار خروجیِ دیگر نداشتند. عدد
+#: یک‌جا می‌نشیند تا «۵۰۰۰» در پنج فایل تکرار نشود و روزی چهارتایش عوض نشود و
+#: یکی جا نماند.
+EXPORT_MAX_ROWS = 5000
+
+#: جمله‌ای که وقتی خروجی به سقف خورده، در یک ستونِ اضافه می‌آید.
+#:
+#: سکوت بدترین گزینه است: HR فایلی می‌گیرد که *کامل به‌نظر می‌رسد* و نیست، و
+#: تصمیمِ دوره را روی نمونه‌ای می‌گیرد که خودش نمی‌داند نمونه است.
+EXPORT_TRUNCATED_NOTE = (
+    f"این خروجی به سقفِ {EXPORT_MAX_ROWS:,} ردیف خورده و کامل نیست؛ "
+    "با فیلترِ باریک‌تر دوباره بگیرید."
+).translate(_PERSIAN_DIGITS).replace(",", "٬")
 
 
 def _jalali_date(value: date | None) -> str:
@@ -118,6 +142,36 @@ def _to_bytes(wb: Workbook) -> bytes:
     buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def cap_rows(rows: Sequence[T]) -> tuple[list[T], bool]:
+    """سقفِ خروجی را اعمال می‌کند و می‌گوید چیزی جا ماند یا نه.
+
+    فراخواننده باید `EXPORT_MAX_ROWS + 1` ردیف خوانده باشد؛ همان یک ردیفِ
+    اضافه تنها راهِ تشخیصِ «دقیقاً پنج‌هزارتا بود» از «بیشتر بود» است، بی
+    آنکه یک `COUNT(*)`ِ جدا روی همان فیلترها زده شود.
+    """
+    return list(rows[:EXPORT_MAX_ROWS]), len(rows) > EXPORT_MAX_ROWS
+
+
+def note_truncation(content: bytes) -> bytes:
+    """جملهٔ «این خروجی کامل نیست» را زیر آخرین ردیفِ شیتِ اول می‌نویسد.
+
+    چرا روی خودِ فایل و نه فقط یک هدرِ HTTP: فایلِ Excel دست‌به‌دست می‌شود.
+    کسی که آن را در جلسه باز می‌کند، هدرِ پاسخ را ندیده و نمی‌داند دارد روی
+    نمونه تصمیم می‌گیرد. هشدارِ بریدگی باید با خودِ داده سفر کند.
+
+    فایل دوباره باز می‌شود به‌جای آنکه هر پنج سازندهٔ workbook یک پارامترِ
+    تازه بگیرند — این مسیر فقط در حالتِ *بریده‌شده* اجرا می‌شود، که استثناست.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(content))
+    sheet = wb.worksheets[0]
+    sheet.append([])
+    sheet.append([EXPORT_TRUNCATED_NOTE])
+    sheet.cell(row=sheet.max_row, column=1).font = Font(bold=True)
+    return _to_bytes(wb)
 
 
 def build_evaluations_workbook(

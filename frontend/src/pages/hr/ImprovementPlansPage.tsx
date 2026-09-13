@@ -155,11 +155,21 @@ export function ImprovementPlansPage() {
   const [profilePerson, setProfilePerson] = useState<{ id: number; name: string } | null>(null);
   const debouncedSearch = useDebouncedValue(search);
 
+  // صفحهٔ خودش را دارد: این فهرست هیچ‌وقت خودبه‌خود کوچک نمی‌شود — تنها راهِ
+  // خارج‌شدنِ یک پرونده از آن، ساختنِ برنامه است.
+  const [eligiblePage, setEligiblePage] = useState(0);
+  const [eligiblePageSize, setEligiblePageSize] = useState(DEFAULT_PAGE_SIZE);
   const {
-    data: eligible = [],
+    data: eligibleData,
     isPending: eligiblePending,
     error: eligibleError,
-  } = useEligibleEvaluations();
+  } = useEligibleEvaluations({
+    limit: eligiblePageSize,
+    offset: eligiblePage * eligiblePageSize,
+  });
+  const eligible = eligibleData?.items ?? [];
+  const eligibleTotal = eligibleData?.total ?? 0;
+  const eligibleTotalPages = Math.max(1, Math.ceil(eligibleTotal / eligiblePageSize));
   const { data, error, isPending } = useImprovementPlans({
     status: statusFilter || undefined,
     q: debouncedSearch || undefined,
@@ -180,7 +190,7 @@ export function ImprovementPlansPage() {
         subtitle="پیگیری برنامه بهبود مکتوب برای ارزیابی‌هایی که نتیجه‌شان «تمدید مشروط» بوده است."
       />
 
-      <Card title={`نیازمند برنامه بهبود (${eligible.length.toLocaleString("fa-IR")})`}>
+      <Card title={`نیازمند برنامه بهبود (${eligibleTotal.toLocaleString("fa-IR")})`}>
         {eligibleError != null ? (
           <p className="py-4 text-center text-sm text-red-600">{extractErrorMessage(eligibleError)}</p>
         ) : eligiblePending ? (
@@ -210,6 +220,19 @@ export function ImprovementPlansPage() {
               </tbody>
             </table>
           </TableScroll>
+        )}
+        {eligibleTotal > 0 && (
+          <PaginationControls
+            page={eligiblePage}
+            totalPages={eligibleTotalPages}
+            totalCount={eligibleTotal}
+            pageSize={eligiblePageSize}
+            onPageSizeChange={(size) => {
+              setEligiblePageSize(size);
+              setEligiblePage(0);
+            }}
+            onPageChange={setEligiblePage}
+          />
         )}
       </Card>
 

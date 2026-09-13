@@ -86,3 +86,19 @@ class EligibleEvaluation(BaseModel):
     personnel_full_name: str
     final_weighted_pct: float | None
     finalized_at: datetime | None
+
+
+class EligibleEvaluationPage(BaseModel):
+    """صفحه‌ای از «نیازمندِ برنامهٔ بهبود».
+
+    این فهرست پیش از این بی‌سقف برمی‌گشت. هر پروندهٔ نهایی‌شدهٔ زیرِ آستانه که
+    هنوز برنامه ندارد در آن می‌ماند و *هیچ‌وقت* هم خود‌به‌خود بیرون نمی‌رود —
+    تنها راهِ خارج‌شدنش ساختِ برنامه است. یعنی سالِ پنجم، یک کارتِ داشبورد
+    چند هزار ردیف در DOM می‌ریخت.
+
+    `total` برای شمارِ روی عنوانِ کارت لازم است: با صفحه‌بندی، `items` دیگر
+    کلِ عدد را نمی‌گوید.
+    """
+
+    total: int
+    items: list[EligibleEvaluation]

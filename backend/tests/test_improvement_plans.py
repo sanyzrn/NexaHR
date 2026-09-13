@@ -53,7 +53,7 @@ def test_eligible_lists_only_conditional_without_plan(client, db_session):
 
     r = client.get("/api/improvement-plans/eligible", headers=auth_header(hr))
     assert r.status_code == 200
-    assert any(item["evaluation_record_id"] == evaluation_id for item in r.json())
+    assert any(item["evaluation_record_id"] == evaluation_id for item in r.json()["items"])
 
     # پس از ساخت برنامه، دیگر در فهرست eligible نیست
     created = client.post(
@@ -72,7 +72,7 @@ def test_eligible_lists_only_conditional_without_plan(client, db_session):
     assert body["status"] == "open"
 
     r = client.get("/api/improvement-plans/eligible", headers=auth_header(hr))
-    assert all(item["evaluation_record_id"] != evaluation_id for item in r.json())
+    assert all(item["evaluation_record_id"] != evaluation_id for item in r.json()["items"])
 
 
 def test_plan_rejected_for_non_conditional_result(client, db_session):
@@ -546,7 +546,7 @@ def test_a_sub_sixty_result_is_now_eligible_for_a_plan(client, db_session):
     eligible = client.get(
         "/api/improvement-plans/eligible", headers=auth_header(context["hr"])
     ).json()
-    codes = {row["evaluation_record_id"] for row in eligible}
+    codes = {row["evaluation_record_id"] for row in eligible["items"]}
     assert context["record_id"] in codes
 
     created = client.post(
@@ -571,7 +571,7 @@ def test_a_good_result_is_still_not_eligible(client, db_session):
     eligible = client.get(
         "/api/improvement-plans/eligible", headers=auth_header(context["hr"])
     ).json()
-    assert context["record_id"] not in {row["evaluation_record_id"] for row in eligible}
+    assert context["record_id"] not in {row["evaluation_record_id"] for row in eligible["items"]}
 
     refused = client.post(
         "/api/improvement-plans",
@@ -585,3 +585,38 @@ def test_a_good_result_is_still_not_eligible(client, db_session):
         headers=auth_header(context["hr"]),
     )
     assert refused.status_code == 400, refused.text
+
+
+def test_eligible_list_is_paginated(client, db_session):
+    """این فهرست هیچ‌وقت خودبه‌خود کوچک نمی‌شود.
+
+    تنها راهِ خارج‌شدنِ یک پرونده از آن، ساختنِ برنامه است — پس هر پروندهٔ
+    نهایی‌شدهٔ زیرِ آستانه که کسی برایش برنامه ننوشته، تا ابد می‌ماند. بی
+    صفحه‌بندی، سالِ پنجم چند هزار ردیف در DOM می‌ریخت.
+    """
+    hr = None
+    record_ids = []
+    for i in range(3):
+        personnel = make_personnel(db_session, full_name=f"واجدِ {i}")
+        hr, _sup, _dep, _ceo, evaluation_id = _finalize_with_conditional_result(
+            client, db_session, personnel
+        )
+        record_ids.append(evaluation_id)
+
+    first = client.get(
+        "/api/improvement-plans/eligible?limit=2&offset=0", headers=auth_header(hr)
+    ).json()
+    # `total` کلِ عدد را می‌گوید، حتی وقتی `items` بریده است — عنوانِ کارت به
+    # همین بند است.
+    assert first["total"] >= 3
+    assert len(first["items"]) == 2
+
+    second = client.get(
+        "/api/improvement-plans/eligible?limit=2&offset=2", headers=auth_header(hr)
+    ).json()
+    assert second["total"] == first["total"]
+    assert len(second["items"]) >= 1
+
+    # و دو صفحه روی هم، همان ردیف را دوبار نمی‌دهند
+    ids = [r["evaluation_record_id"] for r in first["items"] + second["items"]]
+    assert len(ids) == len(set(ids))

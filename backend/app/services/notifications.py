@@ -4,7 +4,7 @@
 atomic باشند؛ اگر گذار rollback شود اعلانی هم باقی نمی‌ماند.
 """
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select
@@ -38,8 +38,9 @@ def _queue_outbound(db: Session, notification: Notification) -> None:
 
     if not is_module_enabled(db, "outbound_notifications"):
         return
-    # شناسه لازم است تا ردیف تحویل به آن ارجاع دهد
-    db.flush()
+    # بی flush: ردیفِ تحویل به خودِ شیءِ اعلان وصل می‌شود و SQLAlchemy کلیدِ
+    # خارجی را سرِ همان flushِ پایانی پر می‌کند. flushِ این‌جا یعنی هر اعلان
+    # یک رفت‌وبرگشتِ جدا — در جاروی شبانه هزار تا.
     enqueue_for(db, notification)
 
 
@@ -63,6 +64,38 @@ def notify(
         _queue_outbound(db, notification)
 
 
+def already_notified(
+    db: Session, dedup_keys: Collection[str], within_days: int
+) -> set[tuple[int, str]]:
+    """جفت‌های (کاربر، کلید) که در پنجرهٔ اخیر اعلان گرفته‌اند — با *یک* کوئری.
+
+    برای جاروها، که ذاتاً حلقه‌اند. `notify_once` به‌تنهایی درست است ولی برای
+    هر اعلان یک `count(*)` می‌زند؛ روی هزار پروندهٔ باز همین دو هزار کوئری
+    می‌شد — بزرگ‌ترین بازماندهٔ هزینهٔ جاروی SLA پس از رفعِ بقیهٔ N+1ها.
+
+    فراخواننده نتیجه را به `notify_once(..., seen=...)` می‌دهد و همان مجموعه
+    با هر اعلانِ تازه به‌روز می‌شود، پس تکرارِ *درونِ همین اجرا* هم مثل قبل
+    گرفته می‌شود.
+
+    فهرستِ `IN` بی‌سقف به‌نظر می‌رسد و نیست: هر چهار جارو روی چیزهایی می‌چرخند
+    که تعدادشان به *اندازهٔ سازمان* بند است و نه به تاریخش — پروندهٔ باز
+    (قیدِ یکتا حداکثر یکی به‌ازای هر نفر می‌دهد)، پرسنلِ فعال، و برنامهٔ بهبودِ
+    باز.
+    """
+    if not dedup_keys:
+        return set()
+    cutoff = datetime.now(UTC) - timedelta(days=within_days)
+    return {
+        (row.user_id, row.dedup_key)
+        for row in db.execute(
+            select(Notification.user_id, Notification.dedup_key).where(
+                Notification.dedup_key.in_(dedup_keys),
+                Notification.created_at >= cutoff,
+            )
+        ).all()
+    }
+
+
 def notify_once(
     db: Session,
     user_id: int,
@@ -72,21 +105,31 @@ def notify_once(
     within_days: int,
     evaluation_record_id: int | None = None,
     link: str | None = None,
+    seen: set[tuple[int, str]] | None = None,
 ) -> bool:
     """اگر همین کاربر در پنجره اخیر اعلانی با همین dedup_key گرفته باشد، دوباره نمی‌سازد.
-    خروجی True یعنی اعلان جدید ساخته شد. برای sweep های تکرارشونده تا از اسپم جلوگیری شود."""
-    cutoff = datetime.now(UTC) - timedelta(days=within_days)
-    exists = db.scalar(
-        select(func.count())
-        .select_from(Notification)
-        .where(
-            Notification.user_id == user_id,
-            Notification.dedup_key == dedup_key,
-            Notification.created_at >= cutoff,
+    خروجی True یعنی اعلان جدید ساخته شد. برای sweep های تکرارشونده تا از اسپم جلوگیری شود.
+
+    `seen` — اگر داده شود — جایِ آن کوئری را می‌گیرد: مجموعه‌ای که
+    `already_notified` یک‌بار برای کلِ جارو ساخته و این تابع هر اعلانِ تازه را
+    به آن اضافه می‌کند. رفتار عوض نمی‌شود، فقط منبعِ همان جواب.
+    """
+    if seen is not None:
+        if (user_id, dedup_key) in seen:
+            return False
+    else:
+        cutoff = datetime.now(UTC) - timedelta(days=within_days)
+        exists = db.scalar(
+            select(func.count())
+            .select_from(Notification)
+            .where(
+                Notification.user_id == user_id,
+                Notification.dedup_key == dedup_key,
+                Notification.created_at >= cutoff,
+            )
         )
-    )
-    if exists:
-        return False
+        if exists:
+            return False
     notification = Notification(
         user_id=user_id,
         type=type_,
@@ -96,6 +139,8 @@ def notify_once(
         dedup_key=dedup_key,
     )
     db.add(notification)
+    if seen is not None:
+        seen.add((user_id, dedup_key))
     _queue_outbound(db, notification)
     return True
 

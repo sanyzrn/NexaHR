@@ -29,6 +29,7 @@ from app.models.user import User
 from app.schemas.auth import CurrentUser
 from app.schemas.improvement_plan import (
     EligibleEvaluation,
+    EligibleEvaluationPage,
     GoalCreate,
     GoalRead,
     GoalUpdate,
@@ -40,7 +41,7 @@ from app.schemas.improvement_plan import (
 )
 from app.services.audit import log_event
 from app.services.authorization import ensure_module_enabled
-from app.services.excel import build_improvement_plans_workbook
+from app.services.excel import EXPORT_MAX_ROWS, build_improvement_plans_workbook, cap_rows, note_truncation
 from app.services.notifications import notify
 from app.services.scoring_scheme import rules_for_record
 from app.services.self_evaluation import ensure_hr_may_handle
@@ -131,11 +132,13 @@ def _ensure_owner_is_valid(db: Session, owner_user_id: int | None) -> None:
         )
 
 
-@router.get("/eligible", response_model=list[EligibleEvaluation])
+@router.get("/eligible", response_model=EligibleEvaluationPage)
 def list_eligible_evaluations(
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_roles(UserRole.hr)),
-) -> list[EligibleEvaluation]:
+) -> EligibleEvaluationPage:
     """ارزیابی‌های نهایی‌شدهٔ نیازمند برنامهٔ بهبود که هنوز برنامه ندارند.
 
     واجد بودن با *عدد* سنجیده می‌شود نه با برچسب، و سقفش از نسخهٔ طرحِ همان
@@ -150,7 +153,7 @@ def list_eligible_evaluations(
     has_plan = select(ImprovementPlan.id).where(
         ImprovementPlan.evaluation_record_id == EvaluationRecord.id
     ).exists()
-    rows = db.scalars(
+    eligible = (
         select(EvaluationRecord)
         .outerjoin(ScoringScheme, ScoringScheme.id == EvaluationRecord.scoring_scheme_id)
         .where(
@@ -163,19 +166,27 @@ def list_eligible_evaluations(
             ),
             ~has_plan,
         )
-        .order_by(EvaluationRecord.finalized_at.desc())
     )
-    return [
-        EligibleEvaluation(
-            evaluation_record_id=r.id,
-            evaluation_code=r.evaluation_code,
-            personnel_id=r.subject_personnel_id,
-            personnel_full_name=r.subject.full_name,
-            final_weighted_pct=r.final_weighted_pct,
-            finalized_at=r.finalized_at,
-        )
-        for r in rows
-    ]
+    # شمارش روی همان شرط‌ها و در SQL — نه `len()` روی نتیجه، که دوباره کلِ
+    # جدول را به حافظه می‌آورد و اصلِ صفحه‌بندی را بی‌اثر می‌کند.
+    total = db.scalar(select(func.count()).select_from(eligible.subquery())) or 0
+    rows = db.scalars(
+        eligible.order_by(EvaluationRecord.finalized_at.desc()).limit(limit).offset(offset)
+    )
+    return EligibleEvaluationPage(
+        total=total,
+        items=[
+            EligibleEvaluation(
+                evaluation_record_id=r.id,
+                evaluation_code=r.evaluation_code,
+                personnel_id=r.subject_personnel_id,
+                personnel_full_name=r.subject.full_name,
+                final_weighted_pct=r.final_weighted_pct,
+                finalized_at=r.finalized_at,
+            )
+            for r in rows
+        ],
+    )
 
 
 @router.get("", response_model=ImprovementPlanPage)
@@ -310,7 +321,9 @@ def export_plans_excel(
         query = query.join(Personnel, Personnel.id == ImprovementPlan.personnel_id).where(
             Personnel.full_name.ilike(pattern) | ImprovementPlan.title.ilike(pattern)
         )
-    plans = list(db.scalars(query.order_by(ImprovementPlan.review_date)))
+    plans, truncated = cap_rows(
+        db.scalars(query.order_by(ImprovementPlan.review_date).limit(EXPORT_MAX_ROWS + 1)).all()
+    )
 
     # دو کوئری دسته‌ای به‌جای N+1: کد ارزیابی و نام مسئول پیگیری هر برنامه
     evaluation_ids = {p.evaluation_record_id for p in plans}
@@ -340,6 +353,8 @@ def export_plans_excel(
     # eager-loadingِ جامانده، بلکه از *ترتیبِ فراخوانی* می‌آید و هیچ فیلترِ
     # ردیفی هم ندارد. `reports.py` از ابتدا همین ترتیب را داشت.
     content = build_improvement_plans_workbook(plans, evaluation_codes, owner_usernames)
+    if truncated:
+        content = note_truncation(content)
     log_event(db, actor_user_id=current_user.id, event_type="improvement_plans_excel_exported")
     db.commit()
     return Response(
