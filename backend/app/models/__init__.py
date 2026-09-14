@@ -1,4 +1,5 @@
 from app.models.ai import AiConversation, AiMessage, AiSettings, AiUserAccess  # noqa: F401
+from app.models.ai_usage import AiUsageLog
 from app.models.audit_chain_check import AuditChainCheck
 from app.models.audit_log import AuditLog
 from app.models.auth_session import AuthSession
@@ -27,6 +28,7 @@ __all__ = [
     "AiMessage",
     "AiSettings",
     "AiUserAccess",
+    "AiUsageLog",
     "AuditChainCheck",
     "AuditLog",
     "UserCapability",

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.clock import today_local
+from app.core.clock import local_day_start, today_local
 from app.core.config import settings
 from app.core.persian import fa_digits
 from app.models.capability import UserCapability
@@ -177,6 +177,155 @@ def run_sla_sweep(db: Session) -> int:
             ):
                 created += 1
     return created
+
+
+#: عنوانِ گفت‌وگوی اختصاصیِ گزارشِ روزانه. ثابت است چون هر روز باید *همان*
+#: گفت‌وگو پیدا شود، نه یک رشتهٔ تازه.
+DIGEST_TITLE = "گزارش روزانهٔ پرونده‌های راکد"
+
+
+def _assistant_users(db: Session) -> set[int]:
+    """کسانی که دستیار برایشان واقعاً باز است.
+
+    هم کلیدِ سراسری و هم دسترسیِ فردی. پیامی که در گفت‌وگوی کسی بنشیند که
+    اصلاً پنجرهٔ دستیار را نمی‌بیند، نه اعلان است و نه گزارش — فقط ردیفِ
+    مرده در دیتابیس.
+    """
+    from app.models.ai import AiSettings, AiUserAccess
+
+    config = db.get(AiSettings, 1)
+    if config is None or not config.enabled:
+        return set()
+    return set(
+        db.scalars(
+            select(AiUserAccess.user_id)
+            .join(User, User.id == AiUserAccess.user_id)
+            .where(AiUserAccess.enabled.is_(True), User.is_active.is_(True))
+        )
+    )
+
+
+def _digest_conversation(db: Session, user_id: int):
+    """گفت‌وگوی اختصاصیِ گزارش — ساخته می‌شود اگر نباشد.
+
+    چرا گفت‌وگوی *جدا* و نه آخرین گفت‌وگوی کاربر: تاریخچهٔ هر گفت‌وگو در نوبتِ
+    بعدی به خودِ مدل داده می‌شود. تزریقِ یک گزارشِ خودکار وسطِ گفت‌وگوی جاری
+    یعنی مدل در ادامهٔ بحثِ دیروز، ناگهان فهرستی از پرونده‌ها را «حرفِ قبلیِ
+    خودش» می‌بیند — و از آن نتیجه می‌گیرد. گزارش باید خوانده شود، نه اینکه
+    به متنِ زمینه قاچاق شود.
+    """
+    from app.models.ai import AiConversation
+
+    convo = db.scalar(
+        select(AiConversation)
+        .where(AiConversation.user_id == user_id, AiConversation.title == DIGEST_TITLE)
+        .order_by(AiConversation.id)
+        .limit(1)
+    )
+    if convo is None:
+        convo = AiConversation(user_id=user_id, title=DIGEST_TITLE)
+        db.add(convo)
+        db.flush()
+    return convo
+
+
+def run_stale_case_digest_sweep(db: Session) -> int:
+    """یک جملهٔ روزانه در دستیارِ هر ارزیاب: «چند پرونده روی میزِ شماست».
+
+    همان معیارِ `run_sla_sweep` — `stage_entered_at` و نه سنِ کلِ پرونده — و
+    عمداً همان تابعِ مالکیت (`_current_owner_ids`). دو معیارِ جدا یعنی روزی
+    زنگِ اعلان یک چیز بگوید و دستیار چیزِ دیگری.
+
+    تفاوتش با اعلانِ SLA این است که *جمع* می‌بندد: زنگِ اعلان به‌ازای هر
+    پرونده یک ردیف می‌سازد و برای کسی با نُه پروندهٔ عقب‌افتاده، نُه ردیف
+    یعنی هیچ. این‌جا یک جمله است، با فهرستِ کوتاه.
+
+    و هیچ کاری پیشنهاد نمی‌کند. گزارش می‌دهد؛ اقدام را آدم از دستیار
+    می‌خواهد.
+    """
+    from app.models.ai import AiMessage
+
+    recipients = _assistant_users(db)
+    if not recipients:
+        return 0
+
+    cutoff = datetime.now(UTC) - timedelta(days=settings.sla_reminder_days)
+    stalled = list(
+        db.scalars(
+            select(EvaluationRecord).where(
+                IS_OPEN_RECORD,
+                EvaluationRecord.stage_entered_at <= cutoff,
+            )
+        )
+    )
+    if not stalled:
+        return 0
+
+    hr_ids = _active_hr_ids(db)
+    by_owner: dict[int, list[EvaluationRecord]] = {}
+    for record in stalled:
+        for owner_id in _current_owner_ids(record, hr_ids):
+            if owner_id in recipients:
+                by_owner.setdefault(owner_id, []).append(record)
+
+    day_start = local_day_start(today_local())
+    created = 0
+    for owner_id, records in by_owner.items():
+        convo = _digest_conversation(db, owner_id)
+        already = db.scalar(
+            select(AiMessage.id)
+            .where(
+                AiMessage.conversation_id == convo.id,
+                AiMessage.role == "assistant",
+                AiMessage.created_at >= day_start,
+            )
+            .limit(1)
+        )
+        if already is not None:
+            # یک پیام در روز. مرزِ روز *محلی* است و نه UTC، وگرنه اجرای
+            # ۰۱:۰۰ بامدادِ تهران پیامِ دومِ «دیروز» را می‌ساخت.
+            continue
+        db.add(
+            AiMessage(
+                conversation_id=convo.id,
+                role="assistant",
+                content=_digest_text(records),
+            )
+        )
+        convo.updated_at = datetime.now(UTC)
+        created += 1
+    return created
+
+
+#: بیشترین پرونده‌ای که در متنِ گزارش نام برده می‌شود. بقیه شمرده می‌شوند —
+#: فهرستِ چهل‌ردیفی خوانده نمی‌شود و هدفِ «یک نگاه» را از بین می‌برد.
+_DIGEST_LIST_LIMIT = 5
+
+
+def _digest_text(records: list[EvaluationRecord]) -> str:
+    now = datetime.now(UTC)
+
+    def stage_days(record: EvaluationRecord) -> int:
+        entered = record.stage_entered_at or record.created_at
+        if entered.tzinfo is None:
+            entered = entered.replace(tzinfo=UTC)
+        return max(0, (now - entered).days)
+
+    ordered = sorted(records, key=stage_days, reverse=True)
+    lines = [
+        f"- {record.evaluation_code} ({record.subject.full_name}) — "
+        f"{fa_digits(stage_days(record))} روز در همین مرحله"
+        for record in ordered[:_DIGEST_LIST_LIMIT]
+    ]
+    rest = len(ordered) - len(lines)
+    if rest > 0:
+        lines.append(f"- و {fa_digits(rest)} پروندهٔ دیگر")
+    return (
+        f"{fa_digits(len(ordered))} پرونده بیش از "
+        f"{fa_digits(settings.sla_reminder_days)} روز است منتظر اقدام شماست:\n"
+        + "\n".join(lines)
+        + "\n\nاگر خواستید، بپرسید «پرونده‌های باز من» تا جزئیاتشان را بیاورم."
+    )
 
 
 def run_orphaned_case_sweep(db: Session) -> int:
@@ -410,6 +559,8 @@ def run_all_sweeps(db: Session) -> dict[str, int]:
         "sla_reminder": run_sla_sweep(db),
         "orphaned_case": run_orphaned_case_sweep(db),
         "improvement_review": run_improvement_review_sweep(db),
+        # گزارشِ روزانهٔ دستیار — یک جمله به‌جای نُه ردیفِ زنگِ اعلان.
+        "stale_case_digest": run_stale_case_digest_sweep(db),
         # سندهای جامانده — تضمین «بالاخره ساخته می‌شود» برای رندرِ پس‌زمینه‌ای
         "documents_archived": run_document_backfill_sweep(db),
         # نگهداری، نه اعلان: ردیف‌های منقضیِ شمارش تلاش ورود را پاک می‌کند تا جدول

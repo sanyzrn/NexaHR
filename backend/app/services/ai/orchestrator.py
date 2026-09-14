@@ -22,14 +22,23 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.ai import AiConversation, AiMessage, AiPendingAction, AiSettings
 from app.models.enums import Capability
 from app.schemas.auth import CurrentUser
 from app.services.ai import context as context_service
-from app.services.ai.port import ChatMessage, ChatResponse, ToolCall, ToolProtocolUnsupported
+from app.services.ai import summary as summary_service
+from app.services.ai import usage as usage_service
+from app.services.ai.port import (
+    AiRequestFailed,
+    AiUnavailable,
+    ChatMessage,
+    ChatResponse,
+    ToolCall,
+    ToolProtocolUnsupported,
+)
 from app.services.ai.prompt import build_system_prompt
 from app.services.ai.tools import base as tools_base
 from app.services.ai.tools.base import ToolContext, ToolSpec, execute_tool, json_content
@@ -57,6 +66,9 @@ class TurnResult:
     steps: list[StepTrace] = field(default_factory=list)
     pending: list[dict] = field(default_factory=list)
     usage: dict = field(default_factory=dict)
+    #: چند بار در این نوبت به سرویس رفتیم — هر پلهٔ حلقهٔ ابزار یک درخواستِ
+    #: مستقل و یک صورت‌حسابِ مستقل است.
+    calls: int = 0
 
     def meta_json(self) -> str:
         return json.dumps(
@@ -74,20 +86,33 @@ def _pending_dict(row: AiPendingAction) -> dict:
         "tool": row.tool_name,
         "summary": row.summary,
         "arguments": json.loads(row.arguments_json or "{}"),
+        "changes": json.loads(row.preview_json or "[]"),
         "expires_at": row.expires_at.isoformat(),
     }
 
 
+#: سقفِ فهرستِ پیوست‌ها. پیش از این سه بود و آن *خیلی* کم بود: در جلسهٔ
+#: اصلاحِ اکسل، چهارمین فایل که بارگذاری می‌شد اولی از یادِ مدل می‌رفت و
+#: ارجاعِ «همان فایلِ اول» بی‌جواب می‌ماند. بیستِ امروز سقفِ ایمنی است، نه
+#: قاعدهٔ محصول — هیچ گفت‌وگویی در عمل به آن نمی‌رسد.
+_ATTACHMENT_LIMIT = 20
+
+
 def _attachments_note(db: Session, conversation_id: int) -> str:
-    """معرفیِ پیوست‌های اخیرِ گفت‌وگو به مدل — با شناسه، تا بتواند به آن‌ها ارجاع بدهد."""
+    """معرفیِ پیوست‌های همین گفت‌وگو به مدل — با شناسه، تا بتواند ارجاع بدهد."""
     from app.models.ai import AiUpload
 
+    total = db.scalar(
+        select(func.count())
+        .select_from(AiUpload)
+        .where(AiUpload.conversation_id == conversation_id)
+    ) or 0
     rows = list(
         db.scalars(
             select(AiUpload)
             .where(AiUpload.conversation_id == conversation_id)
             .order_by(AiUpload.id.desc())
-            .limit(3)
+            .limit(_ATTACHMENT_LIMIT)
         )
     )[::-1]
     if not rows:
@@ -108,11 +133,21 @@ def _attachments_note(db: Session, conversation_id: int) -> str:
             lines.append(f"- فایل #{upload.id} «{upload.filename}» — اکسلِ غیرِ قالبِ پرسنل")
         else:
             lines.append(f"- فایل #{upload.id} «{upload.filename}» — بدون قالبِ قابل پردازش")
+    if total > len(rows):
+        lines.insert(0, f"- (و {total - len(rows)} فایلِ قدیمی‌تر که این‌جا فهرست نشده‌اند)")
     return "\n".join(lines)
 
 
+#: پنجرهٔ تاریخچه. `summary.refresh` هم همین را می‌گیرد — دو عددِ جدا یعنی
+#: روزی پیامی نه در پنجره باشد و نه در خلاصه، و بی‌صدا گم شود.
+HISTORY_WINDOW = 12
+
+
 def _history_messages(
-    db: Session, conversation_id: int, exclude_id: int | None = None, limit: int = 12
+    db: Session,
+    conversation_id: int,
+    exclude_id: int | None = None,
+    limit: int = HISTORY_WINDOW,
 ) -> list[ChatMessage]:
     stmt = select(AiMessage).where(AiMessage.conversation_id == conversation_id)
     if exclude_id is not None:
@@ -135,6 +170,7 @@ def _system_prompt(
     specs: list[ToolSpec],
     fallback_protocol: bool,
     conversation_id: int,
+    conversation_summary: str = "",
 ) -> str:
     return build_system_prompt(
         instructions=config.instructions or "",
@@ -146,6 +182,7 @@ def _system_prompt(
         tools=specs,
         fallback_protocol=fallback_protocol,
         attachments_note=_attachments_note(db, conversation_id),
+        conversation_summary=conversation_summary,
     )
 
 
@@ -205,6 +242,12 @@ def _execute_call(
             tool_name=spec.name,
             arguments_json=json.dumps(arguments, ensure_ascii=False, default=str),
             summary=spec.summary_of(arguments),
+            # عکسِ لحظهٔ *تصمیم*، نه وضعیتِ امروز: کارت همان چیزی را نگه
+            # می‌دارد که کاربر موقعِ تأیید دید. اگر بعداً کسی چیزی را عوض
+            # کند، نقطهٔ تأیید خودش همه‌چیز را از نو اعتبارسنجی می‌کند.
+            preview_json=json.dumps(
+                spec.preview_of(ctx, arguments), ensure_ascii=False, default=str
+            ),
             status="pending",
             expires_at=datetime.now(UTC) + timedelta(hours=tools_uploads_ttl()),
         )
@@ -298,8 +341,29 @@ async def run_turn(
     fallback_mode = False
     steps: list[StepTrace] = []
     created_pending: list[dict] = []
-    usage: dict = {}
+    usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    # نامش عمداً `calls` نیست: چند خط پایین‌تر `calls` یعنی «خواسته‌های ابزارِ
+    # این پاسخ» و هم‌نامی، شمارنده را وسطِ حلقه با یک لیست جایگزین می‌کرد.
+    provider_calls = 0
     reply = ""
+
+    async def _send(adapter, **kwargs) -> ChatResponse:
+        """`adapter.send` با یک کارِ اضافه: مصرفِ تا این‌جا روی خطا گم نشود.
+
+        نوبتی که در پلهٔ چهارم می‌شکند، سه درخواستِ موفق پشتِ سرش دارد و هر
+        سه پول خرج کرده‌اند. بی این، آن سه از دفتر می‌افتادند و جمعِ ماه
+        هیچ‌وقت با صورت‌حساب نمی‌خواند — دقیقاً همان‌جایی که یک دفترِ هزینه
+        باید جواب بدهد.
+
+        `ToolProtocolUnsupported` عمداً این‌جا گرفته نمی‌شود: آن خطا نیست،
+        یک تغییرِ مسیر است و حلقه خودش با پروتکلِ جایگزین ادامه می‌دهد.
+        """
+        try:
+            return await adapter.send(messages, **kwargs)
+        except (AiUnavailable, AiRequestFailed) as exc:
+            exc.usage = dict(usage)
+            exc.calls = provider_calls
+            raise
 
     max_iterations = max(1, int(config.max_tool_iterations or 6))
 
@@ -314,6 +378,7 @@ async def run_turn(
                 specs=specs,
                 fallback_protocol=False,
                 conversation_id=conversation.id,
+                conversation_summary=conversation.summary_text or "",
             ))]
             messages += _history_messages(db, conversation.id, exclude_id=user_message_id)
             messages.append(ChatMessage("user", user_text))
@@ -330,13 +395,13 @@ async def run_turn(
         adapter = adapter_factory()
         try:
             if wire_specs:
-                response: ChatResponse = await adapter.send(
-                    messages,
+                response: ChatResponse = await _send(
+                    adapter,
                     tools=wire_specs,
                     tool_choice="none" if force_text else None,
                 )
             else:
-                response = await adapter.send(messages)
+                response = await _send(adapter)
         except ToolProtocolUnsupported:
             # سرویس شِمای ابزار را نمی‌شناسد؛ از نو با پروتکلِ JSON می‌رویم.
             fallback_mode = True
@@ -349,11 +414,20 @@ async def run_turn(
                 specs=specs,
                 fallback_protocol=True,
                 conversation_id=conversation.id,
+                conversation_summary=conversation.summary_text or "",
             ))
             adapter = adapter_factory()
-            response = await adapter.send(messages)
+            response = await _send(adapter)
 
-        usage = response.usage or usage
+        # جمع می‌شود، نه جایگزین.
+        #
+        # `usage = response.usage or usage` مصرفِ *آخرین* پله را نگه می‌داشت و
+        # بقیه را دور می‌ریخت. در نوبتی که مدل چهار بار ابزار صدا می‌زند، آن
+        # یعنی گزارشِ هزینه تا یک‌پنجمِ واقعیت را نشان می‌داد — و دفتری که
+        # کم‌تر از واقعیت بگوید، از نبودنش بدتر است.
+        provider_calls += 1
+        for key, value in usage_service.normalize(response.usage).items():
+            usage[key] += value
 
         # منبعِ خواسته‌های ابزار: بومی = tool_calls؛ جایگزین = بلوک‌های JSON
         # که به همان شکلِ ToolCall نرمال می‌شوند تا حلقه یکسان بماند.
@@ -472,6 +546,19 @@ async def run_turn(
             "اگر پیشنهادی در انتظار تأیید است، کارتش را در همین گفت‌وگو می‌بینید."
         )
 
+    # خلاصهٔ غلتان — *بعد* از نوبت، تا پیام‌های همین نوبت هم دیده شوند.
+    #
+    # مصرفش به مصرفِ همین نوبت اضافه می‌شود و نه جایی جدا: دفترِ هزینه‌ای که
+    # یک فراخوانیِ پنهانِ سامانه‌ای را نشمارد، همان دفترِ کم‌گویی است که تازه
+    # رفعش کردیم.
+    folded = await summary_service.refresh(
+        db, conversation, adapter_factory, window=HISTORY_WINDOW
+    )
+    if folded.calls:
+        provider_calls += folded.calls
+        for key, value in usage_service.normalize(folded.usage).items():
+            usage[key] += value
+
     # کنش‌های در انتظارِ تأییدِ *همین نوبت* فقط وقتی معتبرند که مالکشان تصمیم نگرفته باشد
     live_pending = [
         p for p in created_pending
@@ -489,6 +576,7 @@ async def run_turn(
         steps=steps,
         pending=live_pending,
         usage=usage,
+        calls=provider_calls,
     )
 
 
