@@ -76,6 +76,34 @@ def _reset_rate_limiter():
 
 
 @pytest.fixture()
+def frozen_local_day(monkeypatch):
+    """ساعتِ سازمان را روی یک لحظهٔ ثابتِ وسطِ روز نگه می‌دارد.
+
+    هر تستی که «امروزِ» محاسبه‌شدهٔ سرور را با «امروزِ» محاسبه‌شدهٔ خودش
+    مقایسه کند، یک کورماهِ نیمه‌شب دارد: اگر درخواست در ۲۳:۵۹:۵۹ برود و
+    assertion در ۰۰:۰۰:۰۰ اجرا شود، دو تاریخِ متفاوت درمی‌آید و تست قرمز
+    می‌شود — سالی یک‌بار، در بدترین لحظهٔ ممکن، و روی تغییری که هیچ ربطی به
+    آن ندارد.
+
+    `now_local` نقطهٔ درستِ فریز است و نه `today_local`: بقیهٔ ماژول از همان
+    می‌خوانند (`today_local` خودش صدایش می‌زند)، پس یک جا بستن کافی است حتی
+    برای کدی که `today_local` را مستقیم import کرده.
+
+    ساعتِ ۱۲:۰۰ انتخاب شده تا از هر دو مرز — نیمه‌شبِ محلی و نیمه‌شبِ UTC
+    (که در تهران ۳:۳۰ بامداد است) — به‌اندازهٔ کافی دور باشد.
+    """
+    from datetime import datetime
+
+    from app.core import clock
+
+    frozen = datetime.now(clock.org_timezone()).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    monkeypatch.setattr(clock, "now_local", lambda: frozen)
+    return frozen
+
+
+@pytest.fixture()
 def no_cohort_suppression():
     """سرکوب کوهورت حداقلی (P1-08) را برای این تست خاموش می‌کند.
 

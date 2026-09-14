@@ -10,6 +10,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DRAFT_PREFIX } from "../ui/useLocalDraft";
 import { AuthProvider, useAuth } from "./AuthContext";
 
 const get = vi.fn();
@@ -57,6 +58,7 @@ beforeEach(() => {
   get.mockReset();
   post.mockReset();
   tokenStore.value = null;
+  window.localStorage.clear();
 });
 
 describe("AuthProvider", () => {
@@ -106,6 +108,27 @@ describe("AuthProvider", () => {
     expect(client.getQueryData(["notifications"])).toBeUndefined();
     expect(auth.user).toBeNull();
     expect(tokenStore.value).toBeNull();
+  });
+
+  it("خروج، پیش‌نویسِ فرم‌ها را هم از مرورگر برمی‌دارد", async () => {
+    /* کشِ React Query در حافظه است و با بستنِ تبْ می‌رود؛ `localStorage` نه.
+       متنِ خودارزیابی — شخصی‌ترین چیزی که کسی در این سامانه می‌نویسد — تا ابد
+       روی آن رایانه می‌ماند، حتی وقتی نفرِ بعدی وارد شده. */
+    window.localStorage.setItem(`${DRAFT_PREFIX}self-assessment:7`, '{"overallNote":"حرفِ خصوصی"}');
+    window.localStorage.setItem("nexahr:theme", "dark");
+
+    tokenStore.value = "t";
+    get.mockResolvedValue({ data: { id: 1, username: "اولی", role: "employee" } });
+    post.mockResolvedValue({ data: {} });
+
+    await mount();
+    await waitFor(() => expect(auth.user?.username).toBe("اولی"));
+
+    act(() => auth.logout());
+
+    expect(window.localStorage.getItem(`${DRAFT_PREFIX}self-assessment:7`)).toBeNull();
+    // و ترجیحاتِ غیرشخصی سرِ جایشان می‌مانند
+    expect(window.localStorage.getItem("nexahr:theme")).toBe("dark");
   });
 
   it("خطای شبکه در ابطالِ سمتِ سرور، خروجِ محلی را متوقف نمی‌کند", async () => {

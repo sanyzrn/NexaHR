@@ -15,7 +15,7 @@ import { useToast } from "../../components/Toast";
 import { WorkflowStepper } from "../WorkflowStepper";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
-import { useLocalDraft } from "../../ui/useLocalDraft";
+import { DRAFT_PREFIX, useLocalDraft } from "../../ui/useLocalDraft";
 import { formatDate, formatDateTime } from "../../utils/dates";
 import type { MyOpenEvaluation, SelfAssessment } from "../../types";
 import { SELF_ASSESSMENT_SUMMARY_MAX } from "../../utils/textLimits";
@@ -201,7 +201,7 @@ function SelfAssessmentForm({
   // فرم ارزیاب از قبل ذخیرهٔ خودکار داشت؛ فرمِ کارمند نداشت — یعنی کم‌قدرت‌ترین
   // آدمِ این فرایند، نابخشنده‌ترین فرم را داشت: بیست شاخص با یادداشت، که با یک
   // کلید Back از بین می‌رفت.
-  const draftKey = `nexahr:self-assessment:${evaluationId}`;
+  const draftKey = `${DRAFT_PREFIX}self-assessment:${evaluationId}`;
   const [draft, setDraft] = useLocalDraft(draftKey);
   const scores = draft.scores;
   const notes = draft.notes;

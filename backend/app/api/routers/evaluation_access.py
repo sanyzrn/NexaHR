@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role_or_capability
@@ -120,6 +121,22 @@ def upsert_access(
     access.deputy_user_id = payload.deputy_user_id
     access.ceo_user_id = payload.ceo_user_id
     access.updated_by_user_id = current_user.id
+
+    try:
+        db.flush()
+    except IntegrityError:
+        # «هر پرسنل یک زنجیره» قیدِ یکتای دیتابیس است، و `SELECT`ِ بالا در
+        # برابرِ هم‌زمانی گاردی نیست: دو درخواست برای *یک* پرسنل — دو تب، یا
+        # یک تلاشِ دوباره پس از تایم‌اوت — هر دو `None` می‌بینند و هر دو ردیف
+        # می‌سازند. تا امروز دومی ۵۰۰ می‌گرفت.
+        #
+        # ۴۰۹ و نه ۴۰۰: چیزی در ورودی غلط نیست؛ فقط کسِ دیگری زودتر رسیده.
+        # پاسخِ درست برای کاربر «دوباره صفحه را بگیر» است، نه «ورودی را عوض کن».
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="زنجیرهٔ این پرسنل هم‌زمان توسط کسِ دیگری ثبت شد؛ صفحه را تازه کنید و دوباره تلاش کنید",
+        ) from None
 
     log_event(
         db,

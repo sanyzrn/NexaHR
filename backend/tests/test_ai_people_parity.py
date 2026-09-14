@@ -132,11 +132,18 @@ def test_the_last_capability_holder_cannot_strip_itself_through_the_copilot(db_s
     sole = make_user(db_session, "hr", capabilities=[Capability.manage_capabilities])
     db_session.commit()
 
+    # بارِ درخواست عمداً *خالی* است و نه «مجوزی دیگر»: موضوعِ این تست فقط
+    # گرفتنِ `manage_capabilities` از خود است. بارِ مختلط (هم‌زمان گرفتن و
+    # دادن) پیش از این گارد به گاردِ «به خودت مجوز نده» می‌خورد و ۴۰۳
+    # می‌گیرد — همان چیزی که `test_self_grant.py` جداگانه می‌سنجد. این‌جا
+    # همان بارِ دوقلوی HTTPیش را می‌فرستیم
+    # (`test_capabilities.py::test_the_last_grantor_cannot_strip_themselves`).
     with pytest.raises(HTTPException) as err:
         _run(db_session, sole, "grant_capabilities",
-             {"user_id": sole.id, "capabilities": ["manage_users"]},
+             {"user_id": sole.id, "capabilities": []},
              caps=[Capability.manage_capabilities])
     assert err.value.status_code == 400
+    assert "تنها حساب فعالی" in err.value.detail
     db_session.rollback()
     db_session.expire_all()
     from app.services.authorization import capabilities_of

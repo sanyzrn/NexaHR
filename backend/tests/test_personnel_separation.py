@@ -10,7 +10,6 @@
 """
 from io import BytesIO
 
-from app.core.clock import today_local
 from app.models.enums import EvaluationStatus, PersonnelStatus, SeparationReason
 from app.models.evaluation import EvaluationRecord
 from app.models.personnel import Personnel
@@ -46,7 +45,13 @@ def test_a_reason_is_required(client, db_session):
     assert "علت خروج" in response.json()["detail"]
 
 
-def test_reason_and_date_are_recorded(client, db_session):
+def test_reason_and_date_are_recorded(client, db_session, frozen_local_day):
+    """`frozen_local_day` این‌جا تزئینی نیست.
+
+    این تست «امروزِ» سرور را با «امروزِ» خودش مقایسه می‌کند. بی فریزِ ساعت،
+    درخواستی که ۲۳:۵۹:۵۹ برود و assertionی که ۰۰:۰۰:۰۰ اجرا شود دو تاریخِ
+    متفاوت می‌دهند — یک شکستِ سالی‌یک‌بار که هیچ ربطی به تغییرِ آن روز ندارد.
+    """
     hr = _hr(db_session)
     personnel = make_personnel(db_session)
     db_session.commit()
@@ -56,7 +61,7 @@ def test_reason_and_date_are_recorded(client, db_session):
     body = response.json()
     assert body["separation_reason"] == "dismissal"
     # تاریخ داده نشده بود؛ امروز پیش‌فرض می‌شود تا ردیفی بدون تاریخ نماند.
-    assert body["separation_date"] == today_local().isoformat()
+    assert body["separation_date"] == frozen_local_day.date().isoformat()
 
 
 def test_coming_back_clears_the_separation(client, db_session):

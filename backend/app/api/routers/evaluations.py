@@ -113,10 +113,27 @@ router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 _EXTENDABLE_STATUSES = frozenset({EvaluationStatus.draft})
 
 
+def _not_found() -> HTTPException:
+    """یک جوابِ واحد برای «نیست» و «مالِ تو نیست» — عمداً غیرقابلِ تفکیک.
+
+    تا امروز این دو فرق داشتند: شناسهٔ ناموجود ۴۰۴ می‌گرفت و پروندهٔ *دیگران*
+    ۴۰۳. یعنی هر کاربرِ واردشده می‌توانست شناسه‌ها را از یک تا N بشمارد و
+    بفهمد کدام‌ها وجود دارند — و پرونده‌ها شناسهٔ ترتیبی دارند. همان دلیلی که
+    `verify.py` را مجبور کرد به‌جای `evaluation_code`ِ ترتیبی از توکنِ تصادفی
+    استفاده کند، این‌جا هم برقرار است.
+
+    `me.py` از ابتدا همین کار را می‌کرد (`_my_record_or_404`: «پرونده دیگران
+    عمداً 404 برمی‌گردد، نه 403، تا وجودش هم لو نرود»). این تابع همان تصمیم را
+    به مسیرِ پنلِ ارزیابی هم می‌آورد — و چون *یک* شیء است، نه دو جمله که باید
+    یادت بماند مثل هم نگهشان داری.
+    """
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ارزیابی یافت نشد")
+
+
 def _get_record_or_404(db: Session, evaluation_id: int) -> EvaluationRecord:
     record = db.get(EvaluationRecord, evaluation_id)
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ارزیابی یافت نشد")
+        raise _not_found()
     return record
 
 
@@ -137,7 +154,7 @@ def _get_record_or_404_for_update(db: Session, evaluation_id: int) -> Evaluation
         .with_for_update(of=EvaluationRecord)
     )
     if record is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ارزیابی یافت نشد")
+        raise _not_found()
     return record
 
 
@@ -175,9 +192,9 @@ def _ensure_can_view(record: EvaluationRecord, current_user: CurrentUser) -> Non
         return
     allowed_ids = {record.unit_supervisor_user_id, record.deputy_user_id, record.ceo_user_id}
     if current_user.id not in allowed_ids:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="شما به این ارزیابی دسترسی ندارید"
-        )
+        # ۴۰۴ و نه ۴۰۳ — `_not_found` می‌گوید چرا. کسی که روی این زنجیره
+        # صندلی ندارد، نباید حتی بفهمد پرونده‌ای با این شناسه هست.
+        raise _not_found()
 
 
 def _was_returned(db: Session, evaluation_id: int) -> bool:

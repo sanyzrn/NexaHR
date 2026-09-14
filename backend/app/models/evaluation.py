@@ -240,10 +240,19 @@ class EvaluationRecord(Base):
             "OR unit_supervisor_user_id <> deputy_user_id",
             name="ck_evaluation_records_supervisor_not_deputy",
         ),
-        CheckConstraint(
-            "unit_supervisor_user_id IS NULL OR unit_supervisor_user_id <> ceo_user_id",
-            name="ck_evaluation_records_supervisor_not_ceo",
-        ),
+        # «مسئول واحد = مدیرعامل» عمداً قید ندارد.
+        #
+        # اعلانِ یک `CheckConstraint` این‌جا بود که در دیتابیس وجود ندارد —
+        # یعنی مدل قاعده‌ای را ادعا می‌کرد که سامانه ندارد، و
+        # `alembic --autogenerate` روزی پیشنهادِ ساختنش را می‌داد. ساختنش
+        # ثبتِ کسی را که *مستقیم زیر نظر مدیرعامل* کار می‌کند ناممکن می‌کرد:
+        # مدیرعامل هم نمره‌دهندهٔ اولش است و هم تأییدکنندهٔ نهایی، و بالای سرش
+        # کسِ دیگری وجود ندارد.
+        #
+        # تصمیمِ اصلی در مایگریشنِ `e9c47b3f1a52` نوشته شده: دو ترکیبِ دیگر
+        # («مسئول واحد = معاونت» و «معاونت = مدیرعامل») بیانِ درست‌تری دارند —
+        # خالی گذاشتنِ آن صندلی — پس ممنوع‌اند. این یکی ندارد، پس مجاز است و
+        # به‌جای ممنوعیت، روی سندِ نهایی *افشا* می‌شود (`single_decider`).
         CheckConstraint(
             "deputy_user_id IS NULL OR deputy_user_id <> ceo_user_id",
             name="ck_evaluation_records_deputy_not_ceo",

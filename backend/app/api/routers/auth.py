@@ -238,6 +238,16 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)) 
 
 
 @router.post("/change-password", response_model=LoginResponse)
+# همان سقفِ `login`، چون همان چیز حدس زده می‌شود: رمزِ *فعلی*.
+#
+# «کاربر از قبل وارد شده» این را بی‌معنا نمی‌کند — برعکس، همان‌جاست که مهم
+# می‌شود. کسی که یک نشستِ دزدیده‌شده دارد (توکنِ دسترسیِ لو رفته، یا رایانه‌ای
+# که قفل نشده) با این endpoint می‌تواند رمزِ فعلی را بی هیچ سقفی حدس بزند؛ و
+# با پیدا کردنش، تصاحبِ کاملِ حساب است، چون همین مسیر رمز را عوض می‌کند.
+#
+# قفلِ حسابِ `login_guard` هم این‌جا نیست: آن روی نامِ کاربری در مسیرِ ورود
+# می‌نشیند و این مسیر اصلاً نامِ کاربری نمی‌گیرد.
+@limiter.limit("10/minute")
 def change_password(
     request: Request,
     payload: ChangePasswordRequest,

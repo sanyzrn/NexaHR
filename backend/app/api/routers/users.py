@@ -200,7 +200,20 @@ def create_user(
         must_change_password=True,
     )
     db.add(user)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # همان «نام کاربری تکراری است»ِ بالا، ولی از زبانِ دیتابیس.
+        #
+        # بررسیِ بالا بی‌فایده نیست — پیامِ بهتری می‌دهد و در حالتِ عادی
+        # همان‌جا تمام می‌شود — ولی تنها گاردِ *واقعی* نیست: دو درخواستِ
+        # هم‌زمان با یک نام، هر دو پیش از commitِ اولی «نیست» می‌بینند و رد
+        # می‌شوند، و دومی روی قیدِ یکتا می‌خورَد. تا امروز نتیجه‌اش ۵۰۰ بود:
+        # یک خطای داخلی برای چیزی که کاربر باید بفهمد و دوباره امتحان کند.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="نام کاربری تکراری است"
+        ) from None
     if user.role == UserRole.hr:
         apply_default_hr_capabilities(db, user.id)
     log_event(

@@ -28,21 +28,9 @@ from app.services.ai.tools.base import (
     tool,
 )
 from app.services.audit import log_event
+from app.services.authorization import sees_all_personnel
 from app.services.org_unit import split_site
 from app.services.workflow import IS_OPEN_RECORD
-
-#: نقش‌هایی که فهرست کاملِ پرسنل را در رابط هم می‌بینند — و فقط همان‌ها.
-#:
-#: تا امروز `deputy` و `ceo` و `support` هم این‌جا بودند، با این توضیح که «در
-#: فهرست پرسنلِ رابط هم کامل می‌بینند». آن جمله غلط بود:
-#: `routers/personnel.list_personnel` معاونت و مدیرعامل را به ردیف‌های
-#: `EvaluationAccess`ِ خودشان محدود می‌کند و برای `support` صفحهٔ *تهی*
-#: برمی‌گرداند (`_ACCESS_COLUMN_BY_ROLE` ستونی برایش ندارد).
-#:
-#: همان خرابی در `ai/context.py` هم بود و رفع شد؛ این نسخهٔ دومش بود که در
-#: لایهٔ *ابزارها* جا مانده بود — یعنی همان دادهٔ رابط‌نادیده، این‌بار از راه
-#: `search_personnel` و `get_personnel`.
-ORG_WIDE_ROLES = (UserRole.hr,)
 
 _ROLE_LABELS = {
     UserRole.hr: "منابع انسانی",
@@ -59,11 +47,11 @@ def _visible_personnel_ids(
 ) -> set[int] | None:
     """None یعنی همه — دقیقاً مثل متنِ زمینه و فهرستِ پرسنلِ رابط.
 
-    `manage_personnel` جداگانه سنجیده می‌شود، چون آن مجوز در رابط هم کلِ
-    فهرست را می‌دهد (`personnel/export.xlsx`، `POST /api/personnel`) — همان
-    قاعده‌ای که در `ai/context.py` نوشته شده.
+    قاعده‌اش این‌جا نوشته نمی‌شود: `authorization.sees_all_personnel` تنها
+    جایی است که می‌گوید چه کسی کل را می‌بیند، و همان یکی را رابط هم می‌خواند.
+    پیش از این سه نسخهٔ جدا بود و یکی‌شان جوابِ دیگری می‌داد.
     """
-    if user.role in ORG_WIDE_ROLES or Capability.manage_personnel in caps:
+    if sees_all_personnel(user.role, caps):
         return None
     rows = db.scalars(
         select(EvaluationAccess.personnel_id).where(

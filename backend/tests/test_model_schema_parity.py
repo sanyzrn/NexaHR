@@ -102,3 +102,53 @@ def test_the_open_evaluation_guard_is_partial_and_unique(db_session):
     assert "UNIQUE" in definition
     assert "WHERE" in definition
     assert "finalized" in definition and "cancelled" in definition
+
+
+def test_every_declared_check_constraint_exists_in_the_database(db_session):
+    """`compare_metadata` قیدهای CHECK را نمی‌سنجد — این‌جا سنجیده می‌شوند.
+
+    و آن نقطهٔ کور یک واگراییِ واقعی را پنهان کرده بود:
+    `ck_*_supervisor_not_ceo` روی هر دو مدل اعلام شده بود و در دیتابیس وجود
+    نداشت. مایگریشنِ `e9c47b3f1a52` عمداً نساخته بودش — «مسئول واحد =
+    مدیرعامل» تنها راهِ ثبتِ کسی است که مستقیم زیر نظر مدیرعامل کار می‌کند، و
+    ممنوع‌کردنش آن افراد را غیرقابل‌ثبت می‌کرد.
+
+    یعنی خطر وارونه بود: کسی که روزی `autogenerate` را اجرا و خروجی را
+    بی‌خواندن قبول می‌کرد، قیدی *می‌ساخت* که یک شکلِ سالمِ زنجیره را می‌بست.
+
+    قاعده در هر دو جهت سنجیده می‌شود: قیدی که مدل ادعا می‌کند و دیتابیس ندارد،
+    و قیدی که دیتابیس دارد و مدل نمی‌شناسد. دومی همان‌قدر مهم است — اعلام‌نشده
+    یعنی `autogenerate` روزی پیشنهادِ حذفش را می‌دهد.
+    """
+    from sqlalchemy import text
+
+    declared = {
+        constraint.name
+        for table in Base.metadata.tables.values()
+        for constraint in table.constraints
+        if type(constraint).__name__ == "CheckConstraint" and constraint.name
+    }
+    # قیدهای ساخته‌شدهٔ خودِ Postgres برای `Enum` و `NOT NULL` نامِ ما را
+    # ندارند؛ فقط قیدهای نام‌دارِ خودمان مقایسه می‌شوند.
+    in_database = {
+        row[0]
+        for row in db_session.execute(
+            text(
+                "SELECT conname FROM pg_constraint WHERE contype = 'c' "
+                "AND conname LIKE 'ck\\_%'"
+            )
+        ).all()
+    }
+
+    missing = sorted(declared - in_database)
+    orphaned = sorted(in_database - declared)
+
+    assert not missing, (
+        "این قیدها روی مدل اعلام شده‌اند و در دیتابیس نیستند. یا مایگریشنشان "
+        "را بنویسید، یا — اگر نبودنشان عمدی است — اعلانِ مدل را بردارید و "
+        f"دلیلش را همان‌جا بنویسید: {missing}"
+    )
+    assert not orphaned, (
+        "این قیدها در دیتابیس هستند و روی هیچ مدلی اعلام نشده‌اند؛ "
+        f"`autogenerate` روزی پیشنهادِ حذفشان را می‌دهد: {orphaned}"
+    )

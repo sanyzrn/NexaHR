@@ -85,7 +85,46 @@ def upgrade() -> None:
     op.bulk_insert(indicators_table, rows)
 
 
+def _refuse_if_the_catalogue_is_no_longer_the_seed(bind=None) -> None:
+    """این `downgrade` بر اساسِ *بخش* پاک می‌کند، نه بر اساسِ «ما ساختیمش».
+
+    یعنی شاخصی که منابع انسانی خودش اضافه کرده — و متنش را خودش نوشته — با
+    همان `DELETE` می‌رود، چون آن هم `general` یا `specialized` است. هیچ‌جا
+    نگه نمی‌داریم کدام ردیف از این سید آمده و کدام بعداً اضافه شده.
+
+    شاخصی که نمره خورده، به‌خاطرِ کلیدِ خارجیِ `evaluation_scores` اصلاً پاک
+    نمی‌شود و `DELETE` با خطای دیتابیس می‌افتد — یک پیامِ نامفهوم وسطِ یک
+    ارتقا. شاخصی که هنوز نمره نخورده، بی‌صدا می‌رود.
+
+    هر دو حالت بد است و هر دو یک علاج دارند: پیش از ریختنِ کاتالوگ باید
+    تصمیمِ صریح گرفته شود.
+    """
+    bind = bind if bind is not None else op.get_bind()
+    total = bind.execute(
+        sa.text(
+            "SELECT count(*) FROM indicators WHERE section IN ('general', 'specialized')"
+        )
+    ).scalar_one()
+    scored = bind.execute(
+        sa.text(
+            "SELECT count(DISTINCT indicator_id) FROM evaluation_scores s "
+            "JOIN indicators i ON i.id = s.indicator_id "
+            "WHERE i.section IN ('general', 'specialized')"
+        )
+    ).scalar_one()
+    if total > len(GENERAL_INDICATORS) + len(SPECIALIZED_INDICATORS) or scored:
+        raise RuntimeError(
+            f"downgrade متوقف شد: کاتالوگِ شاخص‌ها {total} ردیف دارد و "
+            f"{scored} تایشان نمره خورده‌اند. این downgrade بر اساسِ *بخش* پاک "
+            "می‌کند و نمی‌داند کدام ردیف از سیدِ اولیه آمده — یعنی شاخص‌هایی که "
+            "خودتان اضافه کرده‌اید هم می‌روند، و آن‌هایی که نمره خورده‌اند "
+            "اصلاً پاک نمی‌شوند و کلیدِ خارجی ارتقا را با خطا می‌شکند. اگر "
+            "واقعاً همین را می‌خواهید، اول کاتالوگ را بیرون بگیرید."
+        )
+
+
 def downgrade() -> None:
+    _refuse_if_the_catalogue_is_no_longer_the_seed()
     op.execute(
         sa.delete(indicators_table).where(
             indicators_table.c.section.in_(["general", "specialized"])

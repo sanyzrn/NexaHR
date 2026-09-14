@@ -79,5 +79,34 @@ def upgrade() -> None:
         )
 
 
+def _refuse_if_the_unit_catalogue_would_be_lost(bind=None) -> None:
+    """نامِ واحد روی خودِ پرسنل می‌ماند؛ چیزی که می‌رود، *معنای* آن نام است.
+
+    `personnel.org_unit` یک رشته است و با این جدول نمی‌رود، پس در نگاهِ اول
+    چیزی گم نمی‌شود. ولی `is_hr_unit` این‌جاست — همان پرچمی که تصمیم می‌گیرد
+    پروندهٔ چه کسی مرحلهٔ بررسیِ منابع انسانی *ندارد*. `upgrade`ِ بعدی جدول را
+    خالی می‌سازد، و آن پرچم روی هیچ واحدی روشن نیست.
+
+    نتیجه‌اش یک خرابیِ بی‌صداست: پرونده‌های واحدِ منابع انسانی از فردا دوباره
+    از صفِ خودِ منابع انسانی می‌گذرند — یعنی همان تعارضِ منافعی که
+    `hr_review_skipped` برای بستنش ساخته شد، بی‌آنکه کسی خبردار شود.
+    """
+    bind = bind if bind is not None else op.get_bind()
+    units = bind.execute(sa.text("SELECT count(*) FROM org_units")).scalar_one()
+    hr_units = bind.execute(
+        sa.text("SELECT count(*) FROM org_units WHERE is_hr_unit")
+    ).scalar_one()
+    if units:
+        raise RuntimeError(
+            f"downgrade متوقف شد: کاتالوگِ واحدها {units} ردیف دارد "
+            f"({hr_units} واحدِ منابع انسانی). این downgrade جدول را می‌ریزد و "
+            "upgradeِ بعدی آن را خالی برمی‌گرداند — نامِ واحدها روی پرسنل "
+            "می‌ماند ولی پرچمِ «واحدِ منابع انسانی» نه، و پرونده‌های آن واحد "
+            "بی‌صدا دوباره از صفِ خودشان رد می‌شوند. اگر واقعاً همین را "
+            "می‌خواهید، اول کاتالوگ را بیرون بگیرید."
+        )
+
+
 def downgrade() -> None:
+    _refuse_if_the_unit_catalogue_would_be_lost()
     op.drop_table("org_units")

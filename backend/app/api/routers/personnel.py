@@ -26,7 +26,11 @@ from app.schemas.personnel import (
     PersonnelUpdate,
 )
 from app.services.audit import log_event
-from app.services.authorization import ensure_module_enabled
+from app.services.authorization import (
+    capabilities_of,
+    ensure_module_enabled,
+    sees_all_personnel,
+)
 from app.services.excel import EXPORT_MAX_ROWS, build_personnel_workbook, cap_rows, note_truncation
 from app.services.notifications import notify_vacated_seats
 from app.services.org_unit import known_sites, units_in_site
@@ -211,9 +215,16 @@ def list_personnel(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> PersonnelPage:
     query = select(Personnel)
-    # نقش‌های غیر از HR فقط پرسنلی را می‌بینند که برایشان دسترسی ارزیابی تعریف شده؛
-    # HR به کل فهرست پرسنل دسترسی دارد (طبق بخش ۴ سند مشخصات).
-    if current_user.role != UserRole.hr or accessible_to_me:
+    # کسی که کلِ فهرست را نمی‌بیند، فقط پرسنلی را می‌بیند که برایشان دسترسیِ
+    # ارزیابی تعریف شده. قاعدهٔ «چه کسی کل را می‌بیند» یک جا نوشته شده
+    # (`authorization.sees_all_personnel`) و همان‌جا می‌گوید چرا — این‌جا سه
+    # نسخهٔ ناهم‌خوان داشت.
+    #
+    # `accessible_to_me` تنگ‌کردنِ *داوطلبانه* است و جداست: کاربر خودش خواسته
+    # فقط افرادِ خودش را ببیند، حتی اگر حقِ دیدنِ همه را داشته باشد.
+    if accessible_to_me or not sees_all_personnel(
+        current_user.role, capabilities_of(db, current_user.id)
+    ):
         column = _ACCESS_COLUMN_BY_ROLE.get(current_user.role)
         if column is None:
             return PersonnelPage(total=0, items=[])
