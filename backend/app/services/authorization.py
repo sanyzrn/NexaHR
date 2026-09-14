@@ -1,4 +1,6 @@
 """خواندن مجوزها و وضعیت ماژول‌ها (نیمهٔ دوم P0-03)."""
+from collections.abc import Collection
+
 from fastapi import HTTPException
 from fastapi import status as http_status
 from sqlalchemy import event, select
@@ -6,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.modules import MODULES, MODULES_BY_KEY
 from app.models.capability import UserCapability
-from app.models.enums import Capability
+from app.models.enums import Capability, UserRole
 from app.models.module import ModuleSetting
 
 DEFAULT_HR_CAPABILITIES = frozenset(
@@ -16,6 +18,28 @@ DEFAULT_HR_CAPABILITIES = frozenset(
         Capability.manage_scoring,
     }
 )
+
+
+def sees_all_personnel(role: UserRole, capabilities: Collection[Capability]) -> bool:
+    """آیا این کاربر *کلِ* فهرستِ پرسنل را می‌بیند، یا فقط افرادِ زنجیرهٔ خودش؟
+
+    یک قاعده، یک تابع. پیش از این سه نسخه داشت — `ai/tools/people.py`،
+    `ai/context.py` و یک شرطِ درون‌خطی در `routers/personnel.list_personnel` —
+    و هر سه نسخه یک جواب نمی‌دادند: دوتای اول `manage_personnel` را
+    سازمان‌گستر می‌شمردند و سومی نه. نتیجه‌اش این بود که یک نفر با همان مجوز،
+    کلِ پرسنل را در خروجیِ اکسل و از دستیار می‌دید و در فهرستِ روی صفحه فقط
+    چند نفر.
+
+    **تصمیم (شهریور ۱۴۰۵): مجوزِ «مدیریت پرسنل» سازمان‌گستر است.** کسی که
+    می‌تواند هر پرسنلی را بسازد، ویرایش کند یا حذف کند — و هر سه را همین مجوز
+    می‌دهد — دیدنش هم باید بتواند. دسترسیِ نوشتنی که از دسترسیِ خواندنی
+    بیشتر باشد، قاعده نیست، اشتباه است.
+
+    `Collection` و نه `Session`: فراخواننده‌ها مجوزها را از قبل دارند
+    (`capabilities_of` یا متنِ زمینهٔ دستیار)، و تابعِ خالص یعنی این قاعده را
+    می‌شود بی دیتابیس آزمود.
+    """
+    return role is UserRole.hr or Capability.manage_personnel in capabilities
 
 
 def capabilities_of(db: Session, user_id: int) -> set[Capability]:

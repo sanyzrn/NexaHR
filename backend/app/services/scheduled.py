@@ -35,6 +35,7 @@ from app.services.documents import archive_final_pdf
 from app.services.login_guard import purge_stale
 from app.services.notifications import already_notified, notify_once
 from app.services.pdf import weasyprint_available
+from app.services.sessions import purge_dead_sessions
 from app.services.workflow import IS_OPEN_RECORD, owner_after_hr_review, scorer_seat
 
 
@@ -417,6 +418,9 @@ def run_all_sweeps(db: Session) -> dict[str, int]:
         # همان دستهٔ نگهداری: کارتِ تأییدِ تصمیم‌گرفته‌شده فقط ظاهرِ گفت‌وگوست و
         # سندش در گزارش رویدادها می‌ماند، پس نباید تا ابد در جدول بنشیند.
         "decided_ai_actions_purged": purge_decided_actions(db),
+        # و نشست‌های مرده. هر چرخشِ توکن یک ردیف می‌ساخت و هیچ‌چیز برشان
+        # نمی‌داشت — تنها جدولی که جاروی نگهداری نداشت.
+        "dead_sessions_purged": purge_dead_sessions(db),
         # راستی‌آزماییِ کاملِ زنجیره — با فاصلهٔ خودش، نه هر پنج دقیقه.
         "audit_chain_anchored": run_audit_anchor_sweep(db),
     }

@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { apiClient, authToken, refreshAccessToken } from "../api/client";
 import type { CurrentUser } from "../types";
 import { clearAppCaches } from "../pwa";
+import { clearLocalDrafts } from "../ui/useLocalDraft";
 
 interface AuthContextValue {
   user: CurrentUser | null;
@@ -75,6 +76,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // کش نمی‌شوند)، ولی روی دستگاه مشترک، «هیچ ردی نماند» چیزی است که کاربر حق
     // دارد از دکمهٔ خروج انتظار داشته باشد.
     void clearAppCaches();
+    // و پیش‌نویس‌های نیمه‌تمامِ فرم‌ها. این‌ها عمداً در `localStorage`اند تا یک
+    // رفرش کار را نبَرد، ولی `localStorage` با خروج پاک نمی‌شود: متنِ
+    // خودارزیابیِ یک نفر — شخصی‌ترین چیزی که در این سامانه می‌نویسد — تا ابد
+    // روی آن رایانه می‌ماند و با devtools خواندنی است، حتی وقتی کسِ دیگری
+    // وارد شده.
+    clearLocalDrafts();
   }, [queryClient]);
 
   return (

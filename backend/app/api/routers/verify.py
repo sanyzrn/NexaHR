@@ -13,7 +13,15 @@ router = APIRouter(prefix="/api/verify", tags=["verify"])
 
 
 @router.get("/{token}", response_model=VerificationResult)
-@limiter.limit("30/minute")
+# `shared_limit` و نه `limit` — و این تفاوت، کلِ فایده‌اش است.
+#
+# `limiter.limit` سطلِ شمارش را بر اساسِ *مسیرِ درخواست* می‌سازد، و توکن جزوِ
+# همان مسیر است. یعنی سقفِ قبلی فقط جلوی کسی را می‌گرفت که یک سند را چهل بار
+# باز می‌کند، و در برابرِ *حدس‌زدنِ توکن* — تنها حمله‌ای که برایش نوشته شده
+# بود — کاملاً بی‌اثر بود: هر توکنِ تازه سهمیهٔ تازهٔ خودش را می‌گرفت.
+#
+# با یک scopeِ ثابت، همهٔ درخواست‌های این مسیر از یک IP در یک سطل می‌افتند.
+@limiter.shared_limit("30/minute", scope="public-document-verify")
 def verify_document(
     request: Request,
     token: str,

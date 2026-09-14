@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
+    #: ردیفِ نشستِ مرده چند روز نگه داشته شود پیش از پاک‌شدن.
+    #:
+    #: صفر هم درست بود — نشستِ منقضی یا باطل‌شده دیگر هیچ‌وقت پذیرفته نمی‌شود.
+    #: این مهلت برای *بعد از حادثه* است: وقتی هشدارِ «توکن دوباره استفاده شد»
+    #: می‌آید، کسی که بررسی می‌کند باید بتواند زنجیرهٔ چرخش‌ها را عقب برود و
+    #: ببیند از کجا شروع شد. بی این ردیف‌ها، همان هشدار یک خطِ بی‌زمینه است.
+    session_retention_days: int = 30
     cors_origins: str = "http://localhost:5173,http://localhost:8080"
     # آدرس عمومی فرانت‌اند؛ برای ساخت لینک تأیید اصالت داخل QR سند PDF استفاده می‌شود
     public_base_url: str = "http://localhost:8080"

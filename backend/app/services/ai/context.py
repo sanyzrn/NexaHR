@@ -28,6 +28,7 @@ from app.models.org_unit import OrgUnit
 from app.models.personnel import Personnel
 from app.models.user import User
 from app.schemas.auth import CurrentUser
+from app.services.authorization import sees_all_personnel
 
 ROLE_LABELS = {
     UserRole.hr: "منابع انسانی",
@@ -38,27 +39,17 @@ ROLE_LABELS = {
     UserRole.support: "مدیر سامانه",
 }
 
-#: نقش‌هایی که فهرست کاملِ پرسنل را در رابط هم می‌بینند — و فقط همان‌ها.
-#:
-#: تا امروز `deputy` و `ceo` و `support` هم این‌جا بودند، و هیچ‌کدام در رابط
-#: فهرستِ کامل را نمی‌بینند: `routers/personnel.list_personnel` معاونت و
-#: مدیرعامل را به ردیف‌های `EvaluationAccess`ِ خودشان محدود می‌کند و برای
-#: `support` فهرستِ *تهی* برمی‌گرداند (`_ACCESS_COLUMN_BY_ROLE` ستونی برایش
-#: ندارد). یعنی متنِ پرامپت پنجره‌ای باز کرده بود که رابط ندارد — دقیقاً همان
-#: چیزی که قاعدهٔ ۱ بالای این فایل ممنوعش می‌کند. نامِ ثابت هم دروغ می‌گفت.
-#:
-#: `manage_personnel` جداگانه سنجیده می‌شود و همان‌جا می‌ماند: آن مجوز در رابط
-#: هم کلِ فهرست را می‌دهد (`personnel/export.xlsx`, `POST /api/personnel`).
-_ORG_WIDE_ROLES = {UserRole.hr}
-
-
 def _visible_personnel_ids(db: Session, user: CurrentUser, caps: set[Capability]) -> set[int] | None:
     """`None` یعنی «همه» — و عمداً با «هیچ‌کس» یکی نیست.
 
     اگر برای «همه» فهرست تهی برمی‌گرداندیم، یک `IN ()` می‌شد که همه‌چیز را حذف
     می‌کند؛ همان اشتباهی که یک بار در فیلتر محل رخ داد.
     """
-    if user.role in _ORG_WIDE_ROLES or Capability.manage_personnel in caps:
+    # قاعده‌اش این‌جا نوشته نمی‌شود — `authorization.sees_all_personnel` تنها
+    # جایی است که می‌گوید چه کسی کل را می‌بیند، و رابط هم همان را می‌خواند.
+    # قاعدهٔ ۱ بالای این فایل دقیقاً همین را می‌خواهد: متنِ پرامپت نباید
+    # پنجره‌ای باز کند که رابط ندارد.
+    if sees_all_personnel(user.role, caps):
         return None
 
     from app.models.evaluation_access import EvaluationAccess

@@ -103,7 +103,9 @@ def test_support_cannot_score_or_approve(client, db_session, support):
         headers=auth_header(sup),
     ).json()["id"]
 
-    assert client.get(f"/api/evaluations/{record_id}", headers=auth_header(support)).status_code == 403
+    # ۴۰۴ و نه ۴۰۳ — «مدیر سامانه» هم روی این زنجیره صندلی ندارد و نباید
+    # بتواند با شمارشِ شناسه بفهمد کدام پرونده‌ها وجود دارند.
+    assert client.get(f"/api/evaluations/{record_id}", headers=auth_header(support)).status_code == 404
     assert (
         client.post(f"/api/evaluations/{record_id}/submit", headers=auth_header(support)).status_code
         == 403

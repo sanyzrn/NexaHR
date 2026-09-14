@@ -54,6 +54,32 @@ def upgrade() -> None:
         )
 
 
+def _refuse_if_printed_documents_would_stop_verifying(bind=None) -> None:
+    """توکنِ تأیید، تنها چیزی است که کاغذِ چاپ‌شده را به این سامانه وصل می‌کند.
+
+    و برخلافِ بقیهٔ چیزهایی که `downgrade` می‌ریزد، این یکی از روی داده‌های
+    دیگر **بازساخته نمی‌شود**: تصادفی است، عمداً. `upgrade`ِ بعدی ستون را خالی
+    برمی‌گرداند و از آن لحظه هر QRی که روی اسنادِ چاپ‌شده رفته — اسنادی که در
+    پرونده‌های پرسنلی و بایگانیِ کاغذی‌اند — برای همیشه «یافت نشد» می‌گیرد.
+
+    یعنی زیانْ داخلِ دیتابیس نمی‌ماند؛ روی کاغذی می‌افتد که دستِ آدم‌هاست و
+    دیگر قابلِ جمع‌کردن نیست.
+    """
+    bind = bind if bind is not None else op.get_bind()
+    issued = bind.execute(
+        sa.text("SELECT count(*) FROM evaluation_records WHERE verify_token IS NOT NULL")
+    ).scalar_one()
+    if issued:
+        raise RuntimeError(
+            f"downgrade متوقف شد: {issued} سند توکنِ تأیید دارد. این downgrade "
+            "آن ستون را می‌ریزد و توکن‌ها تصادفی‌اند، پس بازساختنی نیستند — "
+            "هر QRی که تا امروز چاپ شده برای همیشه از کار می‌افتد. اگر واقعاً "
+            "همین را می‌خواهید، اول توکن‌ها را جایی بیرون از این دیتابیس "
+            "بردارید."
+        )
+
+
 def downgrade() -> None:
+    _refuse_if_printed_documents_would_stop_verifying()
     op.drop_index('ix_evaluation_records_verify_token', table_name='evaluation_records')
     op.drop_column('evaluation_records', 'verify_token')

@@ -139,7 +139,10 @@ def test_an_employee_cannot_download_someone_elses_document(client, db_session):
         f"/api/evaluations/{other['id']}/summary.pdf", headers=auth_header(mine["employee"])
     )
 
-    assert r.status_code == 403
+    # ۴۰۴ و نه ۴۰۳: پاسخ نباید وجودِ پروندهٔ دیگری را تأیید کند. شناسه‌ها
+    # ترتیبی‌اند، پس «۴۰۳ یعنی هست، ۴۰۴ یعنی نیست» همان شمارشی را ممکن می‌کرد
+    # که `verify.py` با توکنِ تصادفی از آن پرهیز می‌کند.
+    assert r.status_code == 404
 
 
 def test_chain_roles_still_cannot_download_the_document(client, db_session):

@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -136,6 +136,35 @@ def rotate_session(
     session.rotated_at = now
     session.replaced_by_jti = new_jti
     return new_jti
+
+
+def purge_dead_sessions(db: Session) -> int:
+    """ردیف‌های نشستِ مرده را پاک می‌کند. خروجی: تعدادِ حذف‌شده.
+
+    **چرا لازم است:** هر چرخشِ توکن یک ردیفِ *تازه* می‌سازد و ردیفِ والد را هم
+    نگه می‌دارد. توکنِ دسترسی کوتاه‌عمر است، پس یک کاربرِ فعال روزی ده‌ها بار
+    چرخش می‌کند — و هیچ‌چیز این ردیف‌ها را برنمی‌داشت. جاروی شبانه
+    `login_attempts` را پاک می‌کرد و این یکی را نه.
+    به‌علاوهٔ چیزی که فقط داده نیست: `ip` و `user_agent` هر نشست تا ابد
+    می‌ماندند.
+
+    **چرا حذف بی‌خطر است:** نشستی که منقضی یا باطل شده، از همین حالا هم
+    پذیرفته نمی‌شود (`rotate_session` هر دو را رد می‌کند). و اگر ردیفی نباشد،
+    `session is None` می‌شود که همان مسیرِ «سرقت» است — یعنی خطای حذف، سامانه
+    را *سخت‌گیرتر* می‌کند و نه شل‌تر. جهتِ درستِ اشتباه کردن.
+
+    **چرا فقط مرده‌ها:** ردیفِ چرخیده ولی هنوز معتبر، همان چیزی است که مهلتِ
+    `ROTATION_GRACE_SECONDS` را ممکن می‌کند؛ حذفش یک refreshِ دوبارهٔ بی‌آزار
+    را به «همهٔ نشست‌هایت باطل شد» تبدیل می‌کرد.
+    """
+    cutoff = _now() - timedelta(days=settings.session_retention_days)
+    result = db.execute(
+        delete(AuthSession).where(
+            (AuthSession.expires_at < cutoff)
+            | ((AuthSession.revoked_at.is_not(None)) & (AuthSession.revoked_at < cutoff))
+        )
+    )
+    return result.rowcount or 0
 
 
 def revoke_session(db: Session, jti: str) -> None:
