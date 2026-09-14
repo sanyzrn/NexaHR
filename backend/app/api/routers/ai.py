@@ -213,6 +213,25 @@ def list_tools(
     ]
 
 
+def _pending_read(row: AiPendingAction) -> AiPendingActionRead:
+    """ردیفِ دیتابیس → کارتِ رابط.
+
+    یک تابع و نه سه رونویسی: پیش از این هر سه مسیرِ خواندنِ کنشِ در انتظار
+    بدنهٔ خودشان را داشتند، و افزودنِ جدولِ «چه چیزی عوض می‌شود» یعنی سه‌جا
+    باید یادت بماند. جایی که سه نسخه باشد، روزی یکی‌شان عقب می‌ماند.
+    """
+    return AiPendingActionRead(
+        id=row.id,
+        tool=row.tool_name,
+        summary=row.summary,
+        changes=json.loads(row.preview_json or "[]"),
+        arguments=json.loads(row.arguments_json or "{}"),
+        status=row.status,
+        result_text=row.result_text,
+        expires_at=row.expires_at,
+    )
+
+
 @router.get("/conversations", response_model=list[AiConversationRead])
 def list_conversations(
     db: Session = Depends(get_db),
@@ -355,15 +374,7 @@ def _pending_of_conversation(db: Session, conversation_id: int) -> list[AiPendin
         .limit(20)
     )
     return [
-        AiPendingActionRead(
-            id=row.id,
-            tool=row.tool_name,
-            summary=row.summary,
-            arguments=json.loads(row.arguments_json or "{}"),
-            status=row.status,
-            result_text=row.result_text,
-            expires_at=row.expires_at,
-        )
+        _pending_read(row)
         for row in rows
     ]
 
@@ -593,15 +604,7 @@ def reject_pending(
 ) -> AiPendingActionRead:
     _resolve(db, user)
     row = confirmations.reject(db, user=user, pending_id=pending_id)
-    return AiPendingActionRead(
-        id=row.id,
-        tool=row.tool_name,
-        summary=row.summary,
-        arguments=json.loads(row.arguments_json or "{}"),
-        status=row.status,
-        result_text=row.result_text,
-        expires_at=row.expires_at,
-    )
+    return _pending_read(row)
 
 
 @router.get("/pending", response_model=list[AiPendingActionRead])
@@ -621,15 +624,7 @@ def list_pending(
         stmt = stmt.where(AiPendingAction.conversation_id == int(conversation_id))
     rows = list(db.scalars(stmt))
     return [
-        AiPendingActionRead(
-            id=row.id,
-            tool=row.tool_name,
-            summary=row.summary,
-            arguments=json.loads(row.arguments_json or "{}"),
-            status=row.status,
-            result_text=row.result_text,
-            expires_at=row.expires_at,
-        )
+        _pending_read(row)
         for row in rows
     ]
 

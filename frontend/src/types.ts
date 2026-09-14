@@ -883,10 +883,22 @@ export interface AiStep {
 }
 
 /** کنشِ تغییردهندهٔ پیشنهادی که منتظرِ تصمیمِ کاربر است. */
+/** یک ردیفِ جدولِ «چه چیزی عوض می‌شود» روی کارتِ تأیید. */
+export interface AiPendingChange {
+  label: string;
+  before: string;
+  after: string;
+  /** change | add | remove | info — فقط رنگ و نشانه */
+  kind: string;
+}
+
 export interface AiPendingAction {
   id: number;
   tool: string;
   summary: string;
+  /** تفاوتِ خوانا. خالی یعنی ردیفِ قدیمی (پیش از نسخهٔ ۱.۱۳.۰) و کارت به
+   *  جدولِ آرگومان‌ها برمی‌گردد. */
+  changes?: AiPendingChange[];
   arguments: Record<string, unknown>;
   status: "pending" | "confirmed" | "rejected" | "expired" | "failed";
   result_text?: string;

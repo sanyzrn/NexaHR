@@ -22,13 +22,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.ai import AiConversation, AiMessage, AiPendingAction, AiSettings
 from app.models.enums import Capability
 from app.schemas.auth import CurrentUser
 from app.services.ai import context as context_service
+from app.services.ai import summary as summary_service
 from app.services.ai import usage as usage_service
 from app.services.ai.port import (
     AiRequestFailed,
@@ -85,20 +86,33 @@ def _pending_dict(row: AiPendingAction) -> dict:
         "tool": row.tool_name,
         "summary": row.summary,
         "arguments": json.loads(row.arguments_json or "{}"),
+        "changes": json.loads(row.preview_json or "[]"),
         "expires_at": row.expires_at.isoformat(),
     }
 
 
+#: سقفِ فهرستِ پیوست‌ها. پیش از این سه بود و آن *خیلی* کم بود: در جلسهٔ
+#: اصلاحِ اکسل، چهارمین فایل که بارگذاری می‌شد اولی از یادِ مدل می‌رفت و
+#: ارجاعِ «همان فایلِ اول» بی‌جواب می‌ماند. بیستِ امروز سقفِ ایمنی است، نه
+#: قاعدهٔ محصول — هیچ گفت‌وگویی در عمل به آن نمی‌رسد.
+_ATTACHMENT_LIMIT = 20
+
+
 def _attachments_note(db: Session, conversation_id: int) -> str:
-    """معرفیِ پیوست‌های اخیرِ گفت‌وگو به مدل — با شناسه، تا بتواند به آن‌ها ارجاع بدهد."""
+    """معرفیِ پیوست‌های همین گفت‌وگو به مدل — با شناسه، تا بتواند ارجاع بدهد."""
     from app.models.ai import AiUpload
 
+    total = db.scalar(
+        select(func.count())
+        .select_from(AiUpload)
+        .where(AiUpload.conversation_id == conversation_id)
+    ) or 0
     rows = list(
         db.scalars(
             select(AiUpload)
             .where(AiUpload.conversation_id == conversation_id)
             .order_by(AiUpload.id.desc())
-            .limit(3)
+            .limit(_ATTACHMENT_LIMIT)
         )
     )[::-1]
     if not rows:
@@ -119,11 +133,21 @@ def _attachments_note(db: Session, conversation_id: int) -> str:
             lines.append(f"- فایل #{upload.id} «{upload.filename}» — اکسلِ غیرِ قالبِ پرسنل")
         else:
             lines.append(f"- فایل #{upload.id} «{upload.filename}» — بدون قالبِ قابل پردازش")
+    if total > len(rows):
+        lines.insert(0, f"- (و {total - len(rows)} فایلِ قدیمی‌تر که این‌جا فهرست نشده‌اند)")
     return "\n".join(lines)
 
 
+#: پنجرهٔ تاریخچه. `summary.refresh` هم همین را می‌گیرد — دو عددِ جدا یعنی
+#: روزی پیامی نه در پنجره باشد و نه در خلاصه، و بی‌صدا گم شود.
+HISTORY_WINDOW = 12
+
+
 def _history_messages(
-    db: Session, conversation_id: int, exclude_id: int | None = None, limit: int = 12
+    db: Session,
+    conversation_id: int,
+    exclude_id: int | None = None,
+    limit: int = HISTORY_WINDOW,
 ) -> list[ChatMessage]:
     stmt = select(AiMessage).where(AiMessage.conversation_id == conversation_id)
     if exclude_id is not None:
@@ -146,6 +170,7 @@ def _system_prompt(
     specs: list[ToolSpec],
     fallback_protocol: bool,
     conversation_id: int,
+    conversation_summary: str = "",
 ) -> str:
     return build_system_prompt(
         instructions=config.instructions or "",
@@ -157,6 +182,7 @@ def _system_prompt(
         tools=specs,
         fallback_protocol=fallback_protocol,
         attachments_note=_attachments_note(db, conversation_id),
+        conversation_summary=conversation_summary,
     )
 
 
@@ -216,6 +242,12 @@ def _execute_call(
             tool_name=spec.name,
             arguments_json=json.dumps(arguments, ensure_ascii=False, default=str),
             summary=spec.summary_of(arguments),
+            # عکسِ لحظهٔ *تصمیم*، نه وضعیتِ امروز: کارت همان چیزی را نگه
+            # می‌دارد که کاربر موقعِ تأیید دید. اگر بعداً کسی چیزی را عوض
+            # کند، نقطهٔ تأیید خودش همه‌چیز را از نو اعتبارسنجی می‌کند.
+            preview_json=json.dumps(
+                spec.preview_of(ctx, arguments), ensure_ascii=False, default=str
+            ),
             status="pending",
             expires_at=datetime.now(UTC) + timedelta(hours=tools_uploads_ttl()),
         )
@@ -346,6 +378,7 @@ async def run_turn(
                 specs=specs,
                 fallback_protocol=False,
                 conversation_id=conversation.id,
+                conversation_summary=conversation.summary_text or "",
             ))]
             messages += _history_messages(db, conversation.id, exclude_id=user_message_id)
             messages.append(ChatMessage("user", user_text))
@@ -381,6 +414,7 @@ async def run_turn(
                 specs=specs,
                 fallback_protocol=True,
                 conversation_id=conversation.id,
+                conversation_summary=conversation.summary_text or "",
             ))
             adapter = adapter_factory()
             response = await _send(adapter)
@@ -511,6 +545,19 @@ async def run_turn(
             "کاری که خواستید چند پله پیش رفت؛ برای ادامه از من بخواهید دوباره پیگیری کنم. "
             "اگر پیشنهادی در انتظار تأیید است، کارتش را در همین گفت‌وگو می‌بینید."
         )
+
+    # خلاصهٔ غلتان — *بعد* از نوبت، تا پیام‌های همین نوبت هم دیده شوند.
+    #
+    # مصرفش به مصرفِ همین نوبت اضافه می‌شود و نه جایی جدا: دفترِ هزینه‌ای که
+    # یک فراخوانیِ پنهانِ سامانه‌ای را نشمارد، همان دفترِ کم‌گویی است که تازه
+    # رفعش کردیم.
+    folded = await summary_service.refresh(
+        db, conversation, adapter_factory, window=HISTORY_WINDOW
+    )
+    if folded.calls:
+        provider_calls += folded.calls
+        for key, value in usage_service.normalize(folded.usage).items():
+            usage[key] += value
 
     # کنش‌های در انتظارِ تأییدِ *همین نوبت* فقط وقتی معتبرند که مالکشان تصمیم نگرفته باشد
     live_pending = [

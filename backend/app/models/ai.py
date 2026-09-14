@@ -190,6 +190,17 @@ class AiConversation(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+
+    #: خلاصهٔ غلتانِ بخشِ *بیرون‌افتاده* از پنجرهٔ تاریخچه.
+    #:
+    #: پنجره دوازده پیام است و بزرگ‌کردنش هزینهٔ هر نوبت را خطی بالا می‌برد.
+    #: پس دوازده پیامِ آخر دست‌نخورده می‌ماند و قدیمی‌ترها در یک پاراگراف
+    #: جمع می‌شوند — وگرنه در جلسهٔ چهل‌پیامیِ ورودِ اکسل، مدل نیمهٔ اولِ
+    #: کار را اصلاً نمی‌بیند.
+    summary_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    #: تا کدام پیام در خلاصه آمده. بی این، هر بازسازی از صفر شروع می‌شد و
+    #: همان هزینه‌ای می‌شد که این ستون برای حذفش هست.
+    summary_through_message_id: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -244,6 +255,10 @@ class AiPendingAction(Base):
     arguments_json: Mapped[str] = mapped_column(Text, default="", nullable=False)
     #: جمله‌ای که کارتِ تأیید نشان می‌دهد — به نامِ انسان‌ها، نه شناسه‌ها.
     summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    #: جدولِ «چه چیزی عوض می‌شود»، به‌صورتِ JSON. عکسِ لحظهٔ *تصمیم* است و نه
+    #: وضعیتِ امروز: چیزی که کاربر هنگام تأیید دید، همان باید در تاریخچه
+    #: بماند — وگرنه کارتِ یک پیشنهادِ تأییدشده بعداً چیزِ دیگری می‌گوید.
+    preview_json: Mapped[str] = mapped_column(Text, default="", nullable=False)
     #: "pending" | "executing" | "confirmed" | "rejected" | "expired" | "failed"
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False, index=True)
     #: نتیجهٔ اجرا پس از تأیید — برای نمایش و برای این که «چه شد» قابل‌خواندن بماند.

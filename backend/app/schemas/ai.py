@@ -125,12 +125,23 @@ class AiStepRead(BaseModel):
     detail: dict = Field(default_factory=dict)
 
 
+class AiPendingChange(BaseModel):
+    """یک ردیفِ جدولِ «چه چیزی عوض می‌شود»."""
+
+    label: str
+    before: str = ""
+    after: str = ""
+    #: change | add | remove | info — فقط رنگ و نشانهٔ کارت
+    kind: str = "change"
+
+
 class AiPendingActionRead(BaseModel):
     """کنشِ در انتظارِ تأیید — کارتِ رابط مستقیماً از همین ساخته می‌شود."""
 
     id: int
     tool: str
     summary: str
+    changes: list[AiPendingChange] = Field(default_factory=list)
     arguments: dict = Field(default_factory=dict)
     status: str = "pending"
     result_text: str = ""

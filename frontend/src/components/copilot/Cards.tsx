@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AiPendingAction } from "../../types";
+import type { AiPendingAction, AiPendingChange } from "../../types";
 
 /**
  * کارتِ تأیید — قلبِ قراردادِ «مدل پیشنهاد می‌دهد، کاربر تصمیم می‌گیرد».
@@ -64,12 +64,26 @@ export function PendingActionCard({
             </p>
           )}
 
+          {/* تفاوت، *بالای* دکمهٔ جزئیات و همیشه باز.
+            *
+            * این آخرین خطِ دفاع در برابر تزریق است: اگر روزی چیزی از گاردهای
+            * بالادست رد شود، تنها چیزی که بین مهاجم و دیتابیس می‌ماند همین
+            * جدول است. جمع‌شده‌بودنش یعنی کاربر «تأیید» را بی‌دیدنش می‌زند،
+            * پس جمع نمی‌شود. */}
+          {(action.changes?.length ?? 0) > 0 && (
+            <dl className="mt-1.5 space-y-0.5">
+              {action.changes!.map((row, index) => (
+                <ChangeRow key={`${row.label}-${index}`} row={row} />
+              ))}
+            </dl>
+          )}
+
           <button
             type="button"
             onClick={() => setExpanded((prev) => !prev)}
             className="tap-target mt-1.5 text-[11px] font-medium text-gray-400 underline-offset-2 hover:text-gray-600 hover:underline"
           >
-            {expanded ? "بستنِ جزئیات" : "جزئیاتِ پیشنهاد"}
+            {expanded ? "بستنِ دادهٔ خام" : "دادهٔ خام"}
           </button>
           {expanded && (
             <pre
@@ -102,6 +116,34 @@ export function PendingActionCard({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** یک سطرِ تفاوت: «برچسب: پیش ← پس».
+ *
+ *  `before` فقط وقتی نشان داده می‌شود که واقعاً چیزی بوده و با `after` فرق
+ *  دارد؛ وگرنه سطر شلوغ می‌شود و «—» به «—» هیچ اطلاعاتی ندارد. */
+function ChangeRow({ row }: { row: AiPendingChange }) {
+  const tone =
+    row.kind === "add"
+      ? "text-green-700"
+      : row.kind === "remove"
+        ? "text-red-700"
+        : row.kind === "info"
+          ? "text-gray-500"
+          : "text-gray-800";
+  const showBefore = row.before && row.before !== "—" && row.before !== row.after;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] leading-relaxed">
+      <dt className="text-gray-500">{row.label}:</dt>
+      {showBefore && (
+        <>
+          <dd className="text-gray-400 line-through">{row.before}</dd>
+          <span aria-hidden className="text-gray-300">←</span>
+        </>
+      )}
+      <dd className={`font-medium ${tone}`}>{row.after}</dd>
     </div>
   );
 }

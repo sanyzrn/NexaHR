@@ -92,6 +92,32 @@ class ToolSpec:
         args = "، ".join(f"{k}={v}" for k, v in arguments.items())
         return f"{self.name}({args})"
 
+    def preview_of(self, ctx: ToolContext, arguments: dict) -> list[dict]:
+        """*چه چیزی* عوض می‌شود — ردیف‌به‌ردیف، برای کارتِ تأیید.
+
+        این آخرین خطِ دفاع در برابر تزریق است. بازبینی نشان داد مدلِ کاملاً
+        مطیع هم پیش از ساختِ کارت ۴۰۳ می‌گیرد، ولی اگر روزی چیزی از آن گارد
+        رد شود، تنها چیزی که بینِ مهاجم و دیتابیس می‌ماند همین کارت است — و
+        کارتی که «تنظیم مجوزهای حساب #۷ به ۲ مجوز» بگوید، کسی جلویش را
+        نمی‌گیرد، چون هیچ‌کس نمی‌داند آن دو کدام‌اند.
+
+        `preview`ِ خودِ ابزار وضعیتِ *امروز* را هم می‌خوانَد، پس می‌تواند
+        بگوید «`manage_users` اضافه می‌شود و `manage_capabilities` می‌رود».
+        ابزاری که `preview` ندارد، همان آرگومان‌ها را در یک جدولِ خوانا
+        می‌گیرد — که باز هم از JSONِ خام بهتر است.
+
+        هیچ خطایی از این‌جا بیرون نمی‌رود: کارتِ بی‌جدول بد است، ولی نوبتی که
+        به‌خاطرِ *ساختنِ کارت* بشکند بدتر.
+        """
+        preview = getattr(self.handler, "preview", None)
+        if preview is not None:
+            try:
+                rows = preview(ctx, **_clean_kwargs(preview, arguments))
+                return [dict(row) for row in rows]
+            except Exception:  # noqa: BLE001 — جدولِ بد نباید اجرا را ببندد
+                pass
+        return generic_preview(arguments)
+
 
 @dataclass
 class ToolOutcome:
@@ -419,3 +445,80 @@ def first_validation_message(err: Exception) -> str:
 def json_content(payload: Any) -> str:
     """محتوایی که مدل می‌بیند — JSON خوانا، کوتاه، بدون کلید اضافه."""
     return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+# ── پیش‌نمایشِ کارتِ تأیید ─────────────────────────────────────────────────
+
+#: نامِ آرگومان → برچسبِ فارسی. جدولِ پیش‌فرض از همین می‌خوانَد، تا حتی
+#: ابزارِ بی‌`preview` هم «user_id: 7» نگوید.
+ARGUMENT_LABELS: dict[str, str] = {
+    "user_id": "حساب کاربری",
+    "username": "نام کاربری",
+    "personnel_id": "پرسنل",
+    "full_name": "نام و نام خانوادگی",
+    "role": "نقش",
+    "is_active": "وضعیت حساب",
+    "capabilities": "مجوزها",
+    "unit_supervisor": "مسئول مستقیم",
+    "deputy": "معاونت",
+    "ceo": "مدیرعامل",
+    "national_id": "کد ملی",
+    "personnel_code": "کد پرسنلی",
+    "job_title": "عنوان شغلی",
+    "org_unit": "واحد سازمانی",
+    "site": "محل خدمت",
+    "status": "وضعیت",
+    "separation_reason": "علت خروج",
+    "separation_date": "تاریخ خروج",
+    "action": "اقدام",
+    "evaluation_id": "پرونده",
+    "reason": "دلیل",
+    "name": "نام",
+    "description": "شرح",
+    "upload_id": "فایل بارگذاری‌شده",
+    "password": "رمز عبور",
+    "new_password": "رمز عبور",
+    "api_key": "کلید سرویس",
+    "token": "توکن",
+}
+
+#: آرگومان‌هایی که مقدارشان هرگز نباید روی صفحه بیاید. کارتِ تأیید در
+#: تاریخچهٔ گفت‌وگو می‌ماند و تاریخچه بعداً هم خوانده می‌شود.
+_SECRET_ARGUMENTS = frozenset({"password", "api_key", "new_password", "token"})
+
+_MASK = "••••••"
+
+
+def format_value(value: Any) -> str:
+    """مقدار → متنی که آدم بخواند. `None` و تهی، «—»."""
+    if value is None or value == "" or value == []:
+        return "—"
+    if isinstance(value, bool):
+        return "فعال" if value else "غیرفعال"
+    if isinstance(value, (list, tuple)):
+        return "، ".join(format_value(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def change(label: str, *, before: Any = None, after: Any = None, kind: str = "change") -> dict:
+    """یک ردیفِ جدولِ کارت. `kind` فقط رنگ و نشانه را تعیین می‌کند."""
+    return {
+        "label": label,
+        "before": format_value(before),
+        "after": format_value(after),
+        "kind": kind,
+    }
+
+
+def generic_preview(arguments: dict) -> list[dict]:
+    """جدولِ پیش‌فرض برای ابزاری که `preview` ندارد."""
+    rows = []
+    for key, value in arguments.items():
+        label = ARGUMENT_LABELS.get(key, key)
+        if key in _SECRET_ARGUMENTS:
+            rows.append(change(label, after=_MASK, kind="info"))
+            continue
+        rows.append(change(label, after=value, kind="info"))
+    return rows

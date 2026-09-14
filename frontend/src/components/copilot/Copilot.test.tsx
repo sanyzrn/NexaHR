@@ -81,7 +81,11 @@ describe("PendingActionCard", () => {
     expect(screen.getByText("پرسنل ثبت شد")).toBeTruthy();
   });
 
-  it("shows the payload only on demand", () => {
+  // برچسبِ دکمه از «جزئیاتِ پیشنهاد» به «دادهٔ خام» عوض شد و این یک
+  // تغییرِ ظاهری نیست: از نسخهٔ ۱.۱۳.۰ *تفاوت* همیشه باز است و چیزی که
+  // پشتِ دکمه می‌ماند فقط JSONِ خام است. «جزئیات» دیگر درست نبود، چون
+  // جزئیات از پیش روی کارت‌اند.
+  it("shows the raw payload only on demand", () => {
     render(
       withProviders(
         <PendingActionCard
@@ -92,7 +96,7 @@ describe("PendingActionCard", () => {
       ),
     );
     expect(screen.queryByText(/9912/)).toBeNull();
-    fireEvent.click(screen.getByText("جزئیاتِ پیشنهاد"));
+    fireEvent.click(screen.getByText("دادهٔ خام"));
     expect(screen.getByText(/9912/)).toBeTruthy();
   });
 });

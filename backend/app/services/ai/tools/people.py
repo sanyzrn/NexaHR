@@ -23,6 +23,7 @@ from app.schemas.auth import CurrentUser
 from app.services.ai.tools.base import (
     ToolContext,
     ToolOutcome,
+    change,
     first_validation_message,
     json_content,
     tool,
@@ -765,7 +766,53 @@ def _describe_update_user(user_id, role=None, is_active=None, password=None, ful
     return f"ویرایش حساب #{user_id}" + (" (" + "، ".join(bits) + ")" if bits else "")
 
 
+def _preview_update_user(
+    ctx: ToolContext, user_id, role=None, is_active=None, password=None, full_name=None, **_
+) -> list[dict]:
+    """فقط چیزی که واقعاً عوض می‌شود.
+
+    غیرفعال‌سازیِ یک حساب در فهرستی از آرگومان‌ها گم می‌شود؛ این‌جا یک ردیفِ
+    جداست با «فعال ← غیرفعال». و رمز هرگز نشان داده نمی‌شود: کارتِ تأیید در
+    تاریخچهٔ گفت‌وگو می‌ماند و تاریخچه بعداً هم خوانده می‌شود.
+    """
+    db = ctx.db
+    account = db.get(User, int(user_id))
+    rows = [
+        change(
+            "حساب کاربری",
+            after=(account.display_name or account.username) if account else f"#{user_id}",
+            kind="info",
+        )
+    ]
+    if full_name:
+        rows.append(
+            change("نام و نام خانوادگی", before=account.display_name if account else None, after=full_name)
+        )
+    if role:
+        before = _ROLE_LABELS.get(account.role) if account else None
+        try:
+            after = _ROLE_LABELS.get(UserRole(str(role)), role)
+        except ValueError:
+            after = role
+        rows.append(change("نقش", before=before, after=after))
+    if is_active is not None:
+        rows.append(
+            change(
+                "وضعیت حساب",
+                before=account.is_active if account else None,
+                after=bool(is_active),
+                kind="remove" if not is_active else "change",
+            )
+        )
+    if password:
+        rows.append(change("رمز عبور", after="بازنشانی می‌شود", kind="change"))
+    if len(rows) == 1:
+        rows.append(change("تغییری", after="درخواست نشده", kind="info"))
+    return rows
+
+
 update_user.describe = _describe_update_user
+update_user.preview = _preview_update_user
 
 
 # ── واحدهای سازمانی ────────────────────────────────────────────────────────
@@ -999,7 +1046,53 @@ def _describe_set_evaluation_access(personnel_id, unit_supervisor="", deputy="",
     return f"تعیین زنجیرهٔ پرسنل #{personnel_id}" + (" (" + "، ".join(parts) + ")" if parts else "")
 
 
+def _preview_set_evaluation_access(
+    ctx: ToolContext, personnel_id, unit_supervisor="", deputy="", ceo="", **_
+) -> list[dict]:
+    """سه صندلی، هرکدام «از که به که» — و صندلیِ خالی صریح گفته می‌شود.
+
+    زنجیرهٔ ارزیابی تعیین می‌کند چه کسی نمرهٔ چه کسی را می‌دهد. تعویضِ بی‌صدای
+    یک صندلی همان چیزی است که کارتِ تأیید باید جلویش را بگیرد، و برای دیدنش
+    باید *وضعیتِ فعلی* هم کنارِ پیشنهاد بنشیند.
+    """
+    db = ctx.db
+    person = db.get(Personnel, int(personnel_id))
+    access = db.scalar(
+        select(EvaluationAccess).where(EvaluationAccess.personnel_id == int(personnel_id))
+    )
+
+    def name_of(user_id) -> str | None:
+        if not user_id:
+            return None
+        user = db.get(User, user_id)
+        return (user.display_name or user.username) if user else None
+
+    def proposed(raw: str, current_id) -> str:
+        """رشتهٔ خالی یعنی «دست نزن»، نه «خالی کن» — همان قاعدهٔ خودِ ابزار."""
+        raw = (raw or "").strip()
+        if not raw:
+            return name_of(current_id) or "—"
+        user = db.scalar(select(User).where(User.username == raw))
+        return (user.display_name or user.username) if user else raw
+
+    rows = [
+        change("پرسنل", after=person.full_name if person else f"#{personnel_id}", kind="info")
+    ]
+    for label, raw, current_id in (
+        ("مسئول مستقیم", unit_supervisor, access.unit_supervisor_user_id if access else None),
+        ("معاونت", deputy, access.deputy_user_id if access else None),
+        ("مدیرعامل", ceo, access.ceo_user_id if access else None),
+    ):
+        before = name_of(current_id) or "—"
+        after = proposed(raw, current_id)
+        rows.append(
+            change(label, before=before, after=after, kind="change" if before != after else "info")
+        )
+    return rows
+
+
 set_evaluation_access.describe = _describe_set_evaluation_access
+set_evaluation_access.preview = _preview_set_evaluation_access
 
 
 # ── مجوزها ─────────────────────────────────────────────────────────────────
@@ -1097,7 +1190,52 @@ def _describe_grant(user_id, capabilities, **_):
     return f"تنظیم مجوزهای حساب #{user_id} به {len(capabilities)} مجوز"
 
 
+def _preview_grant(ctx: ToolContext, user_id, capabilities, **_) -> list[dict]:
+    """کدام مجوز می‌آید و کدام می‌رود — به نامِ فارسی، نه به شمار.
+
+    «تنظیم مجوزهای حساب #۷ به ۲ مجوز» جمله‌ای است که کسی جلویش را نمی‌گیرد،
+    چون هیچ‌کس نمی‌داند آن دو کدام‌اند. تفاوت همان چیزی است که تصمیم را ممکن
+    می‌کند: مجوزی که *حذف* می‌شود اصلاً در آرگومان‌ها نیست و فقط از مقایسه با
+    وضعیتِ امروز پیدا می‌شود.
+    """
+    from app.api.routers.administration import CAPABILITY_LABELS
+    from app.services.authorization import capabilities_of
+
+    db = ctx.db
+    account = db.get(User, int(user_id))
+    desired = set()
+    for item in capabilities or []:
+        try:
+            desired.add(Capability(str(item).strip()))
+        except ValueError:
+            # مجوزِ ناشناخته را خودِ endpoint با ۴۰۰ رد می‌کند؛ این‌جا فقط
+            # باید *دیده* شود، نه اینکه ساختِ کارت را بشکند.
+            desired.add(str(item))
+    current = capabilities_of(db, int(user_id)) if account else set()
+
+    def label(cap) -> str:
+        return CAPABILITY_LABELS.get(cap, getattr(cap, "value", str(cap)))
+
+    rows = [
+        change(
+            "حساب کاربری",
+            after=(account.display_name or account.username) if account else f"#{user_id}",
+            kind="info",
+        )
+    ]
+    added = sorted(label(c) for c in desired - current)
+    removed = sorted(label(c) for c in current - desired)
+    for name in added:
+        rows.append(change(name, after="اضافه می‌شود", kind="add"))
+    for name in removed:
+        rows.append(change(name, before="دارد", after="حذف می‌شود", kind="remove"))
+    if not added and not removed:
+        rows.append(change("تغییری در مجوزها", after="ندارد", kind="info"))
+    return rows
+
+
 grant_capabilities.describe = _describe_grant
+grant_capabilities.preview = _preview_grant
 
 
 def _parse_date(value: object) -> date | None:
