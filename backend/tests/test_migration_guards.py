@@ -173,3 +173,31 @@ def test_an_added_indicator_stops_the_downgrade(db_session):
     with pytest.raises(RuntimeError) as raised:
         guard(bind=db_session.connection())
     assert "downgrade متوقف شد" in str(raised.value)
+
+
+def test_the_usage_ledger_guard_is_silent_when_nothing_was_spent(db_session):
+    guard = _module_of("a3f79c2b5d14_*.py")._refuse_if_the_ledger_has_entries
+    guard(bind=db_session.connection())
+
+
+def test_a_single_ledger_entry_stops_the_downgrade(db_session):
+    """این یکی *بازساختنی نیست*: مصرفِ توکن را سرویسِ بیرونی گفته.
+
+    بیشترِ گاردهای این فایل داده‌ای را نگه می‌دارند که دست‌کم در جای دیگری
+    ردی دارد. این‌جا نه — پیام‌های گفت‌وگو می‌مانند و هیچ‌کدام نمی‌گویند آن
+    نوبت چند توکن سوزانده. یعنی رفت‌وبرگشتِ ساده، تنها سندِ داخلیِ سازمان در
+    برابرِ صورت‌حسابِ سرویس را پاک می‌کند.
+    """
+    guard = _module_of("a3f79c2b5d14_*.py")._refuse_if_the_ledger_has_entries
+    db_session.execute(
+        text(
+            "INSERT INTO ai_usage_log (username, total_tokens, calls) "
+            "VALUES ('کسی', 100, 1)"
+        )
+    )
+    db_session.flush()
+
+    with pytest.raises(RuntimeError) as raised:
+        guard(bind=db_session.connection())
+    assert "downgrade متوقف شد" in str(raised.value)
+    assert "COPY ai_usage_log" in str(raised.value), "پیام باید راهِ خروج را بدهد"

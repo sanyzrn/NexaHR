@@ -88,7 +88,19 @@ type ModuleRow = {
   dependents: string[];
 };
 
-function mockGets(modules: ModuleRow[] = []) {
+const EMPTY_USAGE = {
+  days: 30,
+  from_date: "2026-08-15",
+  to_date: "2026-09-14",
+  totals: {
+    turns: 0, calls: 0, prompt_tokens: 0, completion_tokens: 0,
+    total_tokens: 0, failed_turns: 0,
+  },
+  by_user: [],
+  by_day: [],
+};
+
+function mockGets(modules: ModuleRow[] = [], usage: unknown = EMPTY_USAGE) {
   vi.mocked(apiClient.get).mockImplementation(async (url: string) => {
     if (url === "/administration/policy") return { data: { fields: POLICY_FIELDS } } as never;
     if (url === "/ai/settings")
@@ -108,6 +120,7 @@ function mockGets(modules: ModuleRow[] = []) {
         },
       } as never;
     if (url === "/ai/access") return { data: [] } as never;
+    if (url === "/ai/usage") return { data: usage } as never;
     if (url === "/administration/integrations")
       return { data: { fields: [], secrets: [], active_channels: [] } } as never;
     if (url === "/administration/modules") return { data: modules } as never;
@@ -329,5 +342,77 @@ describe("جهتِ حرکتِ دستهٔ کلیدها", () => {
     expect(Number.isNaN(off)).toBe(false);
     expect(Number.isNaN(on)).toBe(false);
     expect(on).toBeGreaterThan(off);
+  });
+});
+
+
+describe("دفتر هزینهٔ دستیار", () => {
+  const SPENT = {
+    ...EMPTY_USAGE,
+    totals: {
+      turns: 3, calls: 5, prompt_tokens: 900,
+      completion_tokens: 100, total_tokens: 1000, failed_turns: 1,
+    },
+    by_user: [
+      {
+        user_id: 7, username: "hr_one", turns: 2, calls: 4,
+        prompt_tokens: 800, completion_tokens: 90, total_tokens: 890, failed_turns: 0,
+      },
+      {
+        user_id: null, username: "rafte", turns: 1, calls: 1,
+        prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, failed_turns: 1,
+      },
+    ],
+    // دو روز، تا جمعِ کل با هیچ ردیفِ روزانه‌ای یکی نباشد: وگرنه ادعای
+    // «۱٬۰۰۰ روی کارتِ جمع است» با ردیفِ روز هم درست درمی‌آمد.
+    by_day: [
+      {
+        date: "2026-09-13", turns: 1, calls: 2, prompt_tokens: 550,
+        completion_tokens: 50, total_tokens: 600, failed_turns: 0,
+      },
+      {
+        date: "2026-09-14", turns: 2, calls: 3, prompt_tokens: 350,
+        completion_tokens: 50, total_tokens: 400, failed_turns: 1,
+      },
+    ],
+  };
+
+  it("مصرف را نشان می‌دهد و هیچ مبلغی نمی‌سازد", async () => {
+    // این ادعای دوم تزئینی نیست: نرخِ توکن در این سامانه نیست، و عددِ ریالیِ
+    // حدسی دقیق به‌نظر می‌رسد و نیست. اگر روزی کسی یک جدولِ قیمت اضافه کند،
+    // باید همین‌جا تصمیم بگیرد، نه اینکه بی‌صدا اتفاق بیفتد.
+    mockGets([], SPENT);
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    expect(await screen.findByText("دفتر هزینه")).toBeInTheDocument();
+    expect(screen.getByText("۱٬۰۰۰")).toBeInTheDocument();
+    expect(screen.getByText("hr_one")).toBeInTheDocument();
+    expect(screen.queryByText(/ریال|تومان/)).not.toBeInTheDocument();
+  });
+
+  it("حسابِ حذف‌شده را برچسب می‌زند، نه اینکه پنهانش کند", async () => {
+    // هزینه اتفاق افتاده؛ ردیفش می‌ماند و باید بگوید صاحبش دیگر نیست.
+    mockGets([], SPENT);
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    expect(await screen.findByText("(حساب حذف شده)")).toBeInTheDocument();
+  });
+
+  it("می‌گوید نوبتِ ناموفق هم هزینه دارد", async () => {
+    mockGets([], SPENT);
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    expect(await screen.findByText(/نوبت‌های ناموفق هم هزینه دارند/)).toBeInTheDocument();
+  });
+
+  it("بازهٔ خالی جدولِ خالی نشان نمی‌دهد", async () => {
+    mockGets();
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    expect(await screen.findByText("در این بازه مصرفی ثبت نشده است.")).toBeInTheDocument();
   });
 });

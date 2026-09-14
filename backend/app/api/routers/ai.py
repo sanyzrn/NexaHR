@@ -14,12 +14,13 @@
 import json
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_capability
 from app.core.ai_providers import PROVIDERS, PROVIDERS_BY_ID
+from app.core.clock import local_day_start, today_local
 from app.core.config import settings
 from app.core.crypto import decrypt, encrypt, masked
 from app.core.rate_limit import limiter
@@ -33,6 +34,7 @@ from app.models.ai import (
     AiUpload,
     AiUserAccess,
 )
+from app.models.ai_usage import AiUsageLog
 from app.models.enums import Capability
 from app.models.user import User
 from app.schemas.ai import (
@@ -53,11 +55,16 @@ from app.schemas.ai import (
     AiTestResult,
     AiToolRead,
     AiUploadRead,
+    AiUsageByDay,
+    AiUsageByUser,
+    AiUsageReport,
+    AiUsageTotals,
     AiUserAccessRead,
     AiUserAccessUpdate,
 )
 from app.schemas.auth import CurrentUser
 from app.services.ai import confirmations, credentials
+from app.services.ai import usage as usage_service
 from app.services.ai.orchestrator import run_turn
 from app.services.ai.port import AiRequestFailed, AiUnavailable
 from app.services.ai.provider import OpenAiCompatibleAdapter, clean_secret
@@ -495,6 +502,19 @@ async def chat(
             user_message_id=user_message.id,
         )
     except (AiUnavailable, AiRequestFailed) as err:
+        # نوبتی که شکست، الزاماً رایگان نبوده: تا پیش از خطا ممکن است چند
+        # درخواستِ موفق به سرویس رفته باشد. `run_turn` مصرفِ تا آن لحظه را
+        # روی خودِ استثنا می‌گذارد تا این‌جا از دست نرود.
+        usage_service.record(
+            db,
+            user=user,
+            conversation_id=convo.id,
+            provider=config.provider,
+            model=access.model or creds.model,
+            usage=getattr(err, "usage", None),
+            calls=getattr(err, "calls", 0) or 1,
+            failed=True,
+        )
         db.commit()
         detail = getattr(err, "detail", str(err))
         # متنِ خودِ سرویس، بی‌کم‌وکاست: تفاوت ۴۰۱ با «مدل پیدا نشد» چهار رفعِ
@@ -511,6 +531,15 @@ async def chat(
             content=result.reply,
             meta_json=result.meta_json(),
         )
+    )
+    usage_service.record(
+        db,
+        user=user,
+        conversation_id=convo.id,
+        provider=config.provider,
+        model=access.model or creds.model,
+        usage=result.usage,
+        calls=result.calls,
     )
     convo.updated_at = datetime.now(UTC)
     db.commit()
@@ -653,6 +682,63 @@ def _to_settings_read(db: Session, row: AiSettings) -> AiSettingsRead:
         max_tool_iterations=row.max_tool_iterations,
         allow_uploads=row.allow_uploads,
         max_upload_mb=row.max_upload_mb,
+    )
+
+
+@router.get("/usage", response_model=AiUsageReport)
+def usage_report(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(_admin),
+) -> AiUsageReport:
+    """«این ماه چقدر خرج شد، و دستِ چه کسی؟»
+
+    سه تجمیع در سه کوئری و نه یک `.all()` روی کلِ دفتر: این جدول با *زمان*
+    رشد می‌کند و تنها چیزی که از آن خواسته می‌شود جمع است. هیچ ردیفِ خامی به
+    فرانت نمی‌رود.
+
+    پنجره با روزِ *محلیِ* سازمان بسته می‌شود و گروه‌بندیِ روزانه هم همان‌جا
+    انجام می‌شود (`timezone(...)` در خودِ Postgres). با UTC، مصرفِ بین
+    نیمه‌شب و ۳:۳۰ بامدادِ تهران زیرِ روزِ قبل جمع می‌شد — همان اشتباهی که
+    `core/clock.py` برای بستنش نوشته شده.
+    """
+    today = today_local()
+    start_day = today - timedelta(days=days - 1)
+    window = AiUsageLog.created_at >= local_day_start(start_day)
+
+    sums = (
+        func.count().label("turns"),
+        func.coalesce(func.sum(AiUsageLog.calls), 0).label("calls"),
+        func.coalesce(func.sum(AiUsageLog.prompt_tokens), 0).label("prompt_tokens"),
+        func.coalesce(func.sum(AiUsageLog.completion_tokens), 0).label("completion_tokens"),
+        func.coalesce(func.sum(AiUsageLog.total_tokens), 0).label("total_tokens"),
+        func.count().filter(AiUsageLog.failed.is_(True)).label("failed_turns"),
+    )
+
+    total_row = db.execute(select(*sums).where(window)).mappings().one()
+
+    by_user = db.execute(
+        select(AiUsageLog.user_id, AiUsageLog.username, *sums)
+        .where(window)
+        .group_by(AiUsageLog.user_id, AiUsageLog.username)
+        .order_by(func.coalesce(func.sum(AiUsageLog.total_tokens), 0).desc())
+    ).mappings()
+
+    local_day = func.date(func.timezone(settings.org_timezone, AiUsageLog.created_at))
+    by_day = db.execute(
+        select(local_day.label("date"), *sums)
+        .where(window)
+        .group_by(local_day)
+        .order_by(local_day)
+    ).mappings()
+
+    return AiUsageReport(
+        days=days,
+        from_date=start_day.isoformat(),
+        to_date=today.isoformat(),
+        totals=AiUsageTotals(**total_row),
+        by_user=[AiUsageByUser(**row) for row in by_user],
+        by_day=[AiUsageByDay(**{**row, "date": row["date"].isoformat()}) for row in by_day],
     )
 
 

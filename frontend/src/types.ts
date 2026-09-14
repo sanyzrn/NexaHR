@@ -990,3 +990,34 @@ export interface AiUserAccess {
   allow_write_actions: boolean;
   daily_message_limit: number;
 }
+
+/** دفترِ هزینهٔ دستیار — فقط توکن، نه ریال.
+ *
+ * نرخِ هر توکن به سرویس، مدل و قراردادِ سازمان بستگی دارد و هیچ‌کدام در این
+ * سامانه نیست. عددِ ریالیِ حدسی دقیق به‌نظر می‌رسد و نیست. */
+export interface AiUsageTotals {
+  turns: number;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  failed_turns: number;
+}
+
+export interface AiUsageByUser extends AiUsageTotals {
+  user_id: number | null;
+  username: string;
+}
+
+export interface AiUsageByDay extends AiUsageTotals {
+  date: string;
+}
+
+export interface AiUsageReport {
+  days: number;
+  from_date: string;
+  to_date: string;
+  totals: AiUsageTotals;
+  by_user: AiUsageByUser[];
+  by_day: AiUsageByDay[];
+}

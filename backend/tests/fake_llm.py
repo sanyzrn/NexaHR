@@ -18,10 +18,21 @@ def tool_call(call_id: str, name: str, arguments: dict) -> ToolCall:
 
 
 def response(
-    content: str = "", calls: list[ToolCall] | None = None, truncated: bool = False
+    content: str = "",
+    calls: list[ToolCall] | None = None,
+    truncated: bool = False,
+    usage: dict | None = None,
 ) -> ChatResponse:
+    """`usage` عمداً پیش‌فرضِ خالی دارد و نه یک عددِ ساختگی.
+
+    سرویس‌ها همیشه مصرف را نمی‌دهند، و تستی که همیشه عدد ببیند نمی‌تواند
+    نشان بدهد دفترِ هزینه با نبودِ عدد چه می‌کند.
+    """
     return ChatResponse(
-        content=content, tool_calls=tuple(calls or []), truncated=truncated
+        content=content,
+        tool_calls=tuple(calls or []),
+        truncated=truncated,
+        usage=usage or {},
     )
 
 

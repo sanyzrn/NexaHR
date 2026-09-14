@@ -16,9 +16,11 @@ import { Button } from "../../ui/Button";
 import { Card, EmptyState, FilterSelect, PageHeader, TableSkeleton } from "../../ui/Card";
 import { useOrgUnitCatalogue, useSites } from "../../api/queries";
 import { PasswordInput } from "../../ui/PasswordInput";
+import { isoToJalali, toPersianDigits } from "../../utils/jalali";
 import {
   ROLE_LABELS,
   type AiSettings,
+  type AiUsageReport,
   type AiUserAccess,
   type OrgUnitCatalogueItem,
   type UserRole,
@@ -1437,7 +1439,131 @@ function AiCard() {
           </li>
         ))}
       </ul>
+
+      <AiUsageLedger />
     </Card>
+  );
+}
+
+/** «این ماه چقدر خرج شد، و دستِ چه کسی؟»
+ *
+ *  عمداً فقط توکن نشان می‌دهد و نه ریال: نرخِ هر توکن به سرویس، مدل و
+ *  قراردادِ همان سازمان بستگی دارد و هیچ‌کدام در این سامانه نیست. عددِ
+ *  ریالی‌ای که از یک جدولِ قیمتِ حدسی در بیاید دقیق به‌نظر می‌رسد و نیست —
+ *  و روی گزارشِ هزینه، آن بدترین حالت است.
+ *
+ *  دو ستونِ جدا برای «نوبت» و «درخواست» هم به همین دلیل است: یک نوبتِ
+ *  گفت‌وگو با حلقهٔ ابزار چند درخواستِ مستقل به سرویس می‌شود و صورت‌حساب
+ *  دومی را می‌شمارد، نه اولی را. */
+function AiUsageLedger() {
+  const [days, setDays] = useState(30);
+  const { data, isPending } = useQuery({
+    queryKey: ["ai", "usage", days],
+    queryFn: async () =>
+      (await apiClient.get<AiUsageReport>("/ai/usage", { params: { days } })).data,
+  });
+
+  const faInt = (n: number) => n.toLocaleString("fa-IR");
+  const busiestDay = Math.max(1, ...(data?.by_day ?? []).map((d) => d.total_tokens));
+
+  return (
+    <div className="mt-6 border-t border-gray-100 pt-4">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-bold text-gray-900">دفتر هزینه</h3>
+        <span className="flex-1" />
+        <FilterSelect
+          value={String(days)}
+          onChange={(v) => setDays(Number(v))}
+          aria-label="بازهٔ گزارش هزینه"
+        >
+          <option value="7">۷ روز اخیر</option>
+          <option value="30">۳۰ روز اخیر</option>
+          <option value="90">۹۰ روز اخیر</option>
+        </FilterSelect>
+      </div>
+      <p className="mb-3 text-xs text-gray-500">
+        مصرفِ توکن، همان‌طور که سرویس گزارش کرده. تبدیلش به مبلغ به نرخِ قراردادِ
+        شما بستگی دارد و این‌جا حدس زده نمی‌شود.
+      </p>
+
+      {isPending ? (
+        <TableSkeleton rows={3} />
+      ) : !data || data.totals.turns === 0 ? (
+        <EmptyState>در این بازه مصرفی ثبت نشده است.</EmptyState>
+      ) : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-4">
+            {[
+              { label: "کل توکن", value: data.totals.total_tokens },
+              { label: "نوبت گفت‌وگو", value: data.totals.turns },
+              { label: "درخواست به سرویس", value: data.totals.calls },
+              { label: "نوبت ناموفق", value: data.totals.failed_turns },
+            ].map((box) => (
+              <div key={box.label} className="rounded-xl bg-gray-50 px-3 py-2">
+                <div className="text-[11px] text-gray-500">{box.label}</div>
+                <div className="text-base font-bold text-gray-900">{faInt(box.value)}</div>
+              </div>
+            ))}
+          </div>
+          {data.totals.failed_turns > 0 && (
+            <p className="mt-2 text-[11px] text-amber-700">
+              نوبت‌های ناموفق هم هزینه دارند: درخواست‌هایی که پیش از خطا به سرویس
+              رفته‌اند در صورت‌حساب می‌آیند.
+            </p>
+          )}
+
+          <h4 className="mt-4 mb-1.5 text-xs font-bold text-gray-700">به تفکیک حساب</h4>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[26rem] text-right text-xs">
+              <thead>
+                <tr className="text-gray-500">
+                  <th className="py-1 font-medium">حساب</th>
+                  <th className="py-1 font-medium">نوبت</th>
+                  <th className="py-1 font-medium">درخواست</th>
+                  <th className="py-1 font-medium">توکن</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.by_user.map((row) => (
+                  <tr key={`${row.user_id ?? "gone"}-${row.username}`} className="border-t border-gray-100">
+                    <td className="py-1.5">
+                      <span dir="ltr" className="text-gray-800">{row.username}</span>
+                      {row.user_id === null && (
+                        <span className="mr-1.5 text-[10px] text-gray-400">(حساب حذف شده)</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-gray-600">{faInt(row.turns)}</td>
+                    <td className="py-1.5 text-gray-600">{faInt(row.calls)}</td>
+                    <td className="py-1.5 font-medium text-gray-900">{faInt(row.total_tokens)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <h4 className="mt-4 mb-1.5 text-xs font-bold text-gray-700">روزبه‌روز</h4>
+          <ul className="space-y-1">
+            {data.by_day.map((day) => {
+              const j = isoToJalali(day.date);
+              return (
+                <li key={day.date} className="flex items-center gap-2 text-[11px]">
+                  <span className="w-20 shrink-0 text-gray-500">
+                    {j ? toPersianDigits(`${j.jm}/${j.jd}`) : day.date}
+                  </span>
+                  <span className="h-1.5 flex-1 rounded-full bg-gray-100">
+                    <span
+                      className="block h-1.5 rounded-full bg-pulse-500"
+                      style={{ width: `${Math.round((day.total_tokens / busiestDay) * 100)}%` }}
+                    />
+                  </span>
+                  <span className="w-16 shrink-0 text-gray-600">{faInt(day.total_tokens)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 

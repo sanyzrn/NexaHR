@@ -29,7 +29,15 @@ from app.models.ai import AiConversation, AiMessage, AiPendingAction, AiSettings
 from app.models.enums import Capability
 from app.schemas.auth import CurrentUser
 from app.services.ai import context as context_service
-from app.services.ai.port import ChatMessage, ChatResponse, ToolCall, ToolProtocolUnsupported
+from app.services.ai import usage as usage_service
+from app.services.ai.port import (
+    AiRequestFailed,
+    AiUnavailable,
+    ChatMessage,
+    ChatResponse,
+    ToolCall,
+    ToolProtocolUnsupported,
+)
 from app.services.ai.prompt import build_system_prompt
 from app.services.ai.tools import base as tools_base
 from app.services.ai.tools.base import ToolContext, ToolSpec, execute_tool, json_content
@@ -57,6 +65,9 @@ class TurnResult:
     steps: list[StepTrace] = field(default_factory=list)
     pending: list[dict] = field(default_factory=list)
     usage: dict = field(default_factory=dict)
+    #: چند بار در این نوبت به سرویس رفتیم — هر پلهٔ حلقهٔ ابزار یک درخواستِ
+    #: مستقل و یک صورت‌حسابِ مستقل است.
+    calls: int = 0
 
     def meta_json(self) -> str:
         return json.dumps(
@@ -298,8 +309,29 @@ async def run_turn(
     fallback_mode = False
     steps: list[StepTrace] = []
     created_pending: list[dict] = []
-    usage: dict = {}
+    usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    # نامش عمداً `calls` نیست: چند خط پایین‌تر `calls` یعنی «خواسته‌های ابزارِ
+    # این پاسخ» و هم‌نامی، شمارنده را وسطِ حلقه با یک لیست جایگزین می‌کرد.
+    provider_calls = 0
     reply = ""
+
+    async def _send(adapter, **kwargs) -> ChatResponse:
+        """`adapter.send` با یک کارِ اضافه: مصرفِ تا این‌جا روی خطا گم نشود.
+
+        نوبتی که در پلهٔ چهارم می‌شکند، سه درخواستِ موفق پشتِ سرش دارد و هر
+        سه پول خرج کرده‌اند. بی این، آن سه از دفتر می‌افتادند و جمعِ ماه
+        هیچ‌وقت با صورت‌حساب نمی‌خواند — دقیقاً همان‌جایی که یک دفترِ هزینه
+        باید جواب بدهد.
+
+        `ToolProtocolUnsupported` عمداً این‌جا گرفته نمی‌شود: آن خطا نیست،
+        یک تغییرِ مسیر است و حلقه خودش با پروتکلِ جایگزین ادامه می‌دهد.
+        """
+        try:
+            return await adapter.send(messages, **kwargs)
+        except (AiUnavailable, AiRequestFailed) as exc:
+            exc.usage = dict(usage)
+            exc.calls = provider_calls
+            raise
 
     max_iterations = max(1, int(config.max_tool_iterations or 6))
 
@@ -330,13 +362,13 @@ async def run_turn(
         adapter = adapter_factory()
         try:
             if wire_specs:
-                response: ChatResponse = await adapter.send(
-                    messages,
+                response: ChatResponse = await _send(
+                    adapter,
                     tools=wire_specs,
                     tool_choice="none" if force_text else None,
                 )
             else:
-                response = await adapter.send(messages)
+                response = await _send(adapter)
         except ToolProtocolUnsupported:
             # سرویس شِمای ابزار را نمی‌شناسد؛ از نو با پروتکلِ JSON می‌رویم.
             fallback_mode = True
@@ -351,9 +383,17 @@ async def run_turn(
                 conversation_id=conversation.id,
             ))
             adapter = adapter_factory()
-            response = await adapter.send(messages)
+            response = await _send(adapter)
 
-        usage = response.usage or usage
+        # جمع می‌شود، نه جایگزین.
+        #
+        # `usage = response.usage or usage` مصرفِ *آخرین* پله را نگه می‌داشت و
+        # بقیه را دور می‌ریخت. در نوبتی که مدل چهار بار ابزار صدا می‌زند، آن
+        # یعنی گزارشِ هزینه تا یک‌پنجمِ واقعیت را نشان می‌داد — و دفتری که
+        # کم‌تر از واقعیت بگوید، از نبودنش بدتر است.
+        provider_calls += 1
+        for key, value in usage_service.normalize(response.usage).items():
+            usage[key] += value
 
         # منبعِ خواسته‌های ابزار: بومی = tool_calls؛ جایگزین = بلوک‌های JSON
         # که به همان شکلِ ToolCall نرمال می‌شوند تا حلقه یکسان بماند.
@@ -489,6 +529,7 @@ async def run_turn(
         steps=steps,
         pending=live_pending,
         usage=usage,
+        calls=provider_calls,
     )
 
 

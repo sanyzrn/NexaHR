@@ -209,3 +209,40 @@ class AiTestResult(BaseModel):
     ok: bool
     #: جملهٔ خودِ سرویس، نه ترجمهٔ ما.
     detail: str
+
+
+# ── دفترِ هزینه ────────────────────────────────────────────────────────────
+
+
+class AiUsageTotals(BaseModel):
+    """جمعِ پنجره. `turns` تعدادِ نوبت است و `calls` تعدادِ درخواست به سرویس —
+    و این دو یکی نیستند: یک نوبت با حلقهٔ ابزار چند درخواست می‌شود."""
+
+    turns: int = 0
+    calls: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    #: نوبت‌هایی که وسطشان سرویس خطا داد. هزینه‌اش داده شده و جوابش نیامده.
+    failed_turns: int = 0
+
+
+class AiUsageByUser(AiUsageTotals):
+    #: `None` یعنی حسابش بعداً حذف شده؛ `username` عکسِ همان لحظه است.
+    user_id: int | None = None
+    username: str
+
+
+class AiUsageByDay(AiUsageTotals):
+    #: روزِ *محلیِ* سازمان، نه UTC — وگرنه مصرفِ بین نیمه‌شب و ۳:۳۰ بامداد
+    #: زیرِ روزِ قبل جمع می‌شد.
+    date: str
+
+
+class AiUsageReport(BaseModel):
+    days: int
+    from_date: str
+    to_date: str
+    totals: AiUsageTotals
+    by_user: list[AiUsageByUser] = []
+    by_day: list[AiUsageByDay] = []
