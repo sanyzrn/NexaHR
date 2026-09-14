@@ -122,7 +122,19 @@ _ACCESS_COLUMN_BY_ROLE = {
 
 
 def _can_view_personnel(db: Session, personnel_id: int, current_user: CurrentUser) -> bool:
-    if current_user.role == UserRole.hr:
+    """آیا این کاربر *این یک* پرسنل را می‌بیند؟
+
+    شرطِ اول همان قاعدهٔ فهرست است و نه یک شرطِ کوچک‌ترِ خودش. تا پیش از این
+    `role == hr` بود، و پس از اینکه فهرستِ پرسنل `manage_personnel` را
+    سازمان‌گستر پذیرفت، همان تفاوت یک بن‌بستِ واقعی ساخت: دارندهٔ مجوز همه را
+    در فهرست می‌دید و با کلیک روی هر ردیف ۴۰۳ می‌گرفت — و همین‌طور روی رادار،
+    روند و «پروندهٔ در جریان» که سه‌تایی همین تابع را صدا می‌زنند.
+
+    دسترسیِ خواندن که از دسترسیِ نوشتن تنگ‌تر باشد همان اشتباهی است که
+    `sees_all_personnel` برای بستنش نوشته شد؛ این‌جا هم همان تابع خوانده
+    می‌شود، نه یک رونویسیِ دوم.
+    """
+    if sees_all_personnel(current_user.role, capabilities_of(db, current_user.id)):
         return True
     access = db.scalar(
         select(EvaluationAccess).where(EvaluationAccess.personnel_id == personnel_id)

@@ -61,6 +61,21 @@ def _visible_personnel_ids(
         )
     )
     ids = set(rows)
+    # و صندلیِ خودِ پرونده، نه فقط ردیفِ دسترسی.
+    #
+    # `_can_view_personnel` این شرطِ دوم را دارد و این‌جا نبود، پس دامنه
+    # *کم‌شمول* بود نه نشت‌دار: مسئولی که پرونده‌ای را نمره داده و زنجیره‌اش
+    # بعداً عوض شده، آن فرد را در `get_personnel` می‌دید و در
+    # `search_personnel` و متنِ زمینه نمی‌دید. دو جواب برای یک پرسش.
+    ids.update(
+        db.scalars(
+            select(EvaluationRecord.subject_personnel_id).where(
+                (EvaluationRecord.unit_supervisor_user_id == user.id)
+                | (EvaluationRecord.deputy_user_id == user.id)
+                | (EvaluationRecord.ceo_user_id == user.id)
+            )
+        )
+    )
     if user.personnel_id:
         ids.add(user.personnel_id)
     return ids
@@ -85,15 +100,14 @@ def _ensure_can_view_personnel(
     فرد. رونویسی هم شرطِ «صندلیِ پرونده» را نداشت، پس حتی برای زنجیره‌ای‌ها
     ناقص بود.
 
-    `manage_personnel` این‌جا هم پذیرفته می‌شود تا با `_visible_personnel_ids`
-    یکی بماند: مجوزی که فهرست را می‌دهد نباید جزئیاتِ همان ردیف را ببندد.
-    (روترها خودشان این‌جا ناهمگون‌اند — `export.xlsx` مجوز را می‌پذیرد و
-    `GET /personnel/{id}` نه — که ایرادِ جداگانه‌ای است و این‌جا بدترش
-    نمی‌کنیم.)
+    `manage_personnel` هم دیگر این‌جا جداگانه سنجیده نمی‌شود: خودِ
+    `_can_view_personnel` حالا `sees_all_personnel` را صدا می‌زند، پس ابزار و
+    روتر یک جواب می‌دهند و نه دو تقریبِ نزدیک. `caps` در امضا می‌ماند چون
+    فراخواننده‌ها دارندش و امضای مشترک را ساده نگه می‌دارد.
     """
     from app.api.routers.personnel import _can_view_personnel
 
-    if Capability.manage_personnel in caps or user.personnel_id == person.id:
+    if user.personnel_id == person.id:
         return
     if not _can_view_personnel(db, person.id, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "به این پرسنل دسترسی ندارید")
