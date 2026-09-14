@@ -115,6 +115,7 @@ function mockGets(modules: ModuleRow[] = [], usage: unknown = EMPTY_USAGE) {
           ],
           base_url: "", model: "", api_key_hint: "", api_key_configured: false,
           temperature: 30, max_tokens: 1200, timeout_seconds: 60, instructions: "x",
+          rules_text: "",
           restrict_to_platform: true, context_record_limit: 25,
           allow_write_actions: true, max_user_chars: 4000,
         },
@@ -207,6 +208,9 @@ describe("کارت دستیار هوشمند", () => {
     // نیمی از مشکلات راه‌اندازی یک `/v1` جامانده در آدرس بود؛ این‌جا هر دو با
     // یک کلیک می‌آیند و ذخیره باید همان‌ها را بفرستد.
     mockGets();
+    // `apiClient.put` بینِ تست‌های این فایل مشترک است و تست‌های بالاتر هم
+    // صدایش زده‌اند؛ بی این پاک‌سازی، `calls[0]` مالِ تستِ دیگری است.
+    vi.mocked(apiClient.put).mockClear();
     vi.mocked(apiClient.put).mockResolvedValue({ data: {} } as never);
     renderPage();
     await openTab("دستیار هوشمند");
@@ -414,5 +418,54 @@ describe("دفتر هزینهٔ دستیار", () => {
     await openTab("دستیار هوشمند");
 
     expect(await screen.findByText("در این بازه مصرفی ثبت نشده است.")).toBeInTheDocument();
+  });
+});
+
+
+describe("آیین‌نامهٔ سازمان", () => {
+  it("جدا از «دستورالعمل کلی» است و تا وقتی خالی است «اختیاری» می‌گوید", async () => {
+    // تفکیکِ این دو عمدی است: بالایی می‌گوید «چطور جواب بده» و این یکی
+    // «قاعدهٔ سازمان چیست». یکی‌کردنشان یعنی اولین مدیری که لحنِ پاسخ‌ها را
+    // عوض می‌کند، آیین‌نامه را هم پاک می‌کند.
+    mockGets();
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    expect(await screen.findByLabelText(/دستورالعمل کلی/)).toBeInTheDocument();
+    const rules = screen.getByLabelText(/آیین‌نامهٔ ارزیابی عملکرد سازمان/);
+    expect(rules).toHaveValue("");
+    expect(screen.getByText("اختیاری")).toBeInTheDocument();
+  });
+
+  it("فقط همین فیلد را می‌فرستد", async () => {
+    mockGets();
+    vi.mocked(apiClient.put).mockResolvedValue({ data: {} } as never);
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    const rules = await screen.findByLabelText(/آیین‌نامهٔ ارزیابی عملکرد سازمان/);
+    await userEvent.type(rules, "مادهٔ ۷");
+    await userEvent.click(screen.getByRole("button", { name: "ذخیرهٔ تنظیمات دستیار" }));
+
+    await waitFor(() => expect(apiClient.put).toHaveBeenCalled());
+    // آخرین فراخوانی و نه اولی: کارتِ دستیار هنگام باز شدن، انتخابِ سرویس
+    // را خودش یک بار ذخیره می‌کند و آن ربطی به این تست ندارد.
+    const calls = vi.mocked(apiClient.put).mock.calls;
+    const [url, body] = calls.at(-1)!;
+    expect(url).toBe("/ai/settings");
+    expect(body).toEqual({ rules_text: "مادهٔ ۷" });
+  });
+
+  it("سقفِ سرور را روی خودِ ورودی می‌گذارد", async () => {
+    // فرم باید همان قاعده‌ای را نشان بدهد که سرور اعمال می‌کند، نه اینکه
+    // کاربر با زدنِ «ذخیره» و گرفتنِ ۴۲۲ کشفش کند.
+    mockGets();
+    renderPage();
+    await openTab("دستیار هوشمند");
+
+    expect(await screen.findByLabelText(/آیین‌نامهٔ ارزیابی عملکرد سازمان/)).toHaveAttribute(
+      "maxlength",
+      "20000",
+    );
   });
 });

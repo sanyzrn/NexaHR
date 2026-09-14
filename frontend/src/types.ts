@@ -981,6 +981,9 @@ export interface AiSettings {
   max_tokens: number;
   timeout_seconds: number;
   instructions: string;
+  /** آیین‌نامهٔ ارزیابی عملکردِ سازمان. خالی یعنی هنوز نوشته نشده و بخشش
+   *  اصلاً به مدل فرستاده نمی‌شود. */
+  rules_text: string;
   restrict_to_platform: boolean;
   context_record_limit: number;
   allow_write_actions: boolean;

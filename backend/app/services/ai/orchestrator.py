@@ -183,6 +183,7 @@ def _system_prompt(
         fallback_protocol=fallback_protocol,
         attachments_note=_attachments_note(db, conversation_id),
         conversation_summary=conversation_summary,
+        rules_text=config.rules_text or "",
     )
 
 

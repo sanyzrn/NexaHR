@@ -670,6 +670,7 @@ def _to_settings_read(db: Session, row: AiSettings) -> AiSettingsRead:
         max_tokens=row.max_tokens,
         timeout_seconds=row.timeout_seconds,
         instructions=row.instructions,
+        rules_text=row.rules_text,
         restrict_to_platform=row.restrict_to_platform,
         context_record_limit=row.context_record_limit,
         allow_write_actions=row.allow_write_actions,

@@ -48,6 +48,7 @@ class AiSettingsRead(BaseModel):
     max_tokens: int
     timeout_seconds: int
     instructions: str
+    rules_text: str = ""
     restrict_to_platform: bool
     context_record_limit: int
     allow_write_actions: bool
@@ -73,6 +74,11 @@ class AiSettingsUpdate(BaseModel):
     max_tokens: int | None = Field(default=None, ge=100, le=32000)
     timeout_seconds: int | None = Field(default=None, ge=5, le=300)
     instructions: str | None = None
+    #: سقفِ نویسه عمدی است و نه دلبخواه: این متن در *هر پله* از حلقهٔ گفت‌وگو
+    #: فرستاده می‌شود. بیست هزار نویسه یعنی حدودِ چهل کیلوبایت در هر درخواست
+    #: — و آن‌وقت همان مسئله‌ای می‌شود که RAG برای حلش هست. اگر آیین‌نامه از
+    #: این بلندتر شد، یعنی وقتِ تجدیدنظر در خودِ روش رسیده.
+    rules_text: str | None = Field(default=None, max_length=20000)
     restrict_to_platform: bool | None = None
     context_record_limit: int | None = Field(default=None, ge=0, le=200)
     allow_write_actions: bool | None = None
