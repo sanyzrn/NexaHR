@@ -13,8 +13,16 @@ import json
 from app.services.ai.port import AiRequestFailed, ChatResponse, ToolCall, ToolProtocolUnsupported
 
 
-def tool_call(call_id: str, name: str, arguments: dict) -> ToolCall:
-    return ToolCall(id=call_id, name=name, arguments_json=json.dumps(arguments, ensure_ascii=False))
+def tool_call(
+    call_id: str, name: str, arguments: dict, *, extra: dict | None = None
+) -> ToolCall:
+    """`extra` همان فیلدهای غیرِ استانداردِ سرویس است (مثلِ امضای فکرِ Gemini)."""
+    return ToolCall(
+        id=call_id,
+        name=name,
+        arguments_json=json.dumps(arguments, ensure_ascii=False),
+        provider_extra=dict(extra or {}),
+    )
 
 
 def response(

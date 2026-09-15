@@ -114,7 +114,22 @@ export function Copilot() {
               aria-modal="true"
               aria-label="همکار هوشمند"
               tabIndex={-1}
-              className="fixed bottom-4 left-4 z-50 flex h-[min(680px,calc(100vh-2rem))] w-[min(560px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-float"
+              /* بالای سرِ نشان می‌ایستد و نه رویش.
+                 پیش از این هر دو `bottom-4 left-4` بودند، یعنی پنجره دقیقاً
+                 روی شخصیت می‌افتاد و تا وقتی گفت‌وگو باز بود دیده نمی‌شد.
+
+                 `--copilot-lift` = ارتفاعِ نشان + فاصله‌اش از کف + ۱۲ پیکسل
+                 نفس، و از همان کلاس‌های خودِ دکمه چند خط بالاتر می‌آید:
+                   پایه   ۱۲ + ۵۶ + ۱۲ = ۸۰
+                   sm     ۱۲ + ۶۴ + ۱۲ = ۸۸
+                   lg     ۴۰ + ۶۴ + ۱۲ = ۱۱۶
+                   xl     ۴۸ + ۶۴ + ۱۲ = ۱۲۴
+                 یک متغیر و نه دو عدد: `bottom` و `height` باید *با هم* عوض
+                 شوند، وگرنه پنجره از بالای نما بیرون می‌زند.
+
+                 لبهٔ چپ هم با خودِ نشان تراز است، پس ستونِ عمودیِ گوشه یک
+                 خط دارد: نشان، پنجره، پاصفحه. */
+              className="fixed left-3 z-50 flex flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-float [--copilot-lift:80px] sm:[--copilot-lift:88px] lg:left-10 lg:[--copilot-lift:116px] xl:left-12 xl:[--copilot-lift:124px] bottom-[var(--copilot-lift)] h-[min(680px,calc(100dvh-var(--copilot-lift)-1rem))] w-[min(560px,calc(100vw-1.5rem))]"
               initial={{ opacity: 0, y: 24, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 16, scale: 0.98 }}

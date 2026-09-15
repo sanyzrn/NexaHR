@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
@@ -149,7 +149,14 @@ def _history_messages(
     exclude_id: int | None = None,
     limit: int = HISTORY_WINDOW,
 ) -> list[ChatMessage]:
-    stmt = select(AiMessage).where(AiMessage.conversation_id == conversation_id)
+    # فیلترِ نقش *داخلِ* SQL و پیش از LIMIT است، نه روی نتیجه. وقتی بیرون
+    # بود، هر ردیفِ نقشِ دیگری یکی از دوازده جای پنجره را می‌خورد و بعد دور
+    # ریخته می‌شد — یعنی پنجره بی‌صدا کوچک‌تر از عددش کار می‌کرد و قدیمی‌ترین
+    # پیامِ واقعی بی هیچ نشانه‌ای می‌افتاد.
+    stmt = select(AiMessage).where(
+        AiMessage.conversation_id == conversation_id,
+        AiMessage.role.in_(("user", "assistant")),
+    )
     if exclude_id is not None:
         stmt = stmt.where(AiMessage.id != exclude_id)
     rows = list(
@@ -157,7 +164,7 @@ def _history_messages(
             stmt.order_by(AiMessage.id.desc()).limit(limit)
         )
     )[::-1]
-    return [ChatMessage(role=row.role, content=row.content) for row in rows if row.role in ("user", "assistant")]
+    return [ChatMessage(role=row.role, content=row.content) for row in rows]
 
 
 def _system_prompt(
@@ -433,7 +440,15 @@ async def run_turn(
         # منبعِ خواسته‌های ابزار: بومی = tool_calls؛ جایگزین = بلوک‌های JSON
         # که به همان شکلِ ToolCall نرمال می‌شوند تا حلقه یکسان بماند.
         if not fallback_mode:
-            calls = list(response.tool_calls)
+            # شناسه این‌جا تضمین می‌شود و نه چند خط پایین‌تر: پیامِ `assistant`
+            # و پیامِ `tool` با همین رشته به هم جفت می‌شوند، و تا امروز
+            # نرمال‌سازی *بعد* از ساختنِ پیامِ assistant انجام می‌شد. یعنی
+            # سرویسی که `id` نمی‌فرستد، یک جفتِ ناهم‌خوان می‌ساخت («» در
+            # یکی، «call_0» در دیگری) و سرویس کلِ نوبت را رد می‌کرد.
+            calls = [
+                call if call.id else replace(call, id=f"call_{index}")
+                for index, call in enumerate(response.tool_calls)
+            ]
         else:
             calls = [
                 ToolCall(
@@ -482,10 +497,10 @@ async def run_turn(
                 ChatMessage(
                     "assistant",
                     response.content or "",
-                    tool_calls=tuple(
-                        ToolCall(id=c.id, name=c.name, arguments_json=c.arguments_json)
-                        for c in calls
-                    ),
+                    # عیناً همان شیءها و نه رونوشتِ سه‌فیلدی: رونوشت،
+                    # `provider_extra` را جا می‌گذاشت و امضای فکرِ Gemini
+                    # دقیقاً همان‌جا گم می‌شد که باید برمی‌گشت.
+                    tool_calls=tuple(calls),
                 )
             )
 
@@ -501,8 +516,6 @@ async def run_turn(
                 )
                 steps.append(StepTrace(tool=call.name, status="error", summary="ابزار شناخته نشد"))
                 continue
-            if not fallback_mode and not call.id:
-                call = ToolCall(id="call_0", name=call.name, arguments_json=call.arguments_json)
             try:
                 arguments = _parse_arguments(call.arguments_json)
             except BadToolArguments as err:

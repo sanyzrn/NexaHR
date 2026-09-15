@@ -294,20 +294,23 @@ export function CopilotPanel({
     try {
       const form = new FormData();
       form.append("file", file);
-      const { data } = await apiClient.post<AiUploadInfo>(
+      await apiClient.post<AiUploadInfo>(
         `/ai/conversations/${conversationIdValue}/attachments`,
         form,
       );
-      setUploads((prev) => [...prev, data]);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          role: "assistant",
-          content: `فایل «${data.filename}» را دیدم.` + (data.kind === "personnel_import" ? ` ${data.total_rows} ردیف دارد؛ ${data.valid_count} سالم و ${data.invalid_count} خطادار. بگویید بررسی‌اش کنم تا خطاها را ردیف‌به‌ردیف بگویم.` : ""),
-          actions: [],
-        },
-      ]);
+      // پیام و فهرستِ پیوست‌ها هر دو از سرور خوانده می‌شوند و این‌جا ساخته
+      // نمی‌شوند.
+      //
+      // پیش از این، جملهٔ «فایل … را دیدم» را همین‌جا می‌ساختیم و با
+      // `setMessages` به فهرست می‌چسباندیم. متنی به‌نامِ دستیار روی صفحه بود
+      // که هیچ‌وقت ذخیره نمی‌شد و مدل هیچ ردی از آن نداشت — پس با رفرش
+      // می‌پرید، و بدتر: کاربر به آن جواب می‌داد («بررسی کن») و دستیار
+      // می‌پرسید «کدام فایل؟»، چون آن دعوت را نکرده بود.
+      //
+      // هزینه‌اش یک درخواستِ اضافه است و دستاوردش این است که آنچه کاربر
+      // می‌خواند دقیقاً همان چیزی باشد که مدل می‌خواند.
+      await loadConversation(conversationIdValue);
+      void queryClient.invalidateQueries({ queryKey: ["ai", "conversations"] });
     } catch (err) {
       setFailure(extractErrorMessage(err));
     } finally {

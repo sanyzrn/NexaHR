@@ -10,6 +10,7 @@
 """
 import time
 from io import BytesIO
+import os
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -62,7 +63,10 @@ def main() -> None:
     SHOTS.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+        # مسیرِ مرورگر از محیط خوانده می‌شود تا در کانتینرهایی که مرورگرِ
+        # از پیش نصب‌شده دارند، `playwright install` لازم نباشد.
+        executable = os.environ.get("PW_CHROMIUM_PATH") or None
+        browser = pw.chromium.launch(headless=True, executable_path=executable)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
 
         # ── ورود ─────────────────────────────────────────────────────────

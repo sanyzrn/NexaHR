@@ -159,3 +159,81 @@ describe("کشوی همکار (N18)", () => {
     expect(document.body.style.overflow).not.toBe("hidden");
   });
 });
+
+describe("بارگذاری فایل، بی پیامِ ساختگی", () => {
+  beforeEach(() => {
+    get.mockImplementation(async (url: string) =>
+      url === "/ai/status" ? { data: status } : { data: [] },
+    );
+  });
+
+  it("پیامِ «فایل را دیدم» را خودش نمی‌سازد؛ از سرور می‌خواند", async () => {
+    // خرابی‌ای که کاربر «فراموشی» نامیدش: این جمله را فرانت‌اند می‌ساخت و
+    // فقط در حافظهٔ مرورگر نگه می‌داشت. متنی به‌نامِ دستیار روی صفحه بود که
+    // نه ذخیره می‌شد و نه مدل خبر داشت — پس جوابِ کاربر به آن جمله
+    // («بررسی کن») به گفت‌وگویی می‌رسید که چنین دعوتی در آن نبود.
+    post.mockResolvedValue({ data: { id: 3, filename: "p.xlsx", kind: "personnel_import" } });
+    get.mockImplementation(async (url: string) => {
+      if (url === "/ai/status") return { data: status };
+      if (url === "/ai/conversations/9")
+        return {
+          data: [{ id: 51, role: "assistant", content: "فایل «p.xlsx» را دیدم.", actions: [] }],
+        };
+      return { data: [] };
+    });
+
+    wrap(<CopilotPanel status={status} variant="page" />);
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    // گفت‌وگو هنوز ساخته نشده، پس اول یک شناسه می‌گیرد.
+    post.mockResolvedValueOnce({ data: { id: 9, title: "" } });
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "p.xlsx")] },
+    });
+
+    // متنی که دیده می‌شود همان است که سرور برگردانده.
+    await waitFor(() => expect(get).toHaveBeenCalledWith("/ai/conversations/9"));
+    await waitFor(() =>
+      expect(screen.getByText("فایل «p.xlsx» را دیدم.")).toBeInTheDocument(),
+    );
+  });
+});
+
+describe("جای پنجرهٔ شناور", () => {
+  beforeEach(() => {
+    get.mockImplementation(async (url: string) =>
+      url === "/ai/status" ? { data: status } : { data: [] },
+    );
+  });
+
+  it("بالای سرِ نشان می‌ایستد، نه رویش", async () => {
+    // پیش از این هر دو `bottom-4 left-4` بودند: پنجره دقیقاً روی شخصیت
+    // می‌افتاد و تا وقتی گفت‌وگو باز بود، نشان دیده نمی‌شد.
+    wrap(<Copilot />);
+    fireEvent.click(await screen.findByRole("button", { name: "همکار هوشمند" }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(dialog.className).toMatch(/bottom-\[var\(--copilot-lift\)\]/);
+    expect(dialog.className).not.toMatch(/\bbottom-4\b/);
+  });
+
+  it("بلندیِ پنجره با همان بالابر حساب می‌شود", async () => {
+    // دو عددِ جدا یعنی روزی یکی عوض شود و پنجره از بالای نما بیرون بزند.
+    wrap(<Copilot />);
+    fireEvent.click(await screen.findByRole("button", { name: "همکار هوشمند" }));
+    const dialog = await screen.findByRole("dialog");
+
+    expect(dialog.className).toMatch(/h-\[min\(680px,calc\(100dvh-var\(--copilot-lift\)/);
+  });
+
+  it("لبهٔ چپش با خودِ نشان تراز است", async () => {
+    wrap(<Copilot />);
+    const opener = await screen.findByRole("button", { name: "همکار هوشمند" });
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole("dialog");
+
+    for (const edge of ["left-3", "lg:left-10", "xl:left-12"]) {
+      expect(opener.className, `نشان: ${edge}`).toContain(edge);
+      expect(dialog.className, `پنجره: ${edge}`).toContain(edge);
+    }
+  });
+});

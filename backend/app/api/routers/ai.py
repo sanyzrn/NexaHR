@@ -410,9 +410,9 @@ async def upload_attachment(
     if not content:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "فایل خالی است")
 
-    from app.services.ai.tools.uploads import stage_upload
+    from app.services.ai.tools.uploads import stage_upload, staged_notice
 
-    upload, _summary = stage_upload(
+    upload, summary = stage_upload(
         db,
         user,
         convo.id,
@@ -420,6 +420,27 @@ async def upload_attachment(
         mime_type=file.content_type or "",
         content=content,
     )
+    # پیامِ «فایل را دیدم» یک پیامِ *واقعی* است و در گفت‌وگو می‌ماند.
+    #
+    # پیش از این، رابط آن جمله را خودش می‌ساخت و فقط در حافظهٔ مرورگر نگه
+    # می‌داشت. پس کاربر متنی به‌نامِ دستیار می‌دید که نه ذخیره شده بود و نه
+    # مدل خبر داشت؛ جوابِ کاربر به آن جمله («بررسی کن») به گفت‌وگویی می‌رسید
+    # که چنین دعوتی در آن نبود — و دستیار دوباره می‌پرسید «کدام فایل؟».
+    #
+    # حالا همان جمله در تاریخچه می‌نشیند، پس هم با رفرش نمی‌پرد و هم در
+    # پنجرهٔ تاریخچهٔ نوبتِ بعد به مدل می‌رسد.
+    db.add(
+        AiMessage(
+            conversation_id=convo.id,
+            role="assistant",
+            content=staged_notice(upload, summary),
+        )
+    )
+    # گفت‌وگویی که با بارگذاری شروع شده هنوز عنوان ندارد؛ نامِ فایل بهترین
+    # چیزی است که در آن لحظه می‌شود در ستونِ تاریخچه نشان داد.
+    if not (convo.title or "").strip():
+        convo.title = upload.filename[:60]
+    convo.updated_at = datetime.now(UTC)
     log_event(
         db,
         actor_user_id=user.id,
@@ -490,7 +511,8 @@ async def chat(
         if payload.conversation_id
         else AiConversation(user_id=user.id, title=text[:60])
     )
-    if convo.id is None:
+    conversation_was_new = convo.id is None
+    if conversation_was_new:
         db.add(convo)
         db.flush()
 
@@ -516,6 +538,9 @@ async def chat(
         # نوبتی که شکست، الزاماً رایگان نبوده: تا پیش از خطا ممکن است چند
         # درخواستِ موفق به سرویس رفته باشد. `run_turn` مصرفِ تا آن لحظه را
         # روی خودِ استثنا می‌گذارد تا این‌جا از دست نرود.
+        #
+        # *اول* دفتر، بعد پاک‌کردن: ردیفِ دفتر به گفت‌وگو ارجاع دارد و اگر
+        # گفت‌وگو زودتر برود، درج با نقضِ کلیدِ خارجی می‌شکند.
         usage_service.record(
             db,
             user=user,
@@ -526,6 +551,29 @@ async def chat(
             calls=getattr(err, "calls", 0) or 1,
             failed=True,
         )
+        db.flush()
+
+        # نوبتی که شکست، هیچ ردی در گفت‌وگو نمی‌گذارد — نه پرسشِ کاربر.
+        #
+        # پیش از این پیامِ کاربر چند خط بالاتر flush شده بود و `db.commit()`
+        # پایینِ همین بلوک ماندگارش می‌کرد. نتیجه یک پرسشِ بی‌جواب در تاریخچه
+        # بود، و چون کاربر طبیعتاً دوباره می‌فرستاد، دو نسخه از یک پرسش پشتِ
+        # سرِ هم می‌نشست. بدتر از زشتی‌اش: همان‌ها پنجرهٔ دوازده‌پیامیِ تاریخچه
+        # را پر می‌کردند و پیام‌های *واقعی* را بیرون می‌راندند — یعنی هرچه
+        # کاربر بیشتر تلاش می‌کرد، دستیار کمتر می‌دانست.
+        #
+        # `rollback` نمی‌شود: دفترِ هزینه باید بماند و خودِ `run_turn` هم
+        # ممکن است پله‌های سالمی commit کرده باشد.
+        db.delete(user_message)
+        db.flush()
+        # و گفت‌وگویی که *همین نوبت* ساخته و خالی مانده، اصلاً نبوده. وگرنه
+        # هر خطای سرویس یک «گفت‌وگوی بی‌نامِ» خالی در ستونِ تاریخچه می‌گذاشت.
+        # ارجاعِ دفتر به آن با `ON DELETE SET NULL` باز می‌شود؛ هزینه می‌ماند.
+        if conversation_was_new and not db.scalar(
+            select(func.count()).select_from(AiMessage).where(AiMessage.conversation_id == convo.id)
+        ):
+            db.delete(convo)
+            db.flush()
         db.commit()
         detail = getattr(err, "detail", str(err))
         # متنِ خودِ سرویس، بی‌کم‌وکاست: تفاوت ۴۰۱ با «مدل پیدا نشد» چهار رفعِ
