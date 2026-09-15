@@ -43,7 +43,12 @@ vi.mock("../auth/PermissionsContext", async (importOriginal) => {
 vi.mock("./NotificationBell", () => ({
   NotificationBell: () => <div data-testid="bell">اعلان‌ها</div>,
 }));
-vi.mock("./copilot/Copilot", () => ({ Copilot: () => <div data-testid="copilot">دستیار</div> }));
+vi.mock("./copilot/Copilot", () => ({
+  Copilot: () => <div data-testid="copilot">دستیار</div>,
+  // پاصفحه هم از همین ماژول می‌خواند (تا بداند کنارش دکمه‌ای می‌ایستد یا
+  // نه)، پس ماکِ ناقص کلِ پوسته را می‌شکند.
+  useAiStatus: () => ({ data: undefined }),
+}));
 vi.mock("./copilot/CopilotSession", () => ({
   CopilotSessionProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

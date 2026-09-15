@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useAuth } from "../auth/AuthContext";
 import { usePermissions } from "../auth/PermissionsContext";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { Copilot } from "./copilot/Copilot";
+import { Copilot, useAiStatus } from "./copilot/Copilot";
 import { CopilotSessionProvider } from "./copilot/CopilotSession";
 import { Footer } from "./Footer";
 import { NotificationBell } from "./NotificationBell";
@@ -33,6 +33,10 @@ export function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  // همان کوئریِ خودِ `Copilot` (کلیدِ یکسان، بی درخواستِ اضافه): پاصفحه باید
+  // بداند کنارش دکمه‌ای می‌ایستد یا نه، تا برای چیزی که وجود ندارد جا
+  // خالی نگذارد.
+  const { data: aiStatus } = useAiStatus();
 
   const mainRef = useRef<HTMLElement>(null);
 
@@ -242,7 +246,7 @@ export function Layout() {
           </ErrorBoundary>
         </main>
 
-        <Footer />
+        <Footer roomForCopilot={Boolean(aiStatus?.available)} />
       </div>
 
       {/* دستیار هوشمند — خودش تصمیم می‌گیرد دیده شود یا نه (بر پایهٔ /ai/status).
