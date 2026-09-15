@@ -15,6 +15,22 @@ import { Mascot } from "./Mascot";
  * پرسیده می‌شود؛ دکمه‌ای که تنها پاسخش «در دسترس نیست» باشد، از نبودنش بدتر است.
  * حالتِ «فعال ولی بدون دسترسیِ تغییر» هم دکمه دارد — فقط شکلش فرق می‌کند.
  */
+/** وضعیتِ همکار — یک کوئری، دو مصرف‌کننده.
+ *
+ *  `Layout` هم باید بداند همکار دیده می‌شود یا نه (تا برای دکمه‌اش در
+ *  پاصفحه جا باز کند). کلیدِ کوئری یکی است، پس React Query همان پاسخ را
+ *  می‌دهد و درخواستِ دومی به سرور نمی‌رود. */
+export function useAiStatus() {
+  return useQuery({
+    queryKey: ["ai", "status"],
+    queryFn: async () => (await apiClient.get<AiStatus>("/ai/status")).data,
+    // فعال‌سازی دستیار از پنل مدیریت یا تب دیگری باید بدون تأخیر دیده شود.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function Copilot() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
@@ -35,14 +51,7 @@ export function Copilot() {
     lockScroll: false,
   });
 
-  const { data: status } = useQuery({
-    queryKey: ["ai", "status"],
-    queryFn: async () => (await apiClient.get<AiStatus>("/ai/status")).data,
-    // فعال‌سازی دستیار از پنل مدیریت یا تب دیگری باید بدون تأخیر دیده شود.
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-  });
+  const { data: status } = useAiStatus();
 
   if (!status?.available) return null;
 
@@ -59,29 +68,31 @@ export function Copilot() {
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.3, duration: 0.3 }}
-        /* روی لبهٔ بالای پاصفحه می‌ایستد، دقیقاً بالای امضای «Developed by…».
-           عددها اندازه‌گیری‌شده‌اند، نه حدسی:
+        /* کنارِ پاصفحه می‌ایستد، نه شناور در فضا.
+           مختصات از روی *همان* padding‌هایی می‌آید که پوستهٔ برنامه دارد
+           (`Layout`: `px-3 pb-3` / `lg:p-10` / `xl:p-12`)، پس لبهٔ چپ و
+           کفِ دکمه دقیقاً روی لبهٔ چپ و کفِ قابِ پاصفحه می‌افتند — در هر
+           عرضی، بی هیچ عددِ جادویی.
 
-             bottom = فاصلهٔ پاصفحه از کفِ پنجره (pb-3 → ۱۲، lg:pb-4 → ۱۶)
-                      + بلندیِ پاصفحه (۵۰، در همهٔ عرض‌ها) − ۴
-             ۴ همان فضای خالیِ زیرِ پاست در viewBox ۶۴‌تایی، وگرنه پا کمی
-             بالاتر از سطح می‌ایستد و شخصیت شناور به‌نظر می‌رسد.
+           نسخهٔ قبلی سه عددِ دست‌چین داشت (`bottom-[58px] left-[73px]` و
+           دو حالتِ دیگر) که از «مرکزِ افقیِ امضای توسعه‌دهنده» حساب شده
+           بودند. هر تغییری در متنِ آن امضا یا در padding پوسته، بی‌صدا
+           از تراز خارجشان می‌کرد.
 
-             left   = مرکزِ افقیِ همان امضا − نصفِ دکمه (۳۲)
-             و مرکزِ امضا با padding افقیِ پوسته و پاصفحه جابه‌جا می‌شود:
-             ۱۲+۱۶ در پایه، ۱۲+۲۴ از sm، ۱۶+۲۴ از lg.
-
-           پاصفحه در هیچ عرضی دو خطی نمی‌شود (تا ۳۹۰ پیکسل هم سنجیده شد)، پس
-           بلندی‌اش ثابت است و همین سه حالت کافی است. */
-        className="mascot-host group fixed bottom-[58px] left-[73px] z-40 h-16 w-16 transition-transform hover:scale-105 focus-visible:outline-none sm:left-[81px] lg:bottom-[62px] lg:left-[85px]"
+           جای خالی‌اش را خودِ پاصفحه می‌دهد (`Footer roomForCopilot`)، پس
+           این دکمه روی چیزی نمی‌افتد و لازم نیست نیمه‌شفاف باشد. */
+        className="mascot-host group fixed bottom-3 left-3 z-40 h-14 w-14 focus-visible:outline-none sm:h-16 sm:w-16 lg:bottom-10 lg:left-10 xl:bottom-12 xl:left-12"
       >
-        <Mascot className="h-16 w-16 drop-shadow-[0_5px_12px_rgba(0,0,0,0.22)]" />
+        {/* `track` فقط این‌جا روشن است: آواتارهای داخلِ گفت‌وگو هم همین
+            شخصیت‌اند و اگر همه‌شان به نشانگر گوش بدهند، یک حرکتِ ماوس
+            ده‌ها محاسبهٔ مستقل می‌شود. */}
+        <Mascot track className="h-full w-full drop-shadow-[0_6px_14px_rgba(168,18,16,0.32)]" />
         {/* نشانِ «اجازهٔ پیشنهادِ تغییر دارد».
-            گوشهٔ پایین‌ـ‌ابتدا، چون تنها گوشه‌ای است که شخصیت خالی گذاشته؛ بالای
-            سر روی صورت می‌افتاد و در ۶۴ پیکسل، با چشم‌ها رقابت می‌کرد. */}
+            گوشهٔ پایین‌ـ‌ابتدا: تنها گوشه‌ای که پشم خالی گذاشته. بالای سر
+            روی کاکل می‌افتد و کنارِ صورت با چشم‌ها رقابت می‌کند. */}
         {status.allow_write_actions && (
           <span
-            className="absolute bottom-1.5 end-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-green-500"
+            className="absolute bottom-0.5 end-0 h-2.5 w-2.5 rounded-full border-2 border-white bg-green-500 shadow-sm"
             title="اجازهٔ پیشنهادِ تغییر دارد"
           />
         )}

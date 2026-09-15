@@ -82,68 +82,106 @@
 /* ── نشانِ همکار هوشمند (components/copilot/Mascot.tsx) ──────────────────
    انیمیشنِ بی‌وقفه، پس CSS خالص و نه Framer Motion: نباید در هر رندرِ React
    دوباره ساخته شود. قاعدهٔ `prefers-reduced-motion` پایینِ همین فایل همه‌شان را
-   با هم خاموش می‌کند.
+   با هم خاموش می‌کند — و نگاهِ دنبالِ نشانگر خودش را، در JS.
 
-   هر سه حرکت عمداً *کند و کم‌دامنه*اند. چیزی که همیشه گوشهٔ صفحه است و تند
-   تکان می‌خورد، از چند دقیقه بعد آزاردهنده می‌شود؛ این باید در حاشیهٔ دید
-   «زنده» به‌نظر برسد، نه اینکه توجه را بدزدد. */
+   چرخه‌ها عمداً *کند و کم‌دامنه*اند. چیزی که همیشه گوشهٔ صفحه است و تند تکان
+   می‌خورد، از چند دقیقه بعد آزاردهنده می‌شود؛ این باید در حاشیهٔ دید «زنده»
+   به‌نظر برسد، نه اینکه توجه را بدزدد. آن‌چه *پاسخ* است — نگاه، پرش، خنده —
+   اجازه دارد تندتر باشد، چون کاربر خودش شروعش کرده.
 
-@keyframes mascot-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1.5px); }
+   همهٔ `transform`ها روی گره‌های SVG هستند، پس هرکدام `transform-box: fill-box`
+   می‌خواهند: بی آن، مبدأ مختصات گوشهٔ بالا-چپِ کلِ SVG است و مقیاس، شکل را به
+   گوشه پرت می‌کند به‌جای اینکه سرِ جایش کوچک کند. */
+
+/* نفس: کشیده‌شدنِ عمودیِ ریز. یک موجودِ پشمالو بالا و پایین *نمی‌پرد*؛
+   حجمش کم و زیاد می‌شود. */
+@keyframes mascot-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(0.988, 1.014); }
 }
 
-/* پلک: ۹۵٪ زمان باز. یک پلکِ منظمِ ریتمیک مصنوعی به‌نظر می‌رسد، پس دو پلک با
+/* پلک: ۹۵٪ زمان باز. پلکِ منظمِ ریتمیک مصنوعی به‌نظر می‌رسد، پس دو پلک با
    فاصلهٔ نامساوی در یک دورهٔ بلند می‌زند. */
 @keyframes mascot-blink {
   0%, 46%, 52%, 88%, 93%, 100% { transform: scaleY(1); }
-  49%, 90.5% { transform: scaleY(0.15); }
+  49%, 90.5% { transform: scaleY(0.08); }
 }
 
-@keyframes mascot-spark {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.55; transform: scale(0.82); }
+/* کاکل: تنها عضوِ جهت‌دار، پس تنها جایی که «باد» دیده می‌شود. دورهٔ ناهم‌ساز
+   با نفس (۴٫۱ در برابر ۳٫۲) تا دو حرکت روی هم قفل نشوند و الگویشان تکراری
+   به‌نظر نرسد. */
+@keyframes mascot-tuft {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(5deg); }
 }
 
-.mascot .mascot-body,
-.mascot .mascot-antenna {
-  animation: mascot-float 3.4s ease-in-out infinite;
-}
-
-/* سر کمی دیرتر از تنه حرکت می‌کند — همان تأخیرِ ریزی که حرکت را از «کلِ تصویر
-   بالا و پایین می‌رود» به «نفس می‌کشد» تبدیل می‌کند. */
-.mascot .mascot-head {
-  animation: mascot-float 3.4s ease-in-out infinite;
-  animation-delay: -0.35s;
+.mascot .mascot-body {
+  animation: mascot-breathe 3.2s ease-in-out infinite;
+  transform-origin: center 88%;
+  transform-box: fill-box;
 }
 
 .mascot .mascot-eyes {
   animation: mascot-blink 7s ease-in-out infinite;
-  /* بدونِ این، مقیاسِ پلک از گوشهٔ بالا-چپِ SVG اعمال می‌شود و چشم‌ها
-     به‌جای بسته‌شدن، به گوشه پرت می‌شوند. */
-  transform-origin: center 60%;
+  transform-origin: center 52%;
   transform-box: fill-box;
 }
 
-.mascot .mascot-spark {
-  animation: mascot-spark 2.6s ease-in-out infinite;
-  transform-origin: center;
+.mascot .mascot-tuft {
+  animation: mascot-tuft 4.1s ease-in-out infinite;
+  transform-origin: center 95%;
   transform-box: fill-box;
 }
 
-/* دستِ تکان‌دادن، فقط وقتی نشانگر روی دکمه است: سلامِ کوتاه در پاسخ به
-   نزدیک‌شدنِ کاربر، نه یک حرکتِ همیشگیِ دیگر. */
-@keyframes mascot-wave {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(-18deg); }
-  75% { transform: rotate(10deg); }
+/* حالتِ عادی: لبخندِ بسته. خندهٔ باز پنهان است و با نزدیک‌شدنِ نشانگر
+   جایش را می‌گیرد. */
+.mascot .mascot-grin {
+  opacity: 0;
 }
 
-.mascot-host:hover .mascot .mascot-arm,
-.mascot-host:focus-visible .mascot .mascot-arm {
-  animation: mascot-wave 0.7s ease-in-out 2;
-  transform-origin: center 15%;
-  transform-box: fill-box;
+/* ── پاسخ به کاربر ──────────────────────────────────────────────────────
+   سه چیز با هم عوض می‌شوند و همین هم‌زمانی است که «ذوق‌زده شد» را می‌سازد:
+   می‌پرد، می‌خندد، و چشم‌هایش گرد می‌شود. تک‌تکشان ریزند. */
+
+@keyframes mascot-hop {
+  0% { transform: translateY(0) scale(1, 1); }
+  30% { transform: translateY(-7%) scale(0.97, 1.05); }
+  60% { transform: translateY(0) scale(1.05, 0.95); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+.mascot-host:hover .mascot .mascot-body,
+.mascot-host:focus-visible .mascot .mascot-body {
+  animation: mascot-hop 0.55s ease-out;
+}
+
+.mascot-host:hover .mascot .mascot-smile,
+.mascot-host:focus-visible .mascot .mascot-smile {
+  opacity: 0;
+}
+
+.mascot-host:hover .mascot .mascot-grin,
+.mascot-host:focus-visible .mascot .mascot-grin {
+  opacity: 1;
+  transition: opacity 0.12s ease-out;
+}
+
+/* چشمِ گردشده: پلک در این حالت متوقف می‌شود، وگرنه وسطِ «ذوق» پلک می‌زند
+   و لحظه را می‌شکند. */
+.mascot-host:hover .mascot .mascot-eyes,
+.mascot-host:focus-visible .mascot .mascot-eyes {
+  animation: none;
+  transform: scale(1.06);
+  transition: transform 0.18s ease-out;
+}
+
+/* چشمک هنگام کلیک — همان لحظه‌ای که پنجره باز می‌شود.
+   فقط چشمِ راست (در SVG: دومی)، چون چشمکِ دوتایی پلک است نه چشمک. */
+.mascot-host:active .mascot .mascot-eyes ellipse:nth-of-type(2),
+.mascot-host:active .mascot .mascot-pupils circle:nth-of-type(2) {
+  transform: scaleY(0.1);
+  transform-origin: 61.4px 50px;
+  transform-box: view-box;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
