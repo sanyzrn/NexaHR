@@ -558,3 +558,66 @@ def test_pending_action_cannot_be_confirmed_without_permission(client, db_sessio
 
     response_body = client.post(f"/api/ai/pending/{row.id}/confirm", headers=auth_header(user))
     assert response_body.status_code == 403
+
+
+# ── امضای سرویس باید از حلقه هم سالم رد شود ───────────────────────────────
+
+
+def test_the_loop_hands_the_services_own_fields_back_to_it(client, db_session, monkeypatch):
+    """آداپتور درست بود و حلقه دوباره خرابش می‌کرد.
+
+    `run_turn` پیامِ `assistant` را از روی `calls` می‌سازد، و پیش از این با
+    یک رونوشتِ سه‌فیلدی می‌ساختش (`id`، `name`، `arguments_json`). یعنی
+    `provider_extra` — و با آن امضای فکرِ Gemini — دقیقاً در همان نقطه‌ای
+    می‌افتاد که باید به سرویس برمی‌گشت. تستِ آداپتور این را نمی‌دید، چون
+    آداپتور کارِ خودش را درست می‌کرد.
+    """
+    from app.services.ai.tools import people  # noqa: F401  (ثبت ابزارها)
+
+    user = make_user(db_session, "hr", username="ai_sig", capabilities=[Capability.manage_personnel])
+    _enable_for(db_session, user)
+    monkeypatch.setattr("app.api.routers.ai.OpenAiCompatibleAdapter", ScriptedAdapter)
+    reset(ScriptedAdapter)
+    signature = {"extra_content": {"google": {"thought_signature": "AbC123"}}}
+    ScriptedAdapter.script = [
+        response(
+            content="",
+            calls=[tool_call("c1", "search_personnel", {"q": "تست"}, extra=signature)],
+        ),
+        response(content="کسی پیدا نشد."),
+    ]
+
+    body = client.post("/api/ai/chat", json={"message": "تست کیست؟"}, headers=auth_header(user))
+    assert body.status_code == 200, body.text
+
+    # پلهٔ دوم: همان پیامی که خواستهٔ ابزار را تکرار می‌کند.
+    replayed = [m for m in ScriptedAdapter.seen[1] if m.role == "assistant" and m.tool_calls]
+    assert replayed, "پیامِ assistant با خواستهٔ ابزار در پلهٔ دوم نبود"
+    assert replayed[0].tool_calls[0].provider_extra == signature
+
+
+def test_a_service_that_omits_the_call_id_still_pairs_its_result(client, db_session, monkeypatch):
+    """شناسهٔ خالی باید *یک بار* و پیش از ساختنِ پیام پر شود.
+
+    نرمال‌سازی پیش از این بعد از ساختنِ پیامِ `assistant` انجام می‌شد، پس آن
+    پیام «» می‌برد و پیامِ `tool` «call_0» — دو سرِ یک جفت که به هم نمی‌خوردند
+    و سرویس کلِ نوبت را رد می‌کرد.
+    """
+    from app.services.ai.tools import people  # noqa: F401
+
+    user = make_user(db_session, "hr", username="ai_noid", capabilities=[Capability.manage_personnel])
+    _enable_for(db_session, user)
+    monkeypatch.setattr("app.api.routers.ai.OpenAiCompatibleAdapter", ScriptedAdapter)
+    reset(ScriptedAdapter)
+    ScriptedAdapter.script = [
+        response(content="", calls=[tool_call("", "search_personnel", {"q": "x"})]),
+        response(content="تمام."),
+    ]
+
+    body = client.post("/api/ai/chat", json={"message": "x کیست؟"}, headers=auth_header(user))
+    assert body.status_code == 200, body.text
+
+    sent = ScriptedAdapter.seen[1]
+    asked = [m for m in sent if m.role == "assistant" and m.tool_calls][0].tool_calls[0].id
+    answered = [m for m in sent if m.role == "tool"][0].tool_call_id
+    assert asked and asked == answered

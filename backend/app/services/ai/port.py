@@ -27,14 +27,7 @@ class ChatMessage:
             message: dict = {
                 "role": "assistant",
                 "content": self.content or None,
-                "tool_calls": [
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {"name": call.name, "arguments": call.arguments_json},
-                    }
-                    for call in self.tool_calls
-                ],
+                "tool_calls": [call.to_wire() for call in self.tool_calls],
             }
             return message
         if self.role == "tool":
@@ -53,6 +46,33 @@ class ToolCall:
     id: str
     name: str
     arguments_json: str
+    #: فیلدهای *غیرِ استانداردِ* خودِ سرویس، دست‌نخورده — و اجباری برای Gemini.
+    #:
+    #: Gemini از راهِ درگاهِ سازگار با OpenAI، کنارِ هر `tool_call` یک
+    #: `extra_content.google.thought_signature` می‌فرستد و در درخواستِ *بعدی*
+    #: همان را عیناً پس می‌خواهد. تا امروز این‌جا جایی برای نگه‌داشتنش نبود،
+    #: پس دور ریخته می‌شد و پلهٔ دومِ هر نوبتِ ابزاردار با
+    #: «Function call is missing a thought_signature» رد می‌شد — یعنی دستیار
+    #: دقیقاً در لحظه‌ای می‌مرد که می‌خواست کاری بکند.
+    #:
+    #: محتوایش عمداً *خوانده نمی‌شود*: یک جعبهٔ مات است که از پاسخ برداشته و
+    #: به درخواست برگردانده می‌شود. هر سرویسی که فردا فیلدِ مشابهی اضافه کند،
+    #: بی تغییرِ کد کار می‌کند.
+    provider_extra: dict = field(default_factory=dict)
+
+    def to_wire(self) -> dict:
+        """شکلِ HTTPِ این فراخوانی، با فیلدهای خودِ سرویس سرِ جایشان.
+
+        `provider_extra` *زیرِ* کلیدهای استاندارد ریخته می‌شود و نه رویشان:
+        یک سرویسِ بدقلق که روزی `id` را در `extra` تکرار کند، نباید بتواند
+        شناسه‌ای را عوض کند که پیامِ `tool` با آن جفت می‌شود.
+        """
+        return {
+            **self.provider_extra,
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.name, "arguments": self.arguments_json},
+        }
 
 
 @dataclass(frozen=True)

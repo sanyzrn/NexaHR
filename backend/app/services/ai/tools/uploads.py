@@ -25,6 +25,7 @@ from fastapi import HTTPException, status
 from openpyxl import load_workbook
 from sqlalchemy.orm import Session
 
+from app.core.persian import fa_digits
 from app.models.enums import Capability, UserRole
 from app.schemas.auth import CurrentUser
 from app.services.ai.tools.base import ToolContext, ToolOutcome, json_content, tool
@@ -199,6 +200,43 @@ def stage_upload(
     db.add(upload)
     db.flush()
     return upload, summary
+
+
+def staged_notice(upload, summary: dict) -> str:
+    """جمله‌ای که دستیار *واقعاً* دربارهٔ فایلِ تازه می‌گوید.
+
+    چرا این‌جا و نه در رابط: تا امروز این جمله را خودِ فرانت‌اند می‌ساخت و
+    در حافظهٔ مرورگر به فهرست پیام‌ها اضافه می‌کرد. یعنی متنی به‌نامِ دستیار
+    روی صفحه بود که هیچ‌وقت ذخیره نمی‌شد و مدل هیچ ردی از آن نداشت.
+
+    نتیجه‌اش دقیقاً همان چیزی بود که کاربر «فراموشی» می‌نامید: دستیار
+    می‌گفت «بگویید بررسی‌اش کنم»، کاربر می‌گفت «بررسی کن»، و دستیار
+    می‌پرسید «کدام فایل؟ لطفاً بارگذاری کنید» — چون آن دعوت را نکرده بود.
+
+    پیامی که کاربر می‌بیند باید همان پیامی باشد که مدل می‌بیند. یک متن،
+    یک منبع.
+    """
+    try:
+        structure = json.loads(upload.structure_json or "{}")
+    except ValueError:
+        structure = {}
+    kind = structure.get("kind", "file")
+    head = f"فایل «{upload.filename}» را دیدم."
+
+    if kind == "personnel_import":
+        return (
+            f"{head} {fa_digits(summary['total_rows'])} ردیف دارد؛ "
+            f"{fa_digits(summary['valid_count'])} سالم و "
+            f"{fa_digits(summary['invalid_count'])} خطادار. "
+            "بگویید بررسی‌اش کنم تا خطاها را ردیف‌به‌ردیف بگویم."
+        )
+    if kind == "excel":
+        return (
+            f"{head} اکسل هست ولی قالبِ ورودِ پرسنل نیست، پس ردیف‌هایش را "
+            "خودکار وارد نمی‌کنم. بگویید چه چیزی از آن می‌خواهید."
+        )
+    note = structure.get("note") or "قالبِ قابلِ پردازشی در آن پیدا نکردم."
+    return f"{head} {note}"
 
 
 def enrich_excel_structure(db: Session, upload) -> dict:

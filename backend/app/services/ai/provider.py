@@ -149,6 +149,7 @@ class OpenAiCompatibleAdapter:
                     id=str(raw.get("id") or f"call_{len(calls)}"),
                     name=str(function.get("name") or "").strip(),
                     arguments_json=arguments,
+                    provider_extra=_provider_extra(raw),
                 )
             )
 
@@ -158,6 +159,30 @@ class OpenAiCompatibleAdapter:
             usage=body.get("usage") or {},
             truncated=finish_reason == "length",
         )
+
+
+#: کلیدهای *استانداردِ* یک `tool_call`. هرچه جز این‌ها در پاسخ بیاید، حرفِ
+#: خودِ سرویس است و باید دست‌نخورده برگردد.
+_STANDARD_CALL_KEYS = frozenset({"id", "type", "index", "function"})
+
+
+def _provider_extra(raw: dict) -> dict:
+    """فیلدهای غیرِ استانداردِ یک `tool_call` — برای برگرداندنِ عینی.
+
+    فهرستِ نگه‌داشتنی‌ها *سیاه* است و نه سفید (یعنی «هرچه نمی‌شناسم را نگه
+    دار»)، چون فهرستِ سفید یعنی هر فیلدی که فردا اضافه شود بی‌صدا می‌افتد —
+    و دقیقاً همین اتفاق با `extra_content` افتاد: Gemini امضای فکرش را
+    آن‌جا می‌گذارد، ما نمی‌شناختیمش، پس دور ریخته می‌شد و درخواستِ بعدی
+    با ۴۰۰ رد می‌شد.
+
+    `index` هم کنار می‌رود: شمارندهٔ داخلیِ پاسخ‌های تکه‌تکه است و در
+    درخواست معنایی ندارد.
+    """
+    return {
+        key: value
+        for key, value in raw.items()
+        if key not in _STANDARD_CALL_KEYS and value is not None
+    }
 
 
 #: نویسه‌های *نامرئیِ* قالب‌بندی که با کپی‌کردن وارد می‌شوند و هیچ‌وقت بخشی از

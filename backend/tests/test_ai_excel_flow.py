@@ -350,3 +350,63 @@ def test_employee_cannot_use_import_tools(client, db_session):
     with pytest.raises(HTTPException) as err:
         tools_call(ctx, "patch_upload_rows", {"upload_id": 1, "edits": []})
     assert err.value.status_code == 403
+
+
+# ── پیامِ «فایل را دیدم» باید *واقعی* باشد ────────────────────────────────
+
+
+def test_the_upload_leaves_a_real_message_in_the_conversation(client, db_session):
+    """این جمله را تا امروز مرورگر می‌ساخت و هیچ‌جا ذخیره نمی‌شد.
+
+    یعنی کاربر متنی به‌نامِ دستیار می‌خواند که مدل هیچ ردی از آن نداشت. وقتی
+    کاربر به همان جمله جواب می‌داد («بررسی کن»)، دستیار می‌پرسید «کدام فایل؟
+    لطفاً بارگذاری کنید» — چون آن دعوت را نکرده بود. از بیرون، این دقیقاً
+    «حافظه‌اش پاک شد» به نظر می‌رسد.
+    """
+    hr = make_user(db_session, "hr", username="notice_hr", capabilities=[Capability.manage_personnel])
+    _enable_ai(db_session, hr)
+    conversation_id = _new_conversation(client, hr)
+
+    _upload(client, hr, "personnel.xlsx", _workbook([BROKEN_ROW]), conversation_id)
+
+    history = client.get(
+        f"/api/ai/conversations/{conversation_id}", headers=auth_header(hr)
+    ).json()
+    assert [m["role"] for m in history] == ["assistant"]
+    assert "personnel.xlsx" in history[0]["content"]
+    assert "بررسی" in history[0]["content"]
+
+
+def test_the_model_sees_that_message_on_the_next_turn(client, db_session):
+    """قفلِ اصلی: متنی که کاربر خواند باید در پنجرهٔ تاریخچهٔ نوبتِ بعد باشد.
+
+    ذخیره‌شدنِ پیام به‌تنهایی کافی نیست؛ باید از مسیرِ `_history_messages` هم
+    رد شود. این دو تا جای متفاوت‌اند و فقط یکی‌شان را تست‌کردن، همان خرابی را
+    نصفه می‌بندد.
+    """
+    from tests.fake_llm import ScriptedAdapter, reset, response
+
+    hr = make_user(db_session, "hr", username="notice_hr2", capabilities=[Capability.manage_personnel])
+    _enable_ai(db_session, hr)
+    conversation_id = _new_conversation(client, hr)
+    _upload(client, hr, "personnel.xlsx", _workbook([BROKEN_ROW]), conversation_id)
+
+    import app.api.routers.ai as ai_router
+
+    original = ai_router.OpenAiCompatibleAdapter
+    ai_router.OpenAiCompatibleAdapter = ScriptedAdapter
+    try:
+        reset(ScriptedAdapter)
+        ScriptedAdapter.script = [response(content="باشد، بررسی می‌کنم.")]
+        sent = client.post(
+            "/api/ai/chat",
+            json={"conversation_id": conversation_id, "message": "بررسی کن"},
+            headers=auth_header(hr),
+        )
+        assert sent.status_code == 200, sent.text
+    finally:
+        ai_router.OpenAiCompatibleAdapter = original
+
+    seen = ScriptedAdapter.seen[0]
+    assistant_text = " ".join(m.content for m in seen if m.role == "assistant")
+    assert "personnel.xlsx" in assistant_text
