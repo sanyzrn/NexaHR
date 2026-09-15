@@ -516,3 +516,20 @@ def test_a_new_event_type_is_hidden_from_support_by_default(client, support):
     assert "evaluation_returned" not in SYSTEM_EVENT_TYPES
     assert "pdf_downloaded" not in SYSTEM_EVENT_TYPES
     assert "personnel_created" not in SYSTEM_EVENT_TYPES
+
+
+def test_every_capability_has_a_persian_label():
+    """مجوزی بی برچسب، روی کارتِ تأیید با نامِ انگلیسیِ خودش ظاهر می‌شود.
+
+    `manage_ai` دقیقاً همین بود: فرانت‌اند برچسبِ خودش را داشت و جدولِ
+    بک‌اند نداشت، پس تنها جایی که این جدول خوانده می‌شود — کارتِ تأییدِ
+    دستیار برای `grant_capabilities` — به کاربر می‌گفت «manage_ai اضافه
+    می‌شود».
+
+    قاعده و نه فهرست: هر مجوزی که فردا به enum اضافه شود، همین‌جا افتادنِ
+    برچسبش دیده می‌شود.
+    """
+    from app.api.routers.administration import CAPABILITY_LABELS
+
+    missing = sorted(c.value for c in Capability if c not in CAPABILITY_LABELS)
+    assert not missing, f"این مجوزها برچسب فارسی ندارند: {missing}"
