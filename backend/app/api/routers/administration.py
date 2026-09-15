@@ -53,6 +53,7 @@ CAPABILITY_LABELS: dict[Capability, str] = {
     Capability.manage_modules: "روشن و خاموش کردن بخش‌ها",
     Capability.view_diagnostics: "سلامت سامانه و صف تحویل",
     Capability.manage_personnel: "ثبت و ویرایش پرسنل و زنجیرهٔ ارزیابی",
+    Capability.manage_ai: "تنظیمات دستیار هوشمند",
 }
 
 

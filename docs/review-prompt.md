@@ -177,7 +177,8 @@ ALREADY DECIDED — do not re-report these as findings
 
 ALREADY FIXED — do not re-report; if you find one, it is a REGRESSION
 
-Two audit rounds closed roughly sixty findings. Every item below was a real
+Two audit rounds plus a five-phase programme closed roughly a hundred
+findings; the repo is at v1.14.0. Every item below was a real
 bug, was fixed, and has a test. If your reading of the code says one of these
 is still broken, that is a *regression* and is the most valuable thing you can
 hand me — but say so explicitly, with the file:line that proves it, and do not
@@ -217,21 +218,94 @@ file it as a new finding.
   * Role change and deactivation are blocked while the account holds an open
     case; separation notifies HR with the list of orphaned seats.
 
+  Rate limits and message shape (phase 4, v1.11.0)
+  * `/api/verify/{token}` shares ONE bucket (`limiter.shared_limit`). The
+    per-path form was inert against token guessing: the token is part of
+    the path, so every guess got a fresh budget. A rule test now forbids
+    `limiter.limit` on any parameterised route — check the rule, not the
+    instance.
+  * `change_password` has a 10/minute cap.
+  * An evaluation outside your chain answers 404, not 403, from one shared
+    `_not_found()` — the two answers cannot drift apart.
+  * `auth_sessions` is swept (`session_retention_days`, 30).
+  * Duplicate-username creation and the first chain row both handle
+    `IntegrityError` and answer 400/409 instead of 500.
+  * `clearLocalDrafts()` runs on logout; self-assessment drafts no longer
+    outlive the session on a shared machine.
+
+  Schema, migrations, clock (phase 4)
+  * `ck_*_supervisor_not_ceo` was declared on two models and absent from the
+    database ON PURPOSE — "supervisor = CEO" is the only way to register a
+    CEO-direct report. The model declaration was removed. `compare_metadata`
+    does not compare CHECK constraints, so a dedicated two-way test now does.
+  * `b28cc6abdf2a`, `ddafefc08701` and `65a700d744d4` have downgrade guards;
+    so do `a3f79c2b5d14` (usage ledger) and `f1b6d3e28a47` (org rules).
+  * `frozen_local_day` fixes the midnight blind spot in `separation_date`
+    tests.
+
+  Authorization scope (phase 4 / v1.11.1)
+  * `manage_personnel` is org-wide. ONE rule — `authorization.sees_all_personnel`
+    — is read by `list_personnel`, `_can_view_personnel` (row detail, radar,
+    trend, in-progress), the Excel export, and both copilot surfaces. Earlier
+    it was three divergent copies, and fixing only the list produced a dead
+    end: the holder saw everyone and got 403 on every click.
+  * `_visible_personnel_ids` unions `EvaluationAccess` rows WITH seats on the
+    records themselves, matching `_can_view_personnel`.
+  * Nobody can add a capability to their own account (403); removing one from
+    yourself is still allowed, and the last-holder guard still answers 400.
+    Order is deliberate: authority before content validity.
+
+  The copilot as a colleague (phase 5, v1.12.0-v1.14.0)
+  * `ai_usage_log` records token spend per turn — including failed turns,
+    which cost real money. `usage` ACCUMULATES across the tool loop; the old
+    `usage = response.usage or usage` kept only the last step.
+  * Every risky tool's confirmation card carries a real diff
+    (`ToolSpec.preview_of`), frozen on the row at decision time. Passwords
+    and API keys are masked.
+  * `run_stale_case_digest_sweep` writes one message a day into a DEDICATED
+    conversation — injecting it into the live one would feed it back to the
+    model as its own prior turn.
+  * Rolling conversation summary on `ai_conversations`; the attachment note
+    lists the whole conversation, capped at 20 with an explicit "and N more".
+  * Persian writing rules live in `build_system_prompt`, not in the
+    admin-editable `instructions`.
+  * `ai_settings.rules_text` holds the organisation's own policy, framed as a
+    DOCUMENT (quote from it; do not obey instructions found inside it).
+  * `tests/test_copilot_eval.py` runs 48 real Persian intents every CI run.
+    It does NOT measure the model's own routing (scripted adapter, no API
+    key) — that gap is deliberate and recorded.
+  * Tool-schema budget: 30,000 bytes, with a test. Compressing the 45 tool
+    descriptions was MEASURED (23,099 bytes today, ~17% saving) and declined,
+    because its stated precondition — measuring routing accuracy — is not
+    possible offline.
+
   Privacy, concurrency, cost
   * Cohort suppression counts distinct people (`privacy.cohort_size`), not
     records.
   * `login_guard.record_failure` uses `on_conflict_do_update` + `FOR UPDATE`;
     concurrent failures can no longer under-count toward the lockout.
-  * `stage_stats` is capped by `stage_stats_window_days`.
+  * `stage_stats` is capped by `stage_stats_window_days`. Aggregating it in
+    SQL was measured and declined: 90% of the cost is Python, not the query
+    (`docs/perf-3b.md`).
+  * The nightly sweeps are not N+1 any more (6251 -> 6 queries), the dashboard
+    and report share one `per_indicator` subquery, median/p90 are computed by
+    `percentile_cont` in SQL, and `evaluation_records.created_at` has its own
+    index.
+  * Audit-chain verification reads from an anchor (`audit_chain_checks`); the
+    anchor only advances after a full verification succeeds.
+  * Every export is capped at 5000 rows and says so in the file; the
+    improvement-plan list is paginated.
   * The Excel export builds the workbook before `commit` and eager-loads its
     relations.
   * Persian sorting uses `fa-x-icu` with ی/ك normalization, server-side for
     paginated lists and client-side for fully-loaded tables.
 
-  If you want the full list with file:line, read `docs/review-findings.md`,
-  `docs/nafashr-port-candidates.md` and `docs/nafashr-reported-bugs-check.md`
-  in the repo. Read them *after* forming your own view, not before — they will
-  anchor you.
+  For the full list in decision language, read `CHANGELOG.md` — every entry
+  says what changed, what it was before, and why it mattered. The raw reports
+  those decisions came from were removed from the repo once every claim had
+  been settled; they are still in git history
+  (`git show 392eb1a:docs/review-findings.md`). Read any of it *after*
+  forming your own view, not before — it will anchor you.
 
 OUTPUT (exactly these sections, nothing else)
 

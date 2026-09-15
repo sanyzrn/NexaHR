@@ -1039,6 +1039,8 @@ function OrgUnitsCard() {
  *  استفاده کند» (دسترسی). فقط مدیرِ دارای مجوز `manage_ai` این کارت را
  *  می‌بیند؛ کاربرِ دستیار — مثلاً معاونت — فقط پنجرهٔ گفت‌وگو را دارد.
  */
+const RULES_MAX = 20_000;
+
 function AiCard() {
   const { user } = useAuth();
   const { showSuccess, showError } = useToast();
@@ -1071,6 +1073,10 @@ function AiCard() {
   // نمی‌شود به آن‌ها تکیه کرد.
   const savedFor = (id: string) =>
     (data?.provider_credentials ?? []).find((c) => c.provider === id);
+
+  // سقف، همان عددی که سرور هم اعمال می‌کند (`AiSettingsUpdate.rules_text`).
+  // فرم باید همان قاعده را نشان بدهد، نه اینکه کاربر با زدنِ «ذخیره» کشفش کند.
+  const rulesLength = (value.rules_text ?? "").length;
 
   const grantedCount = access.filter((row) => row.enabled).length;
   // `user` تا پیش از رسیدنِ /me نال است؛ آن لحظه هنوز `access` هم خالی است،
@@ -1325,6 +1331,38 @@ function AiCard() {
           onChange={(e) => set("instructions", e.target.value)}
           className={`${inputClass} resize-y leading-relaxed`}
         />
+      </label>
+
+      {/* آیین‌نامه، جدا از «دستورالعمل کلی» — و این تفکیک عمدی است.
+        *
+        * بالایی می‌گوید «چطور جواب بده» و این یکی می‌گوید «قاعدهٔ سازمان
+        * چیست». یکی‌کردنشان یعنی اولین مدیری که لحنِ پاسخ‌ها را عوض می‌کند،
+        * آیین‌نامه را هم پاک می‌کند. در پرامپت هم دو جای متفاوت می‌نشینند:
+        * آن یکی دستور است و این یکی سندی که دستیار از آن *نقل* می‌کند. */}
+      <label className="mt-3 flex flex-col gap-1 text-xs font-medium text-gray-600">
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          آیین‌نامهٔ ارزیابی عملکرد سازمان
+          <span className="text-[11px] font-normal text-gray-400">
+            {rulesLength > 0
+              ? `${rulesLength.toLocaleString("fa-IR")} از ${RULES_MAX.toLocaleString("fa-IR")} نویسه`
+              : "اختیاری"}
+          </span>
+        </span>
+        <textarea
+          rows={6}
+          maxLength={RULES_MAX}
+          value={value.rules_text ?? ""}
+          onChange={(e) => set("rules_text", e.target.value)}
+          placeholder="متن آیین‌نامهٔ مصوب سازمان را این‌جا بگذارید — مثلاً «مادهٔ ۷: نمرهٔ کمتر از ۶۰ به معنای تمدید مشروط است»."
+          className={`${inputClass} resize-y leading-relaxed`}
+        />
+        <span className="text-[11px] font-normal text-gray-400">
+          دستیار برای پرسش‌های قاعده‌ای از همین متن نقل می‌کند و اگر پاسخی در آن
+          نبود، صریح می‌گوید که آیین‌نامه چیزی نگفته است. تا وقتی خالی باشد، این
+          بخش اصلاً به سرویس فرستاده نمی‌شود. اگر هنوز آیین‌نامه ندارید،
+          پرسش‌نامهٔ <span dir="ltr">docs/rules-intake.md</span> در مخزن، همان
+          چیزهایی را می‌پرسد که برای نوشتنش لازم است.
+        </span>
       </label>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-2">

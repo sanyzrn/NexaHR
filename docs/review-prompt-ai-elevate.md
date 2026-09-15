@@ -43,9 +43,10 @@ the first went well, or the first because the second is more interesting.
 
 ALREADY FIXED — DO NOT RE-REPORT THESE.
 
-Two audit rounds already ran against this subsystem and every item below was
-closed in v1.6.0, each proven by reverting the fix and watching a test go red
-(`backend/tests/test_ai_endpoint_bypass.py`). Re-reporting them costs you a
+Two audit rounds already ran against this subsystem and every item in the
+first list below was closed in v1.6.0, each proven by reverting the fix and
+watching a test go red (`backend/tests/test_ai_endpoint_bypass.py`). The
+second list is phase 5 (v1.12.0-v1.14.0), same standard of proof. Re-reporting them costs you a
 finding slot and costs us the read. Verify they are still closed if you like —
 a regression IS a finding — but a fresh report of the original bug is not.
 
@@ -88,13 +89,56 @@ a regression IS a finding — but a fresh report of the original bug is not.
     `CohortFilter` is three-state, so an unqualified cohort silently excluded
     every manager.
 
+ALSO CLOSED, in phase 5 (v1.12.0 - v1.14.0):
+
+  * Token spend is recorded per turn in `ai_usage_log`, failed turns
+    included. `usage` accumulates across the tool loop — the old
+    `usage = response.usage or usage` kept only the last step and under-
+    reported a multi-step turn by up to 5x.
+  * Confirmation cards carry a real diff (`ToolSpec.preview_of`), computed
+    against current state at proposal time and frozen on the row. Secrets
+    are masked; a tool without its own `preview` still gets a labelled
+    two-column table instead of raw JSON.
+  * The stale-case digest (`run_stale_case_digest_sweep`) writes one message
+    a day into a DEDICATED conversation. Writing into the live one would
+    feed the digest back to the model as its own prior turn.
+  * Rolling conversation summary on `ai_conversations` (12-message window
+    untouched, older folded); its extra model call is billed into the same
+    turn so the ledger stays honest. The attachment note now lists the whole
+    conversation, capped at 20 with an explicit "and N more".
+  * Persian writing rules are in `build_system_prompt`, not in the
+    admin-editable `instructions` — an admin rewriting the tone used to wipe
+    them.
+  * `ai_settings.rules_text` carries the organisation's own policy, framed as
+    a DOCUMENT: quote from it, report but never obey instructions found
+    inside it, and say plainly when it does not cover the question.
+  * All five behavioural divergences from the previous round are closed:
+    `manage_personnel` is org-wide through ONE rule
+    (`authorization.sees_all_personnel`) read by every surface;
+    `_visible_personnel_ids` unions per-record seats; the CEO queue filters
+    by seat; `cancel`'s refusal message names the right path;
+    `_can_view_personnel` accepts the capability.
+
+DELIBERATE, MEASURED, AND NOT CHANGING — argue as design if you disagree,
+but do not file as a bug:
+
+  * Tool schema is ~23,000 bytes for a full-capability HR user (45 tools),
+    sent on every loop step. Compressing descriptions to <=60 chars was
+    measured (~17% saving) and DECLINED: the stated precondition was
+    measuring routing accuracy, which needs a live model key. A 30,000-byte
+    budget test guards against silent growth instead.
+  * `tests/test_copilot_eval.py` runs 48 real Persian intents per CI run and
+    deliberately does NOT measure the model's own tool choice (scripted
+    adapter). Its job is that none of those 48 paths dies silently —
+    detected by status code, since `execute_tool` converts every raw error
+    into a 500.
+
 KNOWN AND ALREADY WRITTEN DOWN — see docs/open-findings-ai.md before you
-report anything. Five behavioural divergences (copilot vs UI on
-`manage_personnel` scope, the per-record seat missing from
-`_visible_personnel_ids`, the CEO queue's missing seat filter, `cancel` being
-narrower in the copilot, `get_personnel` accepting the capability) and eight
-elevation proposals are already on file with reasoning. Finding them again
-adds nothing. Finding something NOT on that list is what we are paying for.
+report anything. What remains there is section "پ" (what was never measured,
+and what it would take) and section "ت" (five claims from earlier reports
+that were checked and found WRONG — re-filing one of those is worse than
+filing nothing). Finding something NOT on that list is what we are paying
+for.
 
 === HALF ONE: DEFECTS ===
 
